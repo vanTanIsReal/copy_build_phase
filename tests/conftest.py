@@ -3,10 +3,13 @@ from unittest.mock import AsyncMock
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+import src.db.session as db_session
 from src.db.base import Base
+from src.db.models import User
 from src.db.session import get_db
 from src.main import app
 
@@ -49,6 +52,23 @@ async def auth_headers(client):
         json={"email": "alice@example.com", "password": "password123", "display_name": "Alice"},
     )
     token = resp.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest_asyncio.fixture
+async def admin_auth_headers(client):
+    """Registers a test user, promotes it to admin directly in the test DB, and returns its header."""
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "admin@example.com", "password": "password123", "display_name": "Admin"},
+    )
+    token = resp.json()["access_token"]
+
+    async with db_session.async_session_maker() as session:
+        user = (await session.execute(select(User).where(User.email == "admin@example.com"))).scalar_one()
+        user.role = "admin"
+        await session.commit()
+
     return {"Authorization": f"Bearer {token}"}
 
 

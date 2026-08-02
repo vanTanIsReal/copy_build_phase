@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
 from src.auth.security import create_access_token, hash_password, verify_password
+from src.config import get_settings
 from src.db.models import User
 from src.db.session import get_db
 from src.models.auth_schemas import AuthResponse, LoginRequest, RegisterRequest, UserPublic
@@ -12,7 +13,7 @@ router = APIRouter()
 
 
 def _to_public(user: User) -> UserPublic:
-    return UserPublic(id=user.id, email=user.email, display_name=user.display_name)
+    return UserPublic(id=user.id, email=user.email, display_name=user.display_name, role=user.role)
 
 
 @router.post("/register", response_model=AuthResponse)
@@ -21,10 +22,15 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db))
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
+    settings = get_settings()
+    initial_admin_email = settings.initial_admin_email.strip().lower()
+    role = "admin" if initial_admin_email and request.email.lower() == initial_admin_email else "user"
+
     user = User(
         email=request.email,
         password_hash=hash_password(request.password),
         display_name=request.display_name,
+        role=role,
     )
     db.add(user)
     await db.commit()

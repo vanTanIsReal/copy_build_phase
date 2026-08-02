@@ -22,6 +22,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(unique=True, index=True)
     password_hash: Mapped[str]
     display_name: Mapped[str]
+    role: Mapped[str] = mapped_column(default="user")  # "user" | "admin"
+    is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 

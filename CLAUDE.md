@@ -1,68 +1,108 @@
-# CLAUDE.md
+Tổng quan dự án
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Orbit là một AI agent nhúng trong ứng dụng chat, giúp:
 
-## What this repo is
+Tóm tắt hội thoại
+Trích xuất công việc / lịch hẹn từ tin nhắn
+Tạo nhắc nhở (luôn có bước xác nhận trước khi thực hiện — human-in-the-loop)
+Quản lý lịch cá nhân (tích hợp Google Calendar)
 
-P-132 is a team project for the **VinUni AI20K Build Phase**, built from the AI20K Agent Template. The goal (see [Frontend/detai.md](Frontend/detai.md)) is an AI agent embedded in a chat app that summarizes conversations, extracts tasks/appointments, creates reminders (with human-in-the-loop confirmation), and manages a personal calendar.
+Repo là monorepo gồm 2 phần độc lập:
 
-The repo currently has two largely disconnected halves:
-- **Backend** (`src/`): a FastAPI + LangGraph agent with real tool-calling (summarize / Google Calendar / reminders) and human-in-the-loop confirmation via LangGraph interrupts. No DB wiring yet.
-- **Frontend** (`Frontend/`): a separate React + Vite SPA (`orbit-ai-assistant`) that is UI-complete but runs entirely on mock data — no API calls, no real auth. See [Frontend/README.md](Frontend/README.md).
+Backend: FastAPI + LangGraph, thư mục src/
+Frontend: React + Vite, thư mục Frontend/
+Trạng thái hiện tại — QUAN TRỌNG, đọc trước khi sửa bất kỳ tính năng nào
 
-There is no integration between them yet — connecting the frontend to real backend endpoints is unbuilt work, not an existing pattern to follow.
+Trước khi code, luôn xác nhận tính năng đang chạm vào thuộc nhóm nào bên dưới, vì cách xử lý rất khác nhau.
 
-## Backend (`src/`) — FastAPI + LangGraph
+Đã hoạt động thật (có backend + database, KHÔNG được thay bằng mock)
+Đăng ký / Đăng nhập / Đăng xuất — SQLite, bcrypt hash password, JWT auth. Các route /assistant, /chat, /tasks, ... được bảo vệ bởi ProtectedRoute, chưa đăng nhập sẽ redirect /login.
+Nhắn tin 1-1 và nhóm real-time qua WebSocket, lịch sử tin nhắn, đếm tin nhắn chưa đọc.
+AI Agent chat: endpoint POST /api/v1/chat, dùng LangGraph, có tool gọi Google Calendar và tạo nhắc nhở (kèm bước xác nhận).
+Mới là giao diện mẫu — CHƯA nối API thật
+Các trang: Tasks, Calendar, Reminders, Memory, Profile
+Trang AI Assistant tóm tắt/quản lý cá nhân (/assistant)
+Toàn bộ dữ liệu các trang trên lấy từ Frontend/src/data/mockData.js
 
-Commands (run from repo root, Python 3.11+, venv at `.venv`):
-```bash
-make run     # uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
-make test    # pytest tests/ -v
-make lint    # ruff check src/ tests/
-make format  # ruff format src/ tests/
-make check   # lint + format + test
-```
-Swagger UI at `http://localhost:8000/docs`. Config comes from `.env` (copy from `.env.example`) loaded via `src/config.py::Settings` (pydantic-settings).
+➡️ Khi được yêu cầu "sửa lỗi trang Tasks" hay tương tự, đây nhiều khả năng là công việc nối API thật thay cho mock, không phải sửa bug logic. Hãy hỏi lại nếu không chắc phạm vi task là nối backend hay chỉ chỉnh UI.
 
-Architecture — `planner` (LLM bound to tools) ⇄ `tools` (`ToolNode`) loop, compiled with a `MemorySaver` checkpointer:
-- `src/agents/state.py` — `AgentState` TypedDict (`total=False`); `messages` uses the `add_messages` reducer, plus flat fields (`context`, `summary`, `error`, ...).
-- `src/agents/graph.py::build_graph()` — `agent` (module-level, reused across requests) routes `planner → tools_condition → {tools|END}`, `tools → planner`. A checkpointer is attached, so `agent.ainvoke(...)` **requires** `config={"configurable": {"thread_id": ...}}`.
-- `src/agents/nodes/planner_node.py` — the real planner node (`get_llm().bind_tools(ALL_TOOLS)`). `example_node.py` is old placeholder scaffolding, not wired into the graph.
-- `src/agents/tools/` — `summarize_tool.py` (reads `state["context"]` via `InjectedState`, no confirmation needed), `calendar_tool.py` (real Google Calendar API), `reminder_tool.py` (APScheduler-backed). Calendar/reminder creation call `interrupt({"type": ..., "draft": ...})` before committing — see `src/api/routes.py`'s `/chat/resume` for the resume side. `tools/__init__.py::ALL_TOOLS` is the registry bound to the LLM; `example_tool.py` stays unwired reference code.
-- `src/services/llm.py::get_llm()` — `ChatOpenAI` client from settings (OpenAI only). `src/services/scheduler.py` — module-level APScheduler `AsyncIOScheduler`, started/stopped in `main.py`'s `lifespan`.
-- `src/api/routes.py` — `POST /chat` (accepts `message`, optional `messages` for summarize context, optional `thread_id`) and `POST /chat/resume` (`{thread_id, approved, edits}`) on one `APIRouter`, mounted at `/api/v1`.
-- Google Calendar needs a one-time `python scripts/google_oauth_setup.py` locally to produce `secrets/token.json` (gitignored) from `secrets/credentials.json`.
-- Database/vector store still unwired: SQLAlchemy/psycopg2/chromadb stay commented out in `requirements.txt`; `database_url`/`chroma_persist_dir` settings have no consumers. Reminders/scheduled jobs are in-memory only (lost on restart).
+Kiến trúc thư mục
+├── src/                    # Backend — FastAPI + LangGraph
+│   ├── agents/             # Agent LangGraph (planner, tools, state)
+│   ├── api/                # REST routes: auth, chat (người-với-người), agent chat
+│   ├── auth/                # Hash mật khẩu, tạo/kiểm tra JWT
+│   ├── db/                  # SQLAlchemy models + session (SQLite)
+│   ├── models/               # Pydantic schemas
+│   ├── services/              # chat_service, scheduler, llm
+│   ├── websocket/              # Kênh real-time cho chat
+│   └── main.py                 # Điểm khởi tạo FastAPI app
+├── tests/                    # pytest cho backend
+└── Frontend/                   # Frontend — React + Vite
+    └── src/
+        ├── api/                  # Gọi REST API + WebSocket client
+        ├── context/               # AuthContext (JWT, user hiện tại)
+        ├── hooks/                  # useConversations, useMessages
+        ├── components/              # Component theo tính năng (chat, layout, ...)
+        ├── pages/                    # Các trang ứng dụng
+        └── router/                    # React Router + ProtectedRoute
+Công nghệ sử dụng
+Layer	Công nghệ
+AI Agent	LangGraph + LangChain (Groq)
+Backend	FastAPI, SQLAlchemy (async) + SQLite, JWT (PyJWT) + bcrypt, WebSocket
+Frontend	React 18, Vite, React Router, React Hook Form, Bootstrap 5, Framer Motion
+Test	pytest, pytest-asyncio, httpx
+Lint	ruff
+Lệnh chạy dự án
 
-Testing: `tests/conftest.py`'s `client` fixture (httpx `ASGITransport`) and `fake_llm_factory` (a `.bind_tools()`-aware fake LLM that returns scripted `AIMessage`s — use this instead of the old unused `mock_llm` for anything touching the planner/tools). `tests/test_agents/test_tools/` covers each tool; interrupt→resume round trips are driven through the full compiled `agent` with a fixed `thread_id`.
+Luôn cần chạy song song 2 server khi phát triển/test thủ công: backend (cổng 8000) và frontend (cổng 5173). Backend không tự chạy nền — tắt terminal là tắt server.
 
-Linting: ruff only (`ruff.toml`: line-length 120, double quotes, `E501` ignored). `make typecheck`/mypy is in the Makefile but mypy isn't in `requirements.txt` — don't rely on it being installed.
+Backend
+bash
+# Lần đầu setup
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+cp .env.example .env             # điền GROQ_API_KEY nếu cần AI chat
 
-## Frontend (`Frontend/`) — React + Vite
-
-```bash
+# Chạy dev server
+uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+# hoặc nếu có make: make run
+Health check: GET http://localhost:8000/health → {"status":"ok",...}
+Swagger UI: http://localhost:8000/docs
+DB mặc định: SQLite tại sqlite:///./data/app.db (không cần Postgres)
+Frontend
+bash
 cd Frontend
 npm install
-npm run dev       # http://localhost:5173
-npm run build
-npm run preview
-```
-No lint/test scripts are configured.
+npm run dev
+App: http://localhost:5173
+Frontend mặc định gọi backend tại http://localhost:8000/api/v1. Nếu backend chạy địa chỉ khác, tạo Frontend/.env từ Frontend/.env.example và sửa VITE_API_BASE_URL / VITE_WS_BASE_URL.
+Test backend
+bash
+pytest tests/ -v
+# hoặc: make test
 
-Architecture:
-- `src/router/AppRouter.jsx` — all routes; `/` redirects to `/assistant`. `/login` and `/register` are standalone; every other route is nested under `AppLayout` (sidebar + top navbar shell).
-- `src/pages/` — one component per route.
-- `src/components/<feature>/` — components grouped by feature area (`chat/`, `calendar/`, `task/`, `ai/`, `layout/`, `common/`, `profile/`).
-- `src/data/mockData.js` — the only data source right now (`tasks`, `calendarEvents`, `conversations`, `messages`). Pages import directly from this file; when wiring real APIs, replace these imports rather than adding a parallel data path.
-- Styling is plain CSS (`src/styles.css`, `src/assistant.css`) plus Bootstrap 5 — no CSS-in-JS or Tailwind despite Tailwind being mentioned in the top-level README's suggested stack.
-- JSX in this codebase is written densely (minimal line breaks, inline ternaries for conditional classes) — match the existing style rather than reformatting to one-JSX-element-per-line.
+Chưa thấy test suite riêng cho frontend trong README — nếu thêm test frontend, kiểm tra Frontend/package.json trước để biết runner đang dùng (nếu có) trước khi giả định.
 
-## Cross-cutting: AI usage logging (graded requirement)
-
-This is an AI20K coursework repo — AI tool usage is auto-logged and factors into grading (README.md deliverable #4). `.claude/settings.json` configures Claude Code hooks that log prompts; a pre-push git hook (installed via `scripts/setup_hooks.sh` / `scripts/setup_hooks.ps1`) submits `.ai-log/session.jsonl` on `git push`. Don't remove or bypass these hooks, and don't add `--no-verify` to pushes in this repo.
-
-## Docs that reflect team process, not just code
-
-- `WORKLOG.md` — daily log table (Member | Task | Status | Output | Time), append rather than rewrite.
-- `ARCHITECTURE.md` — currently unfilled template placeholders; treat as a document to complete, not a source of truth about the current design.
-- `docs/guide/` — the full AI20K course guidebook (setup, LangGraph, FastAPI, testing, deployment chapters) — check here before inventing conventions from scratch.
+Lint
+bash
+ruff check .
+Quy ước code khi chỉnh sửa
+Backend: giữ cấu trúc theo tầng đã có — route mỏng trong api/, logic nghiệp vụ trong services/, không nhét business logic vào route handler. Schema request/response dùng Pydantic trong models/. Thao tác DB qua SQLAlchemy models trong db/, tránh viết raw SQL trừ khi thật cần thiết.
+Agent/LangGraph: các tool mới của agent (ví dụ tool gọi thêm API ngoài) đặt trong agents/, tuân theo pattern planner/tools/state đã có. Nếu tool thực hiện hành động có tác dụng phụ (tạo sự kiện, gửi nhắc nhở, xoá dữ liệu, ...), bắt buộc có bước xác nhận (human-in-the-loop) trước khi thực thi, giống cách đang làm với reminder/calendar — không bỏ qua bước này dù chỉ để test nhanh.
+Frontend: component chia theo tính năng trong components/, trang trong pages/. Gọi API qua lớp api/, không gọi fetch/axios trực tiếp trong component. State auth/JWT lấy qua AuthContext, không tự lưu token rải rác. Khi nối một trang từ mock sang API thật, thay dữ liệu nhập từ data/mockData.js bằng hook tương ứng (theo pattern của useConversations, useMessages) thay vì sửa trực tiếp cấu trúc mock.
+Auth: không tự ý đổi cơ chế hash mật khẩu (bcrypt) hay cấu trúc JWT hiện có trừ khi được yêu cầu rõ ràng — đây là phần đã "chạy thật" và có thể ảnh hưởng tài khoản người dùng đang tồn tại.
+WebSocket: kênh real-time đã hoạt động cho chat 1-1/nhóm — nếu thêm sự kiện realtime mới (ví dụ cập nhật Task/Reminder khi nối API thật), tái sử dụng kênh/pattern trong websocket/ thay vì tạo kết nối WebSocket song song mới.
+Trước khi commit / báo hoàn thành task
+Chạy pytest tests/ -v nếu có đổi backend.
+Chạy ruff check . và sửa lỗi lint.
+Nếu đổi frontend, chạy thử npm run dev và kiểm tra route liên quan không bị vỡ (đặc biệt các route được bảo vệ bởi ProtectedRoute).
+Không commit file .env thật (chỉ .env.example).
+Tài liệu liên quan trong repo
+Frontend/README.md — hướng dẫn riêng cho frontend, gồm cách xử lý lỗi thường gặp khi chạy npm trên Windows.
+Frontend/detai.md — đề bài / yêu cầu gốc của dự án, tham khảo khi không chắc scope tính năng.
+WORKLOG.md — nhật ký công việc theo ngày của cả nhóm, xem để biết ai đang làm phần nào trước khi động vào.
+docs/guide/ — tài liệu khóa học AI20K (setup, LangGraph, FastAPI, testing, deploy).
+Lưu ý an toàn khi code
+Không hardcode GROQ_API_KEY hay bất kỳ secret nào vào code — luôn đọc từ .env.
+Khi agent thao tác với Google Calendar hoặc tạo nhắc nhở, giữ nguyên bước xác nhận người dùng trước khi gọi API thật; đây là yêu cầu thiết kế cốt lõi của sản phẩm (human-in-the-loop), không phải chi tiết có thể lược bỏ để "cho gọn".

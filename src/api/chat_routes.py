@@ -31,7 +31,7 @@ async def list_users(
         pattern = f"%{search}%"
         stmt = stmt.where(or_(User.display_name.ilike(pattern), User.email.ilike(pattern)))
     users = (await db.execute(stmt)).scalars().all()
-    return [UserPublic(id=u.id, email=u.email, display_name=u.display_name) for u in users]
+    return [UserPublic(id=u.id, email=u.email, display_name=u.display_name, role=u.role) for u in users]
 
 
 @router.get("/conversations", response_model=ConversationListResponse)

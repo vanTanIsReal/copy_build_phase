@@ -62,7 +62,7 @@ export default function ChatPage() {
           <div className="chat-empty-state"><i className="bi bi-chat-dots" /><p>Select a conversation or start a new one</p></div>
         )}
       </section>
-      <AIPanel open={aiOpen} onClose={() => setAiOpen(false)} />
+      <AIPanel open={aiOpen} onClose={() => setAiOpen(false)} messages={messages} />
       <NewConversationModal open={newConvoOpen} onClose={() => setNewConvoOpen(false)} onCreated={onCreated} />
     </div>
   )

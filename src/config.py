@@ -20,9 +20,9 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     cors_origins: str = "http://localhost:3000"
 
-    # LLM
-    openai_api_key: str = ""
-    model_name: str = "gpt-4o-mini"
+    # LLM (Groq)
+    groq_api_key: str = ""
+    model_name: str = "llama-3.3-70b-versatile"
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
 
     # Database
@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     secret_key: str = "dev-insecure-secret-change-me"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
+    initial_admin_email: str = ""
 
     # Vector Store
     chroma_persist_dir: str = "./data/chroma"

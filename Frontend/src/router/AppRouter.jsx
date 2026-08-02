@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import AppLayout from '../components/layout/AppLayout'
 import ProtectedRoute from './ProtectedRoute'
+import AdminRoute from './AdminRoute'
 import LoginPage from '../pages/LoginPage'
 import RegisterPage from '../pages/RegisterPage'
 import ChatPage from '../pages/ChatPage'
@@ -10,5 +11,8 @@ import ReminderPage from '../pages/ReminderPage'
 import MemoryPage from '../pages/MemoryPage'
 import ProfilePage from '../pages/ProfilePage'
 import PersonalAssistantPage from '../pages/PersonalAssistantPage'
+import AdminDashboardPage from '../pages/admin/AdminDashboardPage'
+import AdminUsersPage from '../pages/admin/AdminUsersPage'
+import AdminConversationsPage from '../pages/admin/AdminConversationsPage'
 
-export default function AppRouter(){return <BrowserRouter><Routes><Route path="/" element={<Navigate to="/assistant" replace/>}/><Route path="/login" element={<LoginPage/>}/><Route path="/register" element={<RegisterPage/>}/><Route element={<ProtectedRoute/>}><Route element={<AppLayout/>}><Route path="/assistant" element={<PersonalAssistantPage/>}/><Route path="/chat" element={<ChatPage/>}/><Route path="/tasks" element={<TaskPage/>}/><Route path="/calendar" element={<CalendarPage/>}/><Route path="/reminders" element={<ReminderPage/>}/><Route path="/memory" element={<MemoryPage/>}/><Route path="/profile" element={<ProfilePage/>}/></Route></Route><Route path="*" element={<Navigate to="/assistant" replace/>}/></Routes></BrowserRouter>}
+export default function AppRouter(){return <BrowserRouter><Routes><Route path="/" element={<Navigate to="/assistant" replace/>}/><Route path="/login" element={<LoginPage/>}/><Route path="/register" element={<RegisterPage/>}/><Route element={<ProtectedRoute/>}><Route element={<AppLayout/>}><Route path="/assistant" element={<PersonalAssistantPage/>}/><Route path="/chat" element={<ChatPage/>}/><Route path="/tasks" element={<TaskPage/>}/><Route path="/calendar" element={<CalendarPage/>}/><Route path="/reminders" element={<ReminderPage/>}/><Route path="/memory" element={<MemoryPage/>}/><Route path="/profile" element={<ProfilePage/>}/><Route element={<AdminRoute/>}><Route path="/admin" element={<AdminDashboardPage/>}/><Route path="/admin/users" element={<AdminUsersPage/>}/><Route path="/admin/conversations" element={<AdminConversationsPage/>}/></Route></Route></Route><Route path="*" element={<Navigate to="/assistant" replace/>}/></Routes></BrowserRouter>}

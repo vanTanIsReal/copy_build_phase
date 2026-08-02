@@ -120,7 +120,9 @@ async def build_conversation_summary(
             .where(ConversationParticipant.conversation_id == conversation.id)
         )
     ).all()
-    participants = [UserPublic(id=u.id, email=u.email, display_name=u.display_name) for u, _ in participant_rows]
+    participants = [
+        UserPublic(id=u.id, email=u.email, display_name=u.display_name, role=u.role) for u, _ in participant_rows
+    ]
     my_participant = next((cp for _, cp in participant_rows if cp.user_id == current_user_id), None)
 
     if conversation.type == "group":

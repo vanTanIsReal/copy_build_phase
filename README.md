@@ -9,12 +9,15 @@ Dự án AI20K Build Phase: một AI agent nhúng trong ứng dụng chat, giúp
 - **Đăng ký / Đăng nhập / Đăng xuất**: tài khoản lưu thật trong database (SQLite), mật khẩu hash bằng bcrypt, xác thực bằng JWT. Route bên trong ứng dụng (`/assistant`, `/chat`, `/tasks`, ...) được bảo vệ — chưa đăng nhập sẽ tự chuyển về `/login`.
 - **Nhắn tin 1-1 và theo nhóm, real-time**: tạo cuộc trò chuyện 1-1 hoặc nhóm (chọn nhiều người), gửi/nhận tin nhắn tức thời qua WebSocket, xem lại lịch sử tin nhắn, đếm tin nhắn chưa đọc.
 - **AI Agent (chat với AI)**: endpoint `/api/v1/chat` dùng LangGraph, có tool gọi Google Calendar và tạo nhắc nhở với bước xác nhận (human-in-the-loop) trước khi thực hiện.
+- **Phân quyền Admin**: tài khoản có 2 role (`user`/`admin`). Trang `/admin` (Dashboard, Users, Conversations) chỉ hiển thị và truy cập được với tài khoản `admin` — cho phép xem thống kê hệ thống, đổi role/khoá-mở khoá tài khoản người dùng, xem và xoá hội thoại để kiểm duyệt.
 
 ### Mới là giao diện mẫu (chưa nối API thật)
 
 Các trang Tasks, Calendar, Reminders, Memory, Profile, và tính năng AI Assistant tóm tắt/quản lý cá nhân (`/assistant`) hiện đang chạy trên dữ liệu mẫu (`Frontend/src/data/mockData.js`) — giao diện đã xong nhưng chưa nối vào backend.
 
 ## Kiến trúc
+
+> **Backend nằm ở thư mục [`src/`](src/) ở gốc repo** (FastAPI + LangGraph), tách biệt hoàn toàn với frontend ở [`Frontend/`](Frontend/) (React + Vite). Chạy backend bằng lệnh `uvicorn src.main:app ...` từ thư mục gốc repo, không phải từ bên trong `src/`.
 
 ```
 ├── src/                  # Backend — FastAPI + LangGraph
@@ -64,8 +67,9 @@ pip install -r requirements.txt
 
 # Tạo file cấu hình (chỉ cần làm 1 lần)
 cp .env.example .env
-# Mở .env, điền OPENAI_API_KEY nếu muốn dùng tính năng AI chat.
+# Mở .env, điền GROQ_API_KEY nếu muốn dùng tính năng AI chat (tóm tắt, calendar, nhắc nhở).
 # DATABASE_URL mặc định là sqlite:///./data/app.db, không cần cài Postgres.
+# Điền INITIAL_ADMIN_EMAIL nếu muốn tài khoản đăng ký với email đó tự động có quyền admin.
 
 # Chạy server
 uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
@@ -93,6 +97,7 @@ Mở `http://localhost:5173` trong trình duyệt. Frontend mặc định gọi 
 2. Mở thêm một trình duyệt/tab ẩn danh khác, tạo tài khoản thứ hai.
 3. Từ tài khoản thứ nhất, vào trang **Chats**, bấm nút bút (soạn tin nhắn) để chọn người và bắt đầu chat 1-1 hoặc chọn nhiều người để tạo nhóm.
 4. Gửi tin nhắn — tài khoản còn lại sẽ nhận tin nhắn theo thời gian thực nếu đang mở cùng cuộc trò chuyện, hoặc thấy số tin nhắn chưa đọc.
+5. Muốn thử trang **Admin**: đăng ký một tài khoản với email trùng `INITIAL_ADMIN_EMAIL` đã đặt trong `.env` (hoặc đổi role một tài khoản có sẵn thành `admin` trực tiếp trong DB) — tài khoản đó sẽ thấy mục "Admin" trong Sidebar, vào được `/admin`.
 
 ### Chạy test backend
 
@@ -105,7 +110,7 @@ pytest tests/ -v
 
 | Layer | Công nghệ |
 | --- | --- |
-| AI Agent | LangGraph + LangChain (OpenAI) |
+| AI Agent | LangGraph + LangChain (Groq) |
 | Backend | FastAPI, SQLAlchemy (async) + SQLite, JWT (PyJWT) + bcrypt, WebSocket |
 | Frontend | React 18, Vite, React Router, React Hook Form, Bootstrap 5, Framer Motion |
 | Test | pytest, pytest-asyncio, httpx |
