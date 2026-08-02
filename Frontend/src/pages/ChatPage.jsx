@@ -16,6 +16,7 @@ export default function ChatPage() {
   const [aiOpen, setAiOpen] = useState(false)
   const [newConvoOpen, setNewConvoOpen] = useState(false)
   const [selectedId, setSelectedId] = useState(null)
+  const [aiConsent, setAiConsent] = useState({})
   const { conversations, setConversations } = useConversations(token)
   const { messages, setMessages } = useMessages(token, selectedId)
 
@@ -33,9 +34,16 @@ export default function ChatPage() {
   })
 
   const selectedConversation = conversations.find(c => c.id === selectedId) || null
+  const aiAllowed = selectedId ? Boolean(aiConsent[selectedId]) : false
+
+  const setConversationAiConsent = (allowed) => {
+    if (!selectedId) return
+    setAiConsent(prev => ({ ...prev, [selectedId]: allowed }))
+  }
 
   const onSelect = (id) => {
     setSelectedId(id)
+    setAiOpen(false)
     setMobileChat(true)
     setConversations(prev => prev.map(c => c.id === id ? { ...c, unread_count: 0 } : c))
     markRead(token, id).catch(() => {})
@@ -55,14 +63,26 @@ export default function ChatPage() {
       <section className="conversation-pane">
         {selectedConversation ? (
           <>
-            <ConversationHeader conversation={selectedConversation} onBack={() => setMobileChat(false)} onAI={() => setAiOpen(true)} />
+            <ConversationHeader
+              conversation={selectedConversation}
+              aiAllowed={aiAllowed}
+              onAiConsentChange={setConversationAiConsent}
+              onBack={() => setMobileChat(false)}
+              onAI={() => setAiOpen(true)}
+            />
             <MessageArea conversation={selectedConversation} messages={messages} currentUserId={user?.id} onSend={onSend} />
           </>
         ) : (
           <div className="chat-empty-state"><i className="bi bi-chat-dots" /><p>Select a conversation or start a new one</p></div>
         )}
       </section>
-      <AIPanel open={aiOpen} onClose={() => setAiOpen(false)} messages={messages} />
+      <AIPanel
+        open={aiOpen}
+        onClose={() => setAiOpen(false)}
+        granted={aiAllowed}
+        onGrantedChange={setConversationAiConsent}
+        messages={aiAllowed ? messages : []}
+      />
       <NewConversationModal open={newConvoOpen} onClose={() => setNewConvoOpen(false)} onCreated={onCreated} />
     </div>
   )

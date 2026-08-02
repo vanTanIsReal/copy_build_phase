@@ -1,12 +1,151 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.auth.security import hash_password
 from src.db.models import Conversation, ConversationParticipant, Message, User
 from src.models.auth_schemas import UserPublic
 from src.models.chat_schemas import ConversationSummary, MessageOut
+
+DEMO_GROUPS = [
+    {
+        "name": "Product Launch Team",
+        "members": [("Maya Chen", "demo-maya@orbit.local"), ("Jordan Lee", "demo-jordan@orbit.local")],
+        "messages": [
+            ("demo-maya@orbit.local", "The launch checklist is ready for review."),
+            ("demo-jordan@orbit.local", "I will add the final campaign numbers this afternoon."),
+        ],
+    },
+    {
+        "name": "Leadership Circle",
+        "members": [("Jordan Lee", "demo-jordan@orbit.local"), ("Chris Morgan", "demo-chris@orbit.local")],
+        "messages": [
+            ("demo-jordan@orbit.local", "Can we confirm the Q3 planning room before Friday?"),
+            ("demo-chris@orbit.local", "Yes, I will send the calendar invite after the stand-up."),
+        ],
+    },
+    {
+        "name": "Design System Crew",
+        "members": [("Maya Chen", "demo-maya@orbit.local"), ("Chris Morgan", "demo-chris@orbit.local")],
+        "messages": [
+            ("demo-chris@orbit.local", "The new button states are ready in the component library."),
+            ("demo-maya@orbit.local", "Great. I will review accessibility and mobile states next."),
+        ],
+    },
+]
+
+PUBLIC_DEMO_GROUP = {
+    "name": "AI Builders Community",
+    "members": [
+        ("Maya Chen", "demo-maya@orbit.local"),
+        ("Jordan Lee", "demo-jordan@orbit.local"),
+        ("Chris Morgan", "demo-chris@orbit.local"),
+    ],
+    "messages": [
+        ("demo-maya@orbit.local", "Welcome to the AI builders community."),
+        ("demo-jordan@orbit.local", "Share your favorite agent workflow here."),
+    ],
+}
+
+
+async def ensure_demo_groups(db: AsyncSession, current_user_id: str) -> None:
+    """Create development-only group conversations for a user on first chat visit."""
+    demo_names = [group["name"] for group in DEMO_GROUPS]
+    existing_names = set(
+        (
+            await db.execute(
+                select(Conversation.name)
+                .join(ConversationParticipant, ConversationParticipant.conversation_id == Conversation.id)
+                .where(
+                    ConversationParticipant.user_id == current_user_id,
+                    Conversation.type == "group",
+                    Conversation.name.in_(demo_names),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    missing_groups = [group for group in DEMO_GROUPS if group["name"] not in existing_names]
+    public_group_exists = (
+        await db.execute(
+            select(Conversation.id).where(
+                Conversation.type == "group", Conversation.name == PUBLIC_DEMO_GROUP["name"]
+            )
+        )
+    ).scalar_one_or_none() is not None
+    if not missing_groups and public_group_exists:
+        return
+
+    member_specs = {}
+    seed_groups = [*missing_groups]
+    if not public_group_exists:
+        seed_groups.append(PUBLIC_DEMO_GROUP)
+    for group in seed_groups:
+        for display_name, email in group["members"]:
+            member_specs[email] = display_name
+
+    demo_users = {}
+    for email, display_name in member_specs.items():
+        user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+        if user is None:
+            user = User(email=email, password_hash=hash_password("demo-password"), display_name=display_name)
+            db.add(user)
+            await db.flush()
+        demo_users[email] = user
+
+    for group_index, group in enumerate(missing_groups):
+        created_at = datetime.now(UTC) - timedelta(minutes=(len(missing_groups) - group_index) * 4)
+        conversation = Conversation(
+            type="group",
+            name=group["name"],
+            created_by=current_user_id,
+            created_at=created_at,
+            updated_at=created_at,
+        )
+        db.add(conversation)
+        await db.flush()
+
+        participant_ids = {current_user_id, *(demo_users[email].id for _, email in group["members"])}
+        for participant_id in participant_ids:
+            db.add(ConversationParticipant(conversation_id=conversation.id, user_id=participant_id))
+
+        for message_index, (email, content) in enumerate(group["messages"]):
+            db.add(
+                Message(
+                    conversation_id=conversation.id,
+                    sender_id=demo_users[email].id,
+                    content=content,
+                    created_at=created_at + timedelta(minutes=message_index + 1),
+                )
+            )
+
+    if not public_group_exists:
+        created_at = datetime.now(UTC) - timedelta(minutes=2)
+        public_group = Conversation(
+            type="group",
+            name=PUBLIC_DEMO_GROUP["name"],
+            created_by=demo_users["demo-maya@orbit.local"].id,
+            created_at=created_at,
+            updated_at=created_at,
+        )
+        db.add(public_group)
+        await db.flush()
+        for _, email in PUBLIC_DEMO_GROUP["members"]:
+            db.add(ConversationParticipant(conversation_id=public_group.id, user_id=demo_users[email].id))
+        for message_index, (email, content) in enumerate(PUBLIC_DEMO_GROUP["messages"]):
+            db.add(
+                Message(
+                    conversation_id=public_group.id,
+                    sender_id=demo_users[email].id,
+                    content=content,
+                    created_at=created_at + timedelta(minutes=message_index + 1),
+                )
+            )
+
+    await db.commit()
 
 
 def _iso(dt: datetime) -> str:

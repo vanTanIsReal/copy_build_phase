@@ -33,6 +33,16 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
     initial_admin_email: str = ""
+    password_reset_expire_minutes: int = 30
+    frontend_url: str = "http://localhost:5173"
+
+    # Email / password reset
+    smtp_host: str = ""
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_use_tls: bool = True
 
     # Vector Store
     chroma_persist_dir: str = "./data/chroma"

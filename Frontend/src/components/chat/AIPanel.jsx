@@ -12,9 +12,8 @@ const actions = [
 
 const scopeToCount = { '20 latest messages': 20, '50 latest messages': 50 }
 
-export default function AIPanel({ open, onClose, messages = [] }) {
+export default function AIPanel({ open, onClose, messages = [], granted = false, onGrantedChange = () => {} }) {
   const { token } = useAuth()
-  const [granted, setGranted] = useState(true)
   const [scope, setScope] = useState('20 latest messages')
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState('')
@@ -40,13 +39,13 @@ export default function AIPanel({ open, onClose, messages = [] }) {
       <div className="ai-panel-header"><div className="ai-title-icon"><i className="bi bi-stars"/></div><div><h3>AI Assistant</h3><span>Context-aware help</span></div><button className="icon-btn ai-close" onClick={onClose}><i className="bi bi-x-lg"/></button></div>
       <div className={`permission-card ${granted ? 'granted' : ''}`}>
         <div className="permission-top"><div><i className={`bi ${granted ? 'bi-shield-check' : 'bi-shield-lock'}`}/></div><span><strong>{granted ? 'Permission granted' : 'Permission required'}</strong><small>{granted ? 'AI can read selected messages' : 'Allow AI to read this conversation'}</small></span>{granted && <span className="live-badge">Active</span>}</div>
-        {granted ? <><label>Permission scope</label><select value={scope} onChange={e=>setScope(e.target.value)} className="form-select"><option>20 latest messages</option><option>50 latest messages</option><option>Unread messages</option><option>Today's messages</option><option>Custom time range</option></select><button className="revoke-btn" onClick={()=>setGranted(false)}>Revoke permission</button></> : <button className="btn btn-primary w-100 mt-3" onClick={()=>setGranted(true)}><i className="bi bi-shield-check me-2"/>Grant Permission</button>}
+        {granted ? <><label>Permission scope</label><select value={scope} onChange={e=>setScope(e.target.value)} className="form-select"><option>20 latest messages</option><option>50 latest messages</option><option>Unread messages</option><option>Today's messages</option><option>Custom time range</option></select><button className="revoke-btn" onClick={()=>onGrantedChange(false)}>Revoke permission</button></> : <button className="btn btn-primary w-100 mt-3" onClick={()=>onGrantedChange(true)}><i className="bi bi-shield-check me-2"/>Grant Permission</button>}
       </div>
       <div className="ai-section-title"><span>Quick actions</span><i className="bi bi-lightning-charge-fill"/></div>
-      <div className="quick-grid">{actions.map(([icon,title,sub,color])=><motion.button key={title} whileHover={{y:-2}} whileTap={{scale:.98}} disabled={title==='Summarize' && (!granted || running)} onClick={title==='Summarize' ? runSummarize : undefined}><span style={{color,background:`${color}12`}}><i className={`bi ${title==='Summarize' && running ? 'bi-hourglass-split' : icon}`}/></span><strong>{title}</strong><small>{title==='Summarize' && running ? 'Summarizing...' : sub}</small></motion.button>)}</div>
+      <div className="quick-grid">{actions.map(([icon,title,sub,color])=><motion.button key={title} whileHover={{y:-2}} whileTap={{scale:.98}} disabled={!granted || (title==='Summarize' && running)} onClick={title==='Summarize' ? runSummarize : undefined}><span style={{color,background:`${color}12`}}><i className={`bi ${title==='Summarize' && running ? 'bi-hourglass-split' : icon}`}/></span><strong>{title}</strong><small>{title==='Summarize' && running ? 'Summarizing...' : sub}</small></motion.button>)}</div>
       {error && <div className="auth-error">{error}</div>}
       {result && <div className="border rounded-3 p-3 mt-2 small"><strong className="d-block mb-1">Summary</strong>{result}</div>}
-      <div className="ask-card"><div className="ask-title"><span><i className="bi bi-stars"/></span><div><strong>Ask Orbit</strong><small>About this conversation</small></div></div><textarea placeholder="Ask anything about this conversation..."/><div className="ask-footer"><span>AI may make mistakes</span><button><i className="bi bi-arrow-up"/></button></div></div>
+      <div className="ask-card"><div className="ask-title"><span><i className="bi bi-stars"/></span><div><strong>Ask Orbit</strong><small>About this conversation</small></div></div><textarea disabled={!granted} placeholder={granted ? 'Ask anything about this conversation...' : 'Allow AI access to ask about this chat'} /><div className="ask-footer"><span>AI may make mistakes</span><button disabled={!granted}><i className="bi bi-arrow-up"/></button></div></div>
       <div className="suggested-prompts"><span>Try asking</span><button>“What decisions were made today?”</button><button>“Who assigned me tasks?”</button></div>
     </aside></>
   )

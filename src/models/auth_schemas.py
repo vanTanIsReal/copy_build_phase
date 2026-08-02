@@ -14,6 +14,24 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    message: str
+    reset_token: str | None = None
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(..., min_length=20)
+    password: str = Field(..., min_length=6)
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
 class UserPublic(BaseModel):
     id: str
     email: str

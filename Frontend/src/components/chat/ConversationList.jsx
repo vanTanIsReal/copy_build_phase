@@ -7,7 +7,7 @@ export default function ConversationList({ conversations, selectedId, onSelect, 
   const filtered = conversations.filter(c => c.name.toLowerCase().includes(search.toLowerCase()))
   return (
     <section className="conversation-list">
-      <div className="conversation-title"><div><h2>Messages</h2><span>{conversations.length} conversations</span></div><button className="icon-btn primary-soft" onClick={onNewConversation}><i className="bi bi-pencil-square" /></button></div>
+      <div className="conversation-title"><div><h2>Messages</h2><span>{conversations.length} conversations</span></div><button className="icon-btn primary-soft" onClick={onNewConversation} title="Find people or groups" aria-label="Find people or groups"><i className="bi bi-pencil-square" /></button></div>
       <div className="conversation-search"><i className="bi bi-search" /><input placeholder="Search messages" value={search} onChange={e => setSearch(e.target.value)} /></div>
       <div className="conversation-items">
         {filtered.map(c => (

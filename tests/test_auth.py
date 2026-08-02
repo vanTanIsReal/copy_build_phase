@@ -50,3 +50,52 @@ async def test_me_with_token(client, auth_headers):
     resp = await client.get("/api/v1/auth/me", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json()["email"] == "alice@example.com"
+
+
+@pytest.mark.asyncio
+async def test_forgot_password_resets_password_once(client):
+    payload = {"email": "reset@example.com", "password": "password123", "display_name": "Reset User"}
+    await client.post("/api/v1/auth/register", json=payload)
+
+    forgot = await client.post("/api/v1/auth/forgot-password", json={"email": payload["email"]})
+    assert forgot.status_code == 200
+    reset_token = forgot.json()["reset_token"]
+    assert reset_token
+
+    reset = await client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": reset_token, "password": "new-password123"},
+    )
+    assert reset.status_code == 200
+
+    old_login = await client.post(
+        "/api/v1/auth/login", json={"email": payload["email"], "password": payload["password"]}
+    )
+    new_login = await client.post(
+        "/api/v1/auth/login", json={"email": payload["email"], "password": "new-password123"}
+    )
+    assert old_login.status_code == 401
+    assert new_login.status_code == 200
+
+    reused = await client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": reset_token, "password": "another-password123"},
+    )
+    assert reused.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_forgot_password_does_not_reveal_unknown_email(client):
+    resp = await client.post("/api/v1/auth/forgot-password", json={"email": "missing@example.com"})
+    assert resp.status_code == 200
+    assert resp.json()["reset_token"] is None
+    assert "If an account exists" in resp.json()["message"]
+
+
+@pytest.mark.asyncio
+async def test_reset_password_rejects_invalid_token(client):
+    resp = await client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": "invalid-token-that-is-long-enough", "password": "new-password123"},
+    )
+    assert resp.status_code == 400

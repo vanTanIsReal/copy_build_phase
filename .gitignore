@@ -32,6 +32,8 @@ Thumbs.db
 data/
 *.db
 *.sqlite3
+!Frontend/src/data/
+!Frontend/src/data/mockData.js
 
 # Google OAuth credentials/tokens
 secrets/
