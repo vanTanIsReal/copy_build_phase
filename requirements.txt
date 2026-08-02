@@ -10,10 +10,22 @@ langchain>=0.3.0
 langchain-openai>=0.3.0
 langgraph>=0.2.0
 
-# Database (uncomment as needed)
-# sqlalchemy>=2.0.0
+# Calendar & Scheduling
+google-api-python-client>=2.150.0
+google-auth>=2.35.0
+google-auth-oauthlib>=1.2.0
+apscheduler>=3.10.4
+
+# Database
+sqlalchemy>=2.0.0
+aiosqlite>=0.20.0
 # alembic>=1.14.0
 # psycopg2-binary>=2.9.0
+
+# Auth
+pyjwt>=2.9.0
+bcrypt>=4.2.0
+email-validator>=2.2.0
 
 # Vector Store (uncomment as needed)
 # chromadb>=0.5.0

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Annotated, TypedDict
+
+from langchain_core.messages import AnyMessage
+from langgraph.graph.message import add_messages
 
 
 class AgentState(TypedDict, total=False):
@@ -16,3 +19,11 @@ class AgentState(TypedDict, total=False):
     response: str
     error: str
     metadata: dict
+
+    # Tool-calling planner loop (messages, ToolNode, tools_condition all require this).
+    messages: Annotated[list[AnyMessage], add_messages]
+
+    # Structured outputs of the summarize/calendar/reminder tools.
+    summary: str
+    calendar_event_draft: dict | None
+    reminder_draft: dict | None

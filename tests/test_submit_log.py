@@ -38,8 +38,8 @@ def test_archive_deduplication_and_streaming(tmp_path, monkeypatch):
     # Now create a second pending batch with one new entry and one existing entry
     pending_file_2 = tmp_path / "pending2.jsonl"
     pending_lines_2 = [
-        json.dumps({"entry_id": "2", "data": "second_dup"}), # already archived
-        json.dumps({"entry_id": "3", "data": "third"}),      # new
+        json.dumps({"entry_id": "2", "data": "second_dup"}),  # already archived
+        json.dumps({"entry_id": "3", "data": "third"}),  # new
     ]
     pending_file_2.write_text("\n".join(pending_lines_2) + "\n", encoding="utf-8")
 

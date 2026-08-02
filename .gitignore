@@ -33,6 +33,11 @@ data/
 *.db
 *.sqlite3
 
+# Google OAuth credentials/tokens
+secrets/
+credentials.json
+token.json
+
 # Logs
 logs/
 *.log

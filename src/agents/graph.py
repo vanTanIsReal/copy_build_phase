@@ -1,29 +1,30 @@
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
+from langgraph.prebuilt import ToolNode, tools_condition
 
-from src.agents.nodes.example_node import analyze_node, respond_node
+from src.agents.nodes.planner_node import planner_node
 from src.agents.state import AgentState
+from src.agents.tools import ALL_TOOLS
 
 
-def should_continue(state: AgentState) -> str:
-    """Route based on whether an error occurred during analysis."""
+def route_after_planner(state: AgentState) -> str:
+    """Route to tool execution, or end the run if the planner errored or has a final reply."""
     if state.get("error"):
         return END
-    return "respond"
+    return tools_condition(state)
 
 
-def build_graph() -> StateGraph:
+def build_graph():
     graph = StateGraph(AgentState)
 
-    # Add nodes
-    graph.add_node("analyze", analyze_node)
-    graph.add_node("respond", respond_node)
+    graph.add_node("planner", planner_node)
+    graph.add_node("tools", ToolNode(ALL_TOOLS))
 
-    # Add edges
-    graph.set_entry_point("analyze")
-    graph.add_conditional_edges("analyze", should_continue)
-    graph.add_edge("respond", END)
+    graph.set_entry_point("planner")
+    graph.add_conditional_edges("planner", route_after_planner, {"tools": "tools", END: END})
+    graph.add_edge("tools", "planner")
 
-    return graph.compile()
+    return graph.compile(checkpointer=MemorySaver())
 
 
 agent = build_graph()

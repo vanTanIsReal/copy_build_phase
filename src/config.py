@@ -28,8 +28,22 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite:///./data/app.db"
 
+    # Auth
+    secret_key: str = "dev-insecure-secret-change-me"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 1440
+
     # Vector Store
     chroma_persist_dir: str = "./data/chroma"
+
+    # Google Calendar
+    google_credentials_path: str = "./secrets/credentials.json"
+    google_token_path: str = "./secrets/token.json"
+    google_calendar_id: str = "primary"
+    calendar_timezone: str = "Asia/Ho_Chi_Minh"
+
+    # Reminders / scheduler
+    scheduler_timezone: str = "Asia/Ho_Chi_Minh"
 
 
 @lru_cache
