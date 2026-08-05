@@ -23,7 +23,7 @@ Dự án AI20K Build Phase: một AI agent nhúng trong ứng dụng chat, giúp
 
 ### Công cụ đánh giá (dev, không phải tính năng người dùng)
 
-- `scripts/eval_extract_tasks.py` — đo Precision/Recall/F1 của việc trích xuất task trên bộ dữ liệu tay (8 case tiếng Việt + Anh, có cả case không có task để đo độ chính xác). Gọi LLM thật nên không nằm trong `pytest tests/` — chạy tay: `python scripts/eval_extract_tasks.py`. Kết quả gần nhất (model `openai/gpt-oss-20b` qua Groq): **Precision/Recall/F1 = 100%** (8/8 case), ổn định qua nhiều lần chạy.
+- `scripts/eval_extract_tasks.py` — đo chất lượng và hiệu năng trích xuất task trên bộ dữ liệu tay (8 case tiếng Việt + Anh). Các metric gồm **Precision, Recall, F1, exact-match rate, valid-output rate, latency mean/P50/P95**. Gọi LLM thật nên không nằm trong `pytest tests/`; chạy tay bằng `python scripts/eval_extract_tasks.py`. Mỗi lần chạy tạo báo cáo máy đọc được tại `eval/results/task_extraction_latest.json` (có thể đổi bằng `--output`).
 
 ### Chưa xong
 

@@ -8,9 +8,11 @@ swapping models/providers.
 Usage:
     python scripts/eval_extract_tasks.py
 """
+import argparse
 import asyncio
 import json
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +22,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts.eval_metrics import EvalObservation, calculate_metrics, observation_to_dict  # noqa: E402
 from src.agents.tools.task_tool import extract_tasks  # noqa: E402
 
 F1_THRESHOLD = 0.7
@@ -96,13 +99,15 @@ DATASET: list[EvalCase] = [
 ]
 
 
-def _parse_predicted(raw: str) -> list[dict]:
+def _parse_predicted(raw: str) -> tuple[list[dict], bool]:
     cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     try:
         data = json.loads(cleaned)
     except json.JSONDecodeError:
-        return []
-    return data if isinstance(data, list) else []
+        return [], False
+    if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
+        return [], False
+    return data, True
 
 
 def _score_case(expected: list[ExpectedTask], predicted: list[dict]) -> tuple[int, int, int]:
@@ -121,34 +126,63 @@ def _score_case(expected: list[ExpectedTask], predicted: list[dict]) -> tuple[in
     return true_positives, false_positives, false_negatives
 
 
-async def main() -> None:
-    total_tp = total_fp = total_fn = 0
+async def main(output_path: Path) -> None:
+    observations: list[EvalObservation] = []
+    case_results: list[dict] = []
     print(f"Running task-extraction accuracy eval on {len(DATASET)} cases...\n")
 
     for case in DATASET:
+        started = time.perf_counter()
         raw = await extract_tasks.coroutine(state={"context": case.conversation})
-        predicted = _parse_predicted(raw)
+        latency_ms = (time.perf_counter() - started) * 1000
+        predicted, valid_output = _parse_predicted(raw)
         tp, fp, fn = _score_case(case.expected, predicted)
-        total_tp += tp
-        total_fp += fp
-        total_fn += fn
-        status = "OK  " if fp == 0 and fn == 0 else "MISS"
+        observation = EvalObservation(tp, fp, fn, latency_ms, valid_output)
+        observations.append(observation)
+        status = "OK  " if observation.exact_match else "MISS"
         print(
             f"[{status}] {case.name}: expected={len(case.expected)} predicted={len(predicted)} "
-            f"tp={tp} fp={fp} fn={fn}"
+            f"tp={tp} fp={fp} fn={fn} valid={valid_output} latency={latency_ms:.0f}ms"
         )
         if fp or fn:
             print(f"       predicted titles: {[p.get('title') for p in predicted]}")
 
-    precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) else 1.0
-    recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) else 1.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+        case_results.append({
+            "name": case.name,
+            "expected_count": len(case.expected),
+            "predicted_count": len(predicted),
+            **observation_to_dict(observation),
+        })
 
-    print(f"\nPrecision: {precision:.1%}  Recall: {recall:.1%}  F1: {f1:.1%}")
-    if f1 < F1_THRESHOLD:
+    metrics = calculate_metrics(observations)
+    print(
+        "\n"
+        f"Precision: {metrics['precision']:.1%}  Recall: {metrics['recall']:.1%}  "
+        f"F1: {metrics['f1']:.1%}\n"
+        f"Exact match: {metrics['exact_match_rate']:.1%}  "
+        f"Valid output: {metrics['valid_output_rate']:.1%}\n"
+        f"Latency: mean={metrics['latency_mean_ms']:.0f}ms  "
+        f"p50={metrics['latency_p50_ms']:.0f}ms  p95={metrics['latency_p95_ms']:.0f}ms"
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps({"metrics": metrics, "cases": case_results}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    print(f"Report written to {output_path}")
+
+    if metrics["f1"] < F1_THRESHOLD:
         print(f"Below {F1_THRESHOLD:.0%} F1 threshold - review the extraction prompt/model.")
         sys.exit(1)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description="Evaluate task extraction quality and latency")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("eval/results/task_extraction_latest.json"),
+        help="Path for the machine-readable JSON report",
+    )
+    args = parser.parse_args()
+    asyncio.run(main(args.output))
