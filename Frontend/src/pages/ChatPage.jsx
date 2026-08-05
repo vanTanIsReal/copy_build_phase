@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useOutletContext } from 'react-router-dom'
 import ConversationList from '../components/chat/ConversationList'
 import ConversationHeader from '../components/chat/ConversationHeader'
 import MessageArea from '../components/chat/MessageArea'
@@ -7,43 +8,39 @@ import NewConversationModal from '../components/chat/NewConversationModal'
 import { useAuth } from '../context/AuthContext'
 import { useConversations } from '../hooks/useConversations'
 import { useMessages } from '../hooks/useMessages'
-import { useChatSocket } from '../api/useWebSocket'
 import { markRead } from '../api/chat'
 
 export default function ChatPage() {
   const { token, user } = useAuth()
+  const { sendJson, subscribe } = useOutletContext()
   const [mobileChat, setMobileChat] = useState(false)
   const [aiOpen, setAiOpen] = useState(false)
   const [newConvoOpen, setNewConvoOpen] = useState(false)
   const [selectedId, setSelectedId] = useState(null)
-  const [aiConsent, setAiConsent] = useState({})
   const { conversations, setConversations } = useConversations(token)
   const { messages, setMessages } = useMessages(token, selectedId)
 
-  const { sendJson } = useChatSocket(token, (data) => {
+  const stateRef = useRef({ selectedId, userId: user?.id })
+  stateRef.current = { selectedId, userId: user?.id }
+
+  useEffect(() => subscribe((data) => {
     if (data.type !== 'new_message') return
+    const { selectedId, userId } = stateRef.current
     const msg = data.message
     if (msg.conversation_id === selectedId) setMessages(prev => [...prev, msg])
     setConversations(prev => {
       const idx = prev.findIndex(c => c.id === msg.conversation_id)
       if (idx === -1) return prev
-      const bumpUnread = msg.conversation_id !== selectedId && msg.sender_id !== user?.id
+      const bumpUnread = msg.conversation_id !== selectedId && msg.sender_id !== userId
       const updated = { ...prev[idx], last_message: msg, updated_at: msg.created_at, unread_count: bumpUnread ? (prev[idx].unread_count || 0) + 1 : prev[idx].unread_count }
       return [updated, ...prev.slice(0, idx), ...prev.slice(idx + 1)]
     })
-  })
+  }), [subscribe, setMessages, setConversations])
 
   const selectedConversation = conversations.find(c => c.id === selectedId) || null
-  const aiAllowed = selectedId ? Boolean(aiConsent[selectedId]) : false
-
-  const setConversationAiConsent = (allowed) => {
-    if (!selectedId) return
-    setAiConsent(prev => ({ ...prev, [selectedId]: allowed }))
-  }
 
   const onSelect = (id) => {
     setSelectedId(id)
-    setAiOpen(false)
     setMobileChat(true)
     setConversations(prev => prev.map(c => c.id === id ? { ...c, unread_count: 0 } : c))
     markRead(token, id).catch(() => {})
@@ -63,26 +60,14 @@ export default function ChatPage() {
       <section className="conversation-pane">
         {selectedConversation ? (
           <>
-            <ConversationHeader
-              conversation={selectedConversation}
-              aiAllowed={aiAllowed}
-              onAiConsentChange={setConversationAiConsent}
-              onBack={() => setMobileChat(false)}
-              onAI={() => setAiOpen(true)}
-            />
+            <ConversationHeader conversation={selectedConversation} onBack={() => setMobileChat(false)} onAI={() => setAiOpen(true)} />
             <MessageArea conversation={selectedConversation} messages={messages} currentUserId={user?.id} onSend={onSend} />
           </>
         ) : (
           <div className="chat-empty-state"><i className="bi bi-chat-dots" /><p>Select a conversation or start a new one</p></div>
         )}
       </section>
-      <AIPanel
-        open={aiOpen}
-        onClose={() => setAiOpen(false)}
-        granted={aiAllowed}
-        onGrantedChange={setConversationAiConsent}
-        messages={aiAllowed ? messages : []}
-      />
+      <AIPanel open={aiOpen} onClose={() => setAiOpen(false)} messages={messages} conversationId={selectedId} />
       <NewConversationModal open={newConvoOpen} onClose={() => setNewConvoOpen(false)} onCreated={onCreated} />
     </div>
   )

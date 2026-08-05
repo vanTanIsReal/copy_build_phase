@@ -1,13 +1,58 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
+import MemoryModal from '../components/memory/MemoryModal'
+import { useAuth } from '../context/AuthContext'
+import { listMemories, deleteMemory } from '../api/memories'
+import { formatDateShort } from '../utils/datetime'
 
-const memories=[
-  {id:1,icon:'bi-briefcase',color:'#526ff5',category:'Work',title:'I belong to the ERP Project',detail:'Added from Product Launch conversation',date:'Jul 24'},
-  {id:2,icon:'bi-bell',color:'#8b5cf6',category:'Preference',title:'Remind me 30 minutes before meetings',detail:'Used for all calendar events',date:'Jul 20'},
-  {id:3,icon:'bi-translate',color:'#10b981',category:'Language',title:'Preferred language is English',detail:'Applies to AI responses and summaries',date:'Jul 18'},
-  {id:4,icon:'bi-clock',color:'#f59e0b',category:'Routine',title:'Deep work hours are 9–11 AM',detail:'Orbit avoids scheduling interruptions',date:'Jul 14'},
-  {id:5,icon:'bi-people',color:'#ef5675',category:'People',title:'Maya leads the Product Launch team',detail:'Learned from your conversations',date:'Jul 10'},
-  {id:6,icon:'bi-filetype-pdf',color:'#0ea5e9',category:'Preference',title:'I prefer weekly reports as PDF',detail:'Saved from Analytics Team',date:'Jul 7'},
-]
+const CATEGORY_STYLE = {
+  Work: { icon: 'bi-briefcase', color: '#526ff5' },
+  Preference: { icon: 'bi-sliders', color: '#8b5cf6' },
+  People: { icon: 'bi-people', color: '#ef5675' },
+  Language: { icon: 'bi-translate', color: '#10b981' },
+  Routine: { icon: 'bi-clock', color: '#f59e0b' },
+}
+const DEFAULT_STYLE = { icon: 'bi-stars', color: '#64748b' }
 
-export default function MemoryPage(){const [query,setQuery]=useState('');const shown=memories.filter(m=>(m.title+m.category).toLowerCase().includes(query.toLowerCase()));return <div className="page-container"><PageHeader eyebrow="Personal context" title="Memory" description="The helpful details Orbit remembers to personalize your experience." action={<button className="btn btn-primary"><i className="bi bi-plus-lg me-2"/>Add memory</button>}/><div className="memory-toolbar"><div className="memory-search"><i className="bi bi-search"/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search memories..."/></div><div className="memory-tabs"><button className="active">All <span>12</span></button><button>Work</button><button>Preferences</button><button>People</button></div></div><div className="memory-grid">{shown.map(m=><div className="memory-card" key={m.id}><div className="memory-card-top"><div className="memory-icon" style={{background:`${m.color}12`,color:m.color}}><i className={`bi ${m.icon}`}/></div><span>{m.category}</span><div className="dropdown ms-auto"><button className="icon-btn" data-bs-toggle="dropdown"><i className="bi bi-three-dots"/></button><ul className="dropdown-menu dropdown-menu-end"><li><button className="dropdown-item"><i className="bi bi-pencil me-2"/>Edit</button></li><li><button className="dropdown-item text-danger"><i className="bi bi-trash me-2"/>Delete</button></li></ul></div></div><h3>{m.title}</h3><p>{m.detail}</p><div className="memory-footer"><span><i className="bi bi-clock"/> Remembered {m.date}</span><i className="bi bi-stars"/></div></div>)}</div><div className="memory-info"><i className="bi bi-shield-check"/><div><strong>Your memory is private</strong><p>You control what Orbit remembers. Edit or delete anything at any time.</p></div><button className="btn btn-sm btn-light">Learn more</button></div></div>}
+export default function MemoryPage() {
+  const { token } = useAuth()
+  const [memories, setMemories] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [query, setQuery] = useState('')
+  const [tab, setTab] = useState('All')
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+
+  const refresh = () => {
+    setLoading(true)
+    listMemories(token).then(setMemories).finally(() => setLoading(false))
+  }
+
+  useEffect(() => { refresh() }, [token])
+
+  const categories = ['All', ...new Set(memories.map(m => m.category))]
+  const shown = memories
+    .filter(m => tab === 'All' || m.category === tab)
+    .filter(m => (m.title + m.category).toLowerCase().includes(query.toLowerCase()))
+
+  const openAdd = () => { setEditing(null); setModalOpen(true) }
+  const openEdit = (m) => { setEditing(m); setModalOpen(true) }
+  const onSaved = (saved) => setMemories(prev => {
+    const exists = prev.some(m => m.id === saved.id)
+    return exists ? prev.map(m => m.id === saved.id ? saved : m) : [saved, ...prev]
+  })
+  const remove = (m) => deleteMemory(token, m.id).then(() => setMemories(prev => prev.filter(x => x.id !== m.id)))
+
+  return <div className="page-container">
+    <PageHeader eyebrow="Personal context" title="Memory" description="The helpful details Orbit remembers to personalize your experience." action={<button className="btn btn-primary" onClick={openAdd}><i className="bi bi-plus-lg me-2"/>Add memory</button>}/>
+    <div className="memory-toolbar"><div className="memory-search"><i className="bi bi-search"/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search memories..."/></div><div className="memory-tabs">{categories.map(c=><button key={c} className={tab===c?'active':''} onClick={()=>setTab(c)}>{c} {c==='All'&&<span>{memories.length}</span>}</button>)}</div></div>
+    {loading ? <p className="text-muted small">Loading...</p> : <div className="memory-grid">{shown.map(m=>{
+      const style = CATEGORY_STYLE[m.category] || DEFAULT_STYLE
+      return <div className="memory-card" key={m.id}><div className="memory-card-top"><div className="memory-icon" style={{background:`${style.color}12`,color:style.color}}><i className={`bi ${style.icon}`}/></div><span>{m.category}</span><div className="dropdown ms-auto"><button className="icon-btn" data-bs-toggle="dropdown"><i className="bi bi-three-dots"/></button><ul className="dropdown-menu dropdown-menu-end"><li><button className="dropdown-item" onClick={()=>openEdit(m)}><i className="bi bi-pencil me-2"/>Edit</button></li><li><button className="dropdown-item text-danger" onClick={()=>remove(m)}><i className="bi bi-trash me-2"/>Delete</button></li></ul></div></div><h3>{m.title}</h3><p>{m.detail}</p><div className="memory-footer"><span><i className="bi bi-clock"/> Remembered {formatDateShort(m.created_at)}</span><i className="bi bi-stars"/></div></div>
+    })}
+      {!shown.length && <p className="text-muted small mb-0">No memories yet — add one, or they'll build up as Orbit learns from your conversations.</p>}
+    </div>}
+    <div className="memory-info"><i className="bi bi-shield-check"/><div><strong>Your memory is private</strong><p>You control what Orbit remembers. Edit or delete anything at any time.</p></div></div>
+    <MemoryModal open={modalOpen} onClose={()=>setModalOpen(false)} onSaved={onSaved} memory={editing}/>
+  </div>
+}

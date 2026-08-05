@@ -21,7 +21,21 @@ async def summarize_conversation(
     if not text.strip():
         return "No conversation text was provided to summarize."
 
+    style_instructions = {
+        "brief": "2-3 short sentences, plain prose",
+        "detailed": "a single paragraph of at most 6 sentences",
+        "bullet_points": "at most 6 short bullet points",
+    }
+    style_label = style.replace("_", " ")
     llm = get_llm()
-    prompt = f"Summarize the following conversation in a {style.replace('_', ' ')} style:\n\n{text}"
+    prompt = (
+        f"Summarize the following conversation in a {style_label} style "
+        f"({style_instructions[style]}). Give exactly ONE summary in that style. Do not "
+        "restate it in other formats (no mixing brief + detailed + bullet points), and do "
+        "not add any preamble or closing remarks — output only the summary itself. "
+        "Write the summary in Vietnamese (tiếng Việt), regardless of what language the "
+        "conversation below is in.\n\n"
+        f"{text}"
+    )
     result = await llm.ainvoke(prompt)
     return result.content

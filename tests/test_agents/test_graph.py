@@ -63,11 +63,11 @@ async def test_agent_interrupt_then_resume_round_trip(monkeypatch, fake_llm_fact
     fake_service = None
     from unittest.mock import MagicMock
 
-    from src.agents.tools import calendar_tool
+    from src.services import calendar_service
 
     fake_service = MagicMock()
     fake_service.events.return_value.insert.return_value.execute.return_value = {"id": "evt-1"}
-    monkeypatch.setattr(calendar_tool, "_get_calendar_service", lambda: fake_service)
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
 
     config = _config()
     result = await agent.ainvoke({"messages": [HumanMessage(content="book a sync")]}, config)
@@ -75,3 +75,29 @@ async def test_agent_interrupt_then_resume_round_trip(monkeypatch, fake_llm_fact
 
     result2 = await agent.ainvoke(Command(resume={"approved": True}), config)
     assert "Event created" in result2["messages"][-1].content
+
+
+@pytest.mark.asyncio
+async def test_terminal_tool_ends_without_second_llm_call(monkeypatch, fake_llm_factory):
+    """summarize_conversation's own output is the final answer - the graph must not loop back
+    to planner for a second LLM call to 'relay' it (that call is what caused earlier bugs where
+    the model either repeated the summary in 3 formats or hallucinated a bogus tool call)."""
+    from unittest.mock import AsyncMock
+
+    from src.agents.tools import summarize_tool
+
+    fake_tool_llm = AsyncMock()
+    fake_tool_llm.ainvoke.return_value = AsyncMock(content="A short summary.")
+    monkeypatch.setattr(summarize_tool, "get_llm", lambda: fake_tool_llm)
+
+    planner_llm = fake_llm_factory(
+        [AIMessage(content="", tool_calls=[{"name": "summarize_conversation", "args": {}, "id": "call_1"}])]
+    )
+    monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: planner_llm)
+
+    result = await agent.ainvoke(
+        {"messages": [HumanMessage(content="Summarize this.")], "context": "Alice: hi\nBob: hello"}, _config()
+    )
+
+    assert result["messages"][-1].content == "A short summary."
+    assert not planner_llm._responses  # planner was called exactly once, not looped back into

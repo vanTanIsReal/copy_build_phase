@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +17,7 @@ from src.models.chat_schemas import (
     MessageOut,
     SendMessageRequest,
 )
-from src.services import chat_service
+from src.services import chat_service, proactive_service
 from src.websocket.manager import manager
 
 router = APIRouter()
@@ -180,6 +180,7 @@ async def get_messages(
 async def send_message(
     conversation_id: str,
     request: SendMessageRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MessageOut:
@@ -189,6 +190,12 @@ async def send_message(
 
     participant_ids = await chat_service.get_participant_ids(db, conversation_id)
     await manager.broadcast_to_users(participant_ids, {"type": "new_message", "message": message_out.model_dump()})
+    background_tasks.add_task(
+        proactive_service.maybe_suggest_task,
+        conversation_id=conversation_id,
+        sender_id=current_user.id,
+        content=request.content,
+    )
     return message_out
 
 

@@ -16,24 +16,28 @@ Trạng thái hiện tại — QUAN TRỌNG, đọc trước khi sửa bất k�
 Trước khi code, luôn xác nhận tính năng đang chạm vào thuộc nhóm nào bên dưới, vì cách xử lý rất khác nhau.
 
 Đã hoạt động thật (có backend + database, KHÔNG được thay bằng mock)
-Đăng ký / Đăng nhập / Đăng xuất — SQLite, bcrypt hash password, JWT auth. Các route /assistant, /chat, /tasks, ... được bảo vệ bởi ProtectedRoute, chưa đăng nhập sẽ redirect /login.
+Đăng ký / Đăng nhập / Đăng xuất — bcrypt hash password, JWT auth, role user/admin. Các route /assistant, /chat, /tasks, ... được bảo vệ bởi ProtectedRoute; /admin/* thêm AdminRoute (FE) + require_admin (BE).
 Nhắn tin 1-1 và nhóm real-time qua WebSocket, lịch sử tin nhắn, đếm tin nhắn chưa đọc.
-AI Agent chat: endpoint POST /api/v1/chat, dùng LangGraph, có tool gọi Google Calendar và tạo nhắc nhở (kèm bước xác nhận).
-Mới là giao diện mẫu — CHƯA nối API thật
-Các trang: Tasks, Calendar, Reminders, Memory, Profile
-Trang AI Assistant tóm tắt/quản lý cá nhân (/assistant)
-Toàn bộ dữ liệu các trang trên lấy từ Frontend/src/data/mockData.js
+AI Agent chat: endpoint POST /api/v1/chat + /chat/resume, dùng LangGraph, 8 tool — 4 tool có tác dụng phụ (create/update/delete_calendar_event, create_reminder) BẮT BUỘC đi qua interrupt() chờ người dùng xác nhận.
+Tasks, Calendar (Google Calendar 2 chiều), Reminders (bền vững qua restart), Memory, Profile, AI Assistant (/assistant), Admin dashboard — tất cả đã nối API thật.
+Proactive detection: mỗi tin nhắn mới được lọc regex rồi hỏi LLM, tự tạo Task gợi ý và đẩy WebSocket.
+Theo dõi token: bảng usage_logs + cảnh báo trên Admin dashboard khi ≥80% DAILY_TOKEN_BUDGET.
 
-➡️ Khi được yêu cầu "sửa lỗi trang Tasks" hay tương tự, đây nhiều khả năng là công việc nối API thật thay cho mock, không phải sửa bug logic. Hãy hỏi lại nếu không chắc phạm vi task là nối backend hay chỉ chỉnh UI.
+Đã có nhưng chưa hoàn chỉnh
+Toggle "Grant/Revoke Permission" trong AIPanel.jsx vẫn chỉ là state React cục bộ — chưa có bảng ai_permissions ở backend.
+Cảnh báo token chỉ hiện khi admin chủ động mở trang; chưa push/email, chưa tự chặn gọi LLM khi vượt ngân sách.
+Chưa deploy online, chưa có rate limiting. Xem ROADMAP.md.
+
+➡️ KHÔNG còn trang nào dùng Frontend/src/data/mockData.js (file vẫn tồn tại nhưng không được import ở đâu). Khi được yêu cầu "sửa lỗi trang Tasks" hay tương tự, đây là bug logic thật, không phải việc nối API. Trạng thái chi tiết theo từng yêu cầu đề bài: docs/PRD.md và ROADMAP.md.
 
 Kiến trúc thư mục
 ├── src/                    # Backend — FastAPI + LangGraph
 │   ├── agents/             # Agent LangGraph (planner, tools, state)
 │   ├── api/                # REST routes: auth, chat (người-với-người), agent chat
 │   ├── auth/                # Hash mật khẩu, tạo/kiểm tra JWT
-│   ├── db/                  # SQLAlchemy models + session (SQLite)
+│   ├── db/                  # SQLAlchemy models + session (SQLite/PostgreSQL)
 │   ├── models/               # Pydantic schemas
-│   ├── services/              # chat_service, scheduler, llm
+│   ├── services/              # chat_service, scheduler, llm, calendar_service, reminder_service, proactive_service, usage_service
 │   ├── websocket/              # Kênh real-time cho chat
 │   └── main.py                 # Điểm khởi tạo FastAPI app
 ├── tests/                    # pytest cho backend
@@ -48,7 +52,7 @@ Kiến trúc thư mục
 Công nghệ sử dụng
 Layer	Công nghệ
 AI Agent	LangGraph + LangChain (OpenAI, `gpt-4o-mini`)
-Backend	FastAPI, SQLAlchemy (async) + SQLite, JWT (PyJWT) + bcrypt, WebSocket
+Backend	FastAPI, SQLAlchemy (async) + SQLite/PostgreSQL, JWT (PyJWT) + bcrypt, WebSocket
 Frontend	React 18, Vite, React Router, React Hook Form, Bootstrap 5, Framer Motion
 Test	pytest, pytest-asyncio, httpx
 Lint	ruff
@@ -62,14 +66,18 @@ bash
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-cp .env.example .env             # điền GROQ_API_KEY nếu cần AI chat
+cp .env.example .env             # điền OPENAI_API_KEY nếu cần AI chat
 
 # Chạy dev server
 uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 # hoặc nếu có make: make run
+# Windows + DATABASE_URL là PostgreSQL: dùng `python scripts/run_dev.py` thay vì lệnh uvicorn ở
+# trên — agent memory bền vững (AsyncPostgresSaver) cần SelectorEventLoop, nhưng uvicorn CLI trên
+# Windows luôn chọn ProactorEventLoop trước khi app được import, không có cờ CLI nào sửa được.
 Health check: GET http://localhost:8000/health → {"status":"ok",...}
 Swagger UI: http://localhost:8000/docs
-DB mặc định: SQLite tại sqlite:///./data/app.db (không cần Postgres)
+DB mặc định: SQLite tại sqlite:///./data/app.db; đổi DATABASE_URL sang postgresql://... nếu muốn Postgres (xem README.md)
+Nếu sửa .env mà hành vi backend không đổi, kiểm tra có tiến trình uvicorn/scripts/run_dev.py cũ nào còn sống trên port 8000 trước khi nghi code sai — uvicorn --reload trên Windows để lại tiến trình con (spawn qua multiprocessing) vẫn giữ cổng dù tiến trình cha đã bị tắt, nhiều bản cũ/mới có thể cùng nhận request. Kiểm tra: netstat -ano | findstr :8000 rồi Stop-Process -Id <pid> -Force cho từng tiến trình tìm thấy, sau đó khởi động lại.
 Frontend
 bash
 cd Frontend
@@ -101,8 +109,10 @@ Không commit file .env thật (chỉ .env.example).
 Tài liệu liên quan trong repo
 Frontend/README.md — hướng dẫn riêng cho frontend, gồm cách xử lý lỗi thường gặp khi chạy npm trên Windows.
 Frontend/detai.md — đề bài / yêu cầu gốc của dự án, tham khảo khi không chắc scope tính năng.
+ARCHITECTURE.md — kiến trúc hệ thống hiện tại, sơ đồ, quyết định công nghệ.
+ROADMAP.md — bảng đối chiếu từng yêu cầu đề bài với trạng thái thật + việc còn lại theo độ ưu tiên.
 WORKLOG.md — nhật ký công việc theo ngày của cả nhóm, xem để biết ai đang làm phần nào trước khi động vào.
 docs/guide/ — tài liệu khóa học AI20K (setup, LangGraph, FastAPI, testing, deploy).
 Lưu ý an toàn khi code
-Không hardcode GROQ_API_KEY hay bất kỳ secret nào vào code — luôn đọc từ .env.
+Không hardcode OPENAI_API_KEY hay bất kỳ secret nào vào code — luôn đọc từ .env.
 Khi agent thao tác với Google Calendar hoặc tạo nhắc nhở, giữ nguyên bước xác nhận người dùng trước khi gọi API thật; đây là yêu cầu thiết kế cốt lõi của sản phẩm (human-in-the-loop), không phải chi tiết có thể lược bỏ để "cho gọn".

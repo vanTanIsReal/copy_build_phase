@@ -17,10 +17,18 @@ class ChatRequest(BaseModel):
         default=None,
         description="Raw message history to summarize (read by summarize_conversation via state)",
     )
+    conversation_id: str | None = Field(
+        default=None,
+        description=(
+            "If `messages` come from a real 1-1/group chat conversation, its id - the server "
+            "verifies the caller is actually a participant before letting the agent see them, "
+            "rather than trusting whatever `messages` the client attached."
+        ),
+    )
 
 
 class InterruptPayload(BaseModel):
-    type: Literal["calendar_event", "reminder"]
+    type: Literal["calendar_event", "calendar_event_update", "calendar_event_delete", "reminder"]
     draft: dict
 
 
@@ -28,7 +36,7 @@ class ChatResponse(BaseModel):
     response: str = Field(default="", description="Phản hồi từ agent")
     analysis: str = Field(default="", description="Phân tích nội bộ")
     thread_id: str
-    status: Literal["completed", "interrupted"] = "completed"
+    status: Literal["completed", "interrupted", "error"] = "completed"
     interrupt: InterruptPayload | None = None
 
 

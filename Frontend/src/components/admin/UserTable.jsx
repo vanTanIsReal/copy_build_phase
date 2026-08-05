@@ -1,5 +1,6 @@
 import Avatar from '../common/Avatar'
 import { getInitials, getColor } from '../../utils/avatar'
+import { formatDateShort } from '../../utils/datetime'
 
 export default function UserTable({ users, currentUserId, onToggleRole, onToggleStatus }) {
   return (
@@ -14,7 +15,7 @@ export default function UserTable({ users, currentUserId, onToggleRole, onToggle
                 <td><div className="d-flex align-items-center gap-2"><Avatar initials={getInitials(u.display_name)} color={getColor(u.id)} size={34} /><div><strong>{u.display_name}</strong><small className="d-block text-muted">{u.email}</small></div></div></td>
                 <td><span className={`soft-badge ${u.role === 'admin' ? 'danger' : 'info'}`}>{u.role}</span></td>
                 <td><span className={`status-badge ${u.is_active ? 'success' : 'secondary'}`}>{u.is_active ? 'Active' : 'Locked'}</span></td>
-                <td>{new Date(u.created_at).toLocaleDateString()}</td>
+                <td>{formatDateShort(u.created_at)}</td>
                 <td>
                   <div className="d-flex gap-2 justify-content-end">
                     <button className="btn btn-sm btn-light" disabled={isSelf} onClick={() => onToggleRole(u)}>

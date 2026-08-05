@@ -10,11 +10,14 @@ Usage:
        server only ever refreshes this token - it never launches an interactive
        browser flow mid-request.
 """
+import sys
 from pathlib import Path
 
-from google_auth_oauthlib.flow import InstalledAppFlow
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.config import get_settings
+from google_auth_oauthlib.flow import InstalledAppFlow  # noqa: E402
+
+from src.config import get_settings  # noqa: E402
 
 _SCOPES = ["https://www.googleapis.com/auth/calendar"]
 

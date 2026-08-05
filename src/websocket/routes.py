@@ -1,13 +1,26 @@
+import asyncio
+
 import jwt
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from src.auth.security import decode_access_token
 from src.db import session as db_session
 from src.db.models import User
-from src.services import chat_service
+from src.services import chat_service, proactive_service
 from src.websocket.manager import manager
 
 router = APIRouter()
+
+# asyncio.create_task() results must be held onto - an unreferenced task can be garbage
+# collected mid-run. Fire-and-forget background jobs (proactive detection) get parked here
+# and self-remove via add_done_callback once finished.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _run_in_background(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 @router.websocket("/ws")
@@ -56,6 +69,11 @@ async def chat_websocket(websocket: WebSocket) -> None:
 
             await manager.broadcast_to_users(
                 participant_ids, {"type": "new_message", "message": message_out.model_dump()}
+            )
+            _run_in_background(
+                proactive_service.maybe_suggest_task(
+                    conversation_id=conversation_id, sender_id=user_id, content=content
+                )
             )
     except WebSocketDisconnect:
         pass

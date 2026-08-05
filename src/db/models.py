@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base
@@ -24,6 +24,9 @@ class User(Base):
     display_name: Mapped[str]
     role: Mapped[str] = mapped_column(default="user")  # "user" | "admin"
     is_active: Mapped[bool] = mapped_column(default=True)
+    job_title: Mapped[str] = mapped_column(default="")
+    timezone: Mapped[str] = mapped_column(default="Asia/Ho_Chi_Minh")
+    preferences: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
@@ -79,3 +82,74 @@ class Message(Base):
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
     sender: Mapped["User"] = relationship()
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id"), default=None)
+    title: Mapped[str]
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    priority: Mapped[str] = mapped_column(default="Medium")  # "High" | "Medium" | "Low"
+    status: Mapped[str] = mapped_column(default="suggested")
+    # "suggested" | "pending" | "in_progress" | "completed" | "dismissed"
+    source: Mapped[str] = mapped_column(default="manual")  # "manual" | "proactive"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    owner: Mapped["User"] = relationship()
+    conversation: Mapped["Conversation | None"] = relationship()
+
+
+class UsageLog(Base):
+    __tablename__ = "usage_logs"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
+    provider: Mapped[str]
+    model: Mapped[str]
+    prompt_tokens: Mapped[int] = mapped_column(default=0)
+    completion_tokens: Mapped[int] = mapped_column(default=0)
+    total_tokens: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+
+
+class Memory(Base):
+    __tablename__ = "memories"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    category: Mapped[str] = mapped_column(default="Preference")  # "Work" | "Preference" | "People" | ...
+    title: Mapped[str]
+    detail: Mapped[str] = mapped_column(default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    owner: Mapped["User"] = relationship()
+
+
+class CalendarSyncState(Base):
+    """Single-row table (id is always "default") holding the Google Calendar incremental sync
+    cursor, so calendar_service.poll_calendar_changes can resume where it left off across polls
+    and server restarts instead of re-scanning the whole calendar every time."""
+
+    __tablename__ = "calendar_sync_state"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: "default")
+    sync_token: Mapped[str | None] = mapped_column(default=None)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+class Reminder(Base):
+    __tablename__ = "reminders"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
+    owner_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), default=None, index=True)
+    title: Mapped[str]
+    message: Mapped[str] = mapped_column(default="")
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    fire_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(default="scheduled")  # "scheduled" | "fired" | "cancelled"
+    source: Mapped[str] = mapped_column(default="manual")  # "manual" | "agent"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    owner: Mapped["User | None"] = relationship()

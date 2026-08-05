@@ -18,3 +18,21 @@ export const getConversationMessages = (token, conversationId) =>
 
 export const deleteConversation = (token, conversationId) =>
   apiFetch(`/admin/conversations/${conversationId}`, { method: 'DELETE', token })
+
+export const listTasks = (token, ownerId) =>
+  apiFetch(`/admin/tasks${ownerId ? `?owner_id=${encodeURIComponent(ownerId)}` : ''}`, { token })
+
+export const deleteTask = (token, taskId) =>
+  apiFetch(`/admin/tasks/${taskId}`, { method: 'DELETE', token })
+
+export const listReminders = (token, ownerId) =>
+  apiFetch(`/admin/reminders${ownerId ? `?owner_id=${encodeURIComponent(ownerId)}` : ''}`, { token })
+
+export const deleteReminder = (token, reminderId) =>
+  apiFetch(`/admin/reminders/${reminderId}`, { method: 'DELETE', token })
+
+export const listMemories = (token, ownerId) =>
+  apiFetch(`/admin/memories${ownerId ? `?owner_id=${encodeURIComponent(ownerId)}` : ''}`, { token })
+
+export const deleteMemory = (token, memoryId) =>
+  apiFetch(`/admin/memories/${memoryId}`, { method: 'DELETE', token })

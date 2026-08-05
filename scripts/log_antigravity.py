@@ -211,16 +211,10 @@ def iter_user_inputs(brain_dirs: list[Path], cutoff: datetime | None,
                 continue
             if only_conv and conv_dir.name != only_conv:
                 continue
-<<<<<<< HEAD
-            transcript = (
-                conv_dir / ".system_generated" / "logs" / "transcript.jsonl"
-            )
-=======
             logs_dir = conv_dir / ".system_generated" / "logs"
             transcript = logs_dir / "overview.txt"
             if not transcript.exists():
                 transcript = logs_dir / "transcript.jsonl"
->>>>>>> ab15d9c65d6bfab91b29765620ad85dd5382ad33
             if not transcript.exists() or transcript.stat().st_size == 0:
                 continue
 

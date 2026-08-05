@@ -21,9 +21,11 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
 
     # LLM (OpenAI)
+    llm_provider: Literal["openai"] = "openai"
     openai_api_key: str = ""
     model_name: str = "gpt-4o-mini"
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    daily_token_budget: int = Field(default=200_000, ge=0)
 
     # Database
     database_url: str = "sqlite:///./data/app.db"
@@ -55,6 +57,10 @@ class Settings(BaseSettings):
 
     # Reminders / scheduler
     scheduler_timezone: str = "Asia/Ho_Chi_Minh"
+
+    # Calendar polling (no public HTTPS URL yet for Google's real push/webhook channels, so
+    # changes made directly in Google Calendar are picked up by polling with a syncToken instead)
+    calendar_poll_interval_seconds: int = Field(default=20, ge=5)
 
 
 @lru_cache

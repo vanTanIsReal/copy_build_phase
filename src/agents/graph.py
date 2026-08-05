@@ -1,10 +1,20 @@
+from langchain_core.messages import ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
+from psycopg_pool import AsyncConnectionPool
 
 from src.agents.nodes.planner_node import planner_node
 from src.agents.state import AgentState
 from src.agents.tools import ALL_TOOLS
+from src.config import get_settings
+
+# Tools whose own output is already the final answer - no confirmation needed and no benefit
+# from a second LLM pass to "relay" it. Routing straight to END after these avoids that second
+# pass, which some models handle poorly (observed: hallucinating a bogus repeat tool-call instead
+# of plain text). Calendar/reminder tools still go back through planner - their raw output isn't
+# user-facing prose, and human-in-the-loop confirmation flows need that turn.
+TERMINAL_TOOLS = {"summarize_conversation", "extract_tasks"}
 
 
 def route_after_planner(state: AgentState) -> str:
@@ -14,7 +24,16 @@ def route_after_planner(state: AgentState) -> str:
     return tools_condition(state)
 
 
-def build_graph():
+def route_after_tools(state: AgentState) -> str:
+    """End immediately after a terminal tool (its output is the final answer); otherwise loop
+    back to the planner so it can phrase a reply or decide on further tool calls."""
+    last = state["messages"][-1]
+    if isinstance(last, ToolMessage) and last.name in TERMINAL_TOOLS:
+        return END
+    return "planner"
+
+
+def build_graph(checkpointer):
     graph = StateGraph(AgentState)
 
     graph.add_node("planner", planner_node)
@@ -22,9 +41,49 @@ def build_graph():
 
     graph.set_entry_point("planner")
     graph.add_conditional_edges("planner", route_after_planner, {"tools": "tools", END: END})
-    graph.add_edge("tools", "planner")
+    graph.add_conditional_edges("tools", route_after_tools, {"planner": "planner", END: END})
 
-    return graph.compile(checkpointer=MemorySaver())
+    return graph.compile(checkpointer=checkpointer)
 
 
-agent = build_graph()
+_settings = get_settings()
+_use_postgres = _settings.database_url.startswith("postgresql")
+
+# `AsyncPostgresSaver` must be constructed inside a *running* event loop (it calls
+# asyncio.get_running_loop() in __init__), which isn't available yet at module-import time -
+# so the Postgres path is built later, from init_checkpointer() during FastAPI's lifespan.
+# The default MemorySaver has no such requirement, so it (and `agent`) is ready immediately,
+# same as before - teammates on the default SQLite setup and the test suite (which never
+# awaits an init hook) are unaffected.
+if _use_postgres:
+    checkpointer, checkpointer_pool, agent = None, None, None
+else:
+    checkpointer, checkpointer_pool = MemorySaver(), None
+    agent = build_graph(checkpointer)
+
+
+async def init_checkpointer() -> None:
+    """Build the Postgres checkpointer/pool and compile `agent` with it. No-op when
+    DATABASE_URL isn't Postgres (agent is already built). Must be awaited once, inside the
+    event loop that will go on to serve requests, before any /chat call."""
+    global checkpointer, checkpointer_pool, agent
+    if not _use_postgres:
+        return
+
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+    scheme, _, rest = _settings.database_url.partition("://")
+    conninfo = f"{scheme.split('+')[0]}://{rest}"
+    pool = AsyncConnectionPool(conninfo=conninfo, max_size=10, open=False, kwargs={"autocommit": True})
+    await pool.open()
+    saver = AsyncPostgresSaver(pool)
+    await saver.setup()
+
+    checkpointer_pool = pool
+    checkpointer = saver
+    agent = build_graph(checkpointer)
+
+
+async def close_checkpointer() -> None:
+    if checkpointer_pool is not None:
+        await checkpointer_pool.close()

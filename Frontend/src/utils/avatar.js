@@ -1,4 +1,10 @@
+import { HANOI_TZ, formatClock, formatDateShort } from './datetime'
+
 const PALETTE = ['#526ff5', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899']
+
+function hanoiDateKey(date) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: HANOI_TZ }).format(date)
+}
 
 export function getInitials(name) {
   return (name || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase()
@@ -15,9 +21,8 @@ export function formatTime(iso) {
   if (!iso) return ''
   const date = new Date(iso)
   const now = new Date()
-  const sameDay = date.toDateString() === now.toDateString()
-  if (sameDay) return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1)
-  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday'
-  return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  if (hanoiDateKey(date) === hanoiDateKey(now)) return formatClock(iso)
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  if (hanoiDateKey(date) === hanoiDateKey(yesterday)) return 'Yesterday'
+  return formatDateShort(iso)
 }
