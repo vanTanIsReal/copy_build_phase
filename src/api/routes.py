@@ -31,6 +31,9 @@ def _format_messages(messages: list[ChatMessage]) -> str:
 
 
 def _build_chat_response(result: dict, thread_id: str) -> ChatResponse:
+    if result.get("error"):
+        raise HTTPException(status_code=502, detail=f"AI agent failed: {result['error']}")
+
     interrupts = result.get("__interrupt__")
     if interrupts:
         payload = interrupts[0].value
@@ -40,10 +43,6 @@ def _build_chat_response(result: dict, thread_id: str) -> ChatResponse:
             status="interrupted",
             interrupt=InterruptPayload(**payload),
         )
-
-    error = result.get("error")
-    if error:
-        return ChatResponse(response=error, thread_id=thread_id, status="error")
 
     final_text = ""
     for m in reversed(result.get("messages", [])):
@@ -72,7 +71,18 @@ async def chat(
     _thread_owners.setdefault(thread_id, current_user.id)
     config = {"configurable": {"thread_id": thread_id}}
     context_text = _format_messages(request.messages) if request.messages else ""
-    inputs = {"messages": [HumanMessage(content=request.message)], "context": context_text, "user_id": current_user.id}
+    user_content = request.message
+    if context_text:
+        user_content = (
+            f"{request.message}\n\n"
+            "Use the following conversation as context for this request:\n"
+            f"---\n{context_text}\n---"
+        )
+    inputs = {
+        "messages": [HumanMessage(content=user_content)],
+        "context": context_text,
+        "user_id": current_user.id,
+    }
     try:
         result = await agent_graph.agent.ainvoke(inputs, config)
     except Exception as e:
