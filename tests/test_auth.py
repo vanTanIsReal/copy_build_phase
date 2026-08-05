@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 
@@ -50,6 +52,25 @@ async def test_me_with_token(client, auth_headers):
     resp = await client.get("/api/v1/auth/me", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json()["email"] == "alice@example.com"
+
+
+@pytest.mark.asyncio
+async def test_login_promotes_existing_user_to_initial_admin(client, monkeypatch):
+    payload = {"email": "admin@example.com", "password": "password123", "display_name": "Admin User"}
+    await client.post("/api/v1/auth/register", json=payload)
+
+    monkeypatch.setattr(
+        "src.api.auth_routes.get_settings",
+        lambda: SimpleNamespace(initial_admin_email="admin@example.com"),
+    )
+
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": payload["email"], "password": payload["password"]},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["user"]["role"] == "admin"
 
 
 @pytest.mark.asyncio

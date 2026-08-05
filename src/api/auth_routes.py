@@ -35,6 +35,11 @@ def _to_public(user: User) -> UserPublic:
     return UserPublic(id=user.id, email=user.email, display_name=user.display_name, role=user.role)
 
 
+def _resolve_role(email: str, settings) -> str:
+    initial_admin_email = settings.initial_admin_email.strip().lower()
+    return "admin" if initial_admin_email and email.lower() == initial_admin_email else "user"
+
+
 @router.post("/register", response_model=AuthResponse)
 async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
     existing = (await db.execute(select(User).where(User.email == request.email))).scalar_one_or_none()
@@ -42,8 +47,7 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
     settings = get_settings()
-    initial_admin_email = settings.initial_admin_email.strip().lower()
-    role = "admin" if initial_admin_email and request.email.lower() == initial_admin_email else "user"
+    role = _resolve_role(request.email, settings)
 
     user = User(
         email=request.email,
@@ -64,6 +68,13 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)) -> Au
     user = (await db.execute(select(User).where(User.email == request.email))).scalar_one_or_none()
     if user is None or not verify_password(request.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+    settings = get_settings()
+    desired_role = _resolve_role(request.email, settings)
+    if user.role != desired_role:
+        user.role = desired_role
+        await db.commit()
+        await db.refresh(user)
 
     token = create_access_token(user.id)
     return AuthResponse(access_token=token, user=_to_public(user))

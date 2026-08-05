@@ -18,8 +18,9 @@ VN_TZ = timezone(timedelta(hours=7))
 
 def git(*args: str) -> str:
     try:
+        repo_cwd = Path(__file__).resolve().parent.parent
         return subprocess.check_output(
-            ["git", *args], text=True, stderr=subprocess.DEVNULL
+            ["git", *args], text=True, stderr=subprocess.DEVNULL, cwd=repo_cwd
         ).strip()
     except Exception:
         return ""
@@ -100,7 +101,7 @@ def main():
     log_file = log_dir / "session.jsonl"
     seen = logged_ids(log_file)
     cutoff = None if args.all else datetime.now(timezone.utc) - timedelta(hours=args.hours)
-    repo_root = norm_path(str(Path.cwd().resolve()))
+    repo_root = norm_path(str(Path(__file__).resolve().parent.parent))
     repo = git("remote", "get-url", "origin").split("/")[-1].removesuffix(".git")
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
     commit = git("rev-parse", "--short", "HEAD")

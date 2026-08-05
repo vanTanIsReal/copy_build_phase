@@ -11,11 +11,14 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 VN_TZ = timezone(timedelta(hours=7))
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def git(cmd):
+def git(cmd, cwd: Path | None = None):
+    if cwd is None:
+        cwd = REPO_ROOT
     try:
-        return subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.DEVNULL).strip()
+        return subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.DEVNULL, cwd=cwd).strip()
     except Exception:
         return ""
 
