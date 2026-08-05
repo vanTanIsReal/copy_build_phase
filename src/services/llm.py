@@ -1,12 +1,12 @@
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 
 from src.config import get_settings
 
 
-def get_llm() -> ChatGroq:
+def get_llm() -> ChatOpenAI:
     settings = get_settings()
-    return ChatGroq(
+    return ChatOpenAI(
         model=settings.model_name,
-        api_key=settings.groq_api_key,
+        api_key=settings.openai_api_key,
         temperature=settings.llm_temperature,
     )

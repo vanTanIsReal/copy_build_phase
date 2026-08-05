@@ -20,9 +20,9 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     cors_origins: str = "http://localhost:3000"
 
-    # LLM (Groq)
-    groq_api_key: str = ""
-    model_name: str = "llama-3.3-70b-versatile"
+    # LLM (OpenAI)
+    openai_api_key: str = ""
+    model_name: str = "gpt-4o-mini"
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
 
     # Database

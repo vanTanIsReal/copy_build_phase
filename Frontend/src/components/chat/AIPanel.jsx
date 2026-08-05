@@ -17,20 +17,39 @@ export default function AIPanel({ open, onClose, messages = [], granted = false,
   const [scope, setScope] = useState('20 latest messages')
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState('')
+  const [resultTitle, setResultTitle] = useState('Summary')
   const [error, setError] = useState('')
+  const [question, setQuestion] = useState('')
+
+  const scopedMessages = () => {
+    const count = scopeToCount[scope]
+    return count ? messages.slice(-count) : messages
+  }
+
+  const contextPayload = () => scopedMessages().map(m => ({
+    role: 'user', sender: m.sender_name, content: m.content, timestamp: m.created_at,
+  }))
 
   const runSummarize = async () => {
     if (!messages.length) { setError('No messages in this conversation yet.'); setResult(''); return }
-    const count = scopeToCount[scope]
-    const scoped = count ? messages.slice(-count) : messages
     setRunning(true); setError(''); setResult('')
     try {
-      const res = await chatWithAgent(token, {
-        message: 'Summarize this conversation.',
-        messages: scoped.map(m => ({ role: 'user', sender: m.sender_name, content: m.content, timestamp: m.created_at })),
-      })
-      setResult(res.response)
+      const res = await chatWithAgent(token, { message: 'Summarize this conversation.', messages: contextPayload() })
+      setResultTitle('Summary'); setResult(res.response)
     } catch (err) { setError(err.detail || 'Could not summarize this conversation.') }
+    finally { setRunning(false) }
+  }
+
+  const askOrbit = async (value = question) => {
+    const text = typeof value === 'string' ? value.trim() : ''
+    if (!text || running || !granted) return
+    setRunning(true); setError(''); setResult('')
+    try {
+      const res = await chatWithAgent(token, { message: text, messages: contextPayload() })
+      setResultTitle('Orbit')
+      setResult(res.response || 'Orbit returned an empty response.')
+      setQuestion('')
+    } catch (err) { setError(err.detail || 'Could not ask Orbit about this conversation.') }
     finally { setRunning(false) }
   }
 
@@ -44,9 +63,9 @@ export default function AIPanel({ open, onClose, messages = [], granted = false,
       <div className="ai-section-title"><span>Quick actions</span><i className="bi bi-lightning-charge-fill"/></div>
       <div className="quick-grid">{actions.map(([icon,title,sub,color])=><motion.button key={title} whileHover={{y:-2}} whileTap={{scale:.98}} disabled={!granted || (title==='Summarize' && running)} onClick={title==='Summarize' ? runSummarize : undefined}><span style={{color,background:`${color}12`}}><i className={`bi ${title==='Summarize' && running ? 'bi-hourglass-split' : icon}`}/></span><strong>{title}</strong><small>{title==='Summarize' && running ? 'Summarizing...' : sub}</small></motion.button>)}</div>
       {error && <div className="auth-error">{error}</div>}
-      {result && <div className="border rounded-3 p-3 mt-2 small"><strong className="d-block mb-1">Summary</strong>{result}</div>}
-      <div className="ask-card"><div className="ask-title"><span><i className="bi bi-stars"/></span><div><strong>Ask Orbit</strong><small>About this conversation</small></div></div><textarea disabled={!granted} placeholder={granted ? 'Ask anything about this conversation...' : 'Allow AI access to ask about this chat'} /><div className="ask-footer"><span>AI may make mistakes</span><button disabled={!granted}><i className="bi bi-arrow-up"/></button></div></div>
-      <div className="suggested-prompts"><span>Try asking</span><button>“What decisions were made today?”</button><button>“Who assigned me tasks?”</button></div>
+      {result && <div className="border rounded-3 p-3 mt-2 small"><strong className="d-block mb-1">{resultTitle}</strong>{result}</div>}
+      <div className="ask-card"><div className="ask-title"><span><i className="bi bi-stars"/></span><div><strong>Ask Orbit</strong><small>About this conversation</small></div></div><textarea value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();askOrbit()}}} disabled={!granted||running} placeholder={granted ? 'Ask anything about this conversation...' : 'Allow AI access to ask about this chat'} /><div className="ask-footer"><span>AI may make mistakes</span><button type="button" onClick={()=>askOrbit()} disabled={!granted||running||!question.trim()} aria-label="Ask Orbit"><i className={`bi ${running?'bi-hourglass-split':'bi-arrow-up'}`}/></button></div></div>
+      <div className="suggested-prompts"><span>Try asking</span><button type="button" disabled={!granted||running} onClick={()=>askOrbit('What decisions were made today?')}>“What decisions were made today?”</button><button type="button" disabled={!granted||running} onClick={()=>askOrbit('Who assigned me tasks?')}>“Who assigned me tasks?”</button></div>
     </aside></>
   )
 }

@@ -47,7 +47,7 @@ Kiến trúc thư mục
         └── router/                    # React Router + ProtectedRoute
 Công nghệ sử dụng
 Layer	Công nghệ
-AI Agent	LangGraph + LangChain (Groq)
+AI Agent	LangGraph + LangChain (OpenAI, `gpt-4o-mini`)
 Backend	FastAPI, SQLAlchemy (async) + SQLite, JWT (PyJWT) + bcrypt, WebSocket
 Frontend	React 18, Vite, React Router, React Hook Form, Bootstrap 5, Framer Motion
 Test	pytest, pytest-asyncio, httpx
