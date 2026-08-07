@@ -1,0 +1,42 @@
+services:
+  # ---- Backend Web Service (FastAPI + LangGraph) ----
+  - type: web
+    name: orbit-backend
+    env: docker
+    dockerfilePath: Dockerfile
+    dockerContext: .
+    plan: free
+    region: singapore
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: orbit-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: POSTGRES_PASSWORD
+        generateValue: true
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        value: "*"
+
+  # ---- Frontend Web Service (React + Nginx) ----
+  - type: web
+    name: orbit-frontend
+    env: docker
+    dockerfilePath: Frontend/Dockerfile
+    dockerContext: ./Frontend
+    plan: free
+    region: singapore
+
+databases:
+  # ---- Managed PostgreSQL Database ----
+  - name: orbit-db
+    databaseName: orbit
+    user: orbit
+    plan: free
+    region: singapore
