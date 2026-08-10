@@ -4,7 +4,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Command
 
-from src.agents.graph import agent
+from src.agents import graph as agent_graph
 
 
 def _config():
@@ -17,7 +17,7 @@ async def test_agent_basic_flow_no_tool_call(monkeypatch, fake_llm_factory):
     llm = fake_llm_factory([reply])
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
-    result = await agent.ainvoke({"messages": [HumanMessage(content="Hello")]}, _config())
+    result = await agent_graph.agent.ainvoke({"messages": [HumanMessage(content="Hello")]}, _config())
 
     assert "__interrupt__" not in result
     assert result["messages"][-1].content == "Just a plain reply, no tools needed."
@@ -70,10 +70,10 @@ async def test_agent_interrupt_then_resume_round_trip(monkeypatch, fake_llm_fact
     monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
 
     config = _config()
-    result = await agent.ainvoke({"messages": [HumanMessage(content="book a sync")]}, config)
+    result = await agent_graph.agent.ainvoke({"messages": [HumanMessage(content="book a sync")]}, config)
     assert result["__interrupt__"][0].value["type"] == "calendar_event"
 
-    result2 = await agent.ainvoke(Command(resume={"approved": True}), config)
+    result2 = await agent_graph.agent.ainvoke(Command(resume={"approved": True}), config)
     assert "Event created" in result2["messages"][-1].content
 
 
@@ -95,7 +95,7 @@ async def test_terminal_tool_ends_without_second_llm_call(monkeypatch, fake_llm_
     )
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: planner_llm)
 
-    result = await agent.ainvoke(
+    result = await agent_graph.agent.ainvoke(
         {"messages": [HumanMessage(content="Summarize this.")], "context": "Alice: hi\nBob: hello"}, _config()
     )
 

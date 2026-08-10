@@ -54,3 +54,13 @@ class MessageListResponse(BaseModel):
 
 class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=5000)
+
+
+class AIPermissionOut(BaseModel):
+    conversation_id: str
+    granted: bool
+    updated_at: str | None = None
+
+
+class AIPermissionUpdateRequest(BaseModel):
+    granted: bool

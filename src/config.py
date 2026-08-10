@@ -20,31 +20,29 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     cors_origins: str = "http://localhost:3000"
 
-    # LLM (OpenAI)
-    llm_provider: Literal["openai"] = "openai"
+    # LLM
+    llm_provider: Literal["google", "groq", "openai"] = "google"
+    google_api_key: str = ""
+    groq_api_key: str = ""
     openai_api_key: str = ""
-    model_name: str = "gpt-4o-mini"
+    model_name: str = "gemini-2.5-flash"
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     daily_token_budget: int = Field(default=200_000, ge=0)
 
-    # Database
-    database_url: str = "sqlite:///./data/app.db"
+    # Database — PostgreSQL only, no SQLite fallback. Required: no default, so a missing/misconfigured
+    # DATABASE_URL fails fast at startup instead of silently falling back to a file-based DB.
+    database_url: str
 
     # Auth
     secret_key: str = "dev-insecure-secret-change-me"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
     initial_admin_email: str = ""
-    password_reset_expire_minutes: int = 30
-    frontend_url: str = "http://localhost:5173"
-
-    # Email / password reset
-    smtp_host: str = ""
-    smtp_port: int = Field(default=587, ge=1, le=65535)
-    smtp_username: str = ""
-    smtp_password: str = ""
-    smtp_from_email: str = ""
-    smtp_use_tls: bool = True
+    # "Sign in with Google" - Web application OAuth Client ID (audience for ID-token verification).
+    # Distinct from google_credentials_path/google_token_path below (those are for the Calendar
+    # integration's single shared Desktop-app token, unrelated to per-user login). No client secret
+    # needed - only ID-token verification, never an authorization-code exchange.
+    google_oauth_client_id: str = ""
 
     # Vector Store
     chroma_persist_dir: str = "./data/chroma"

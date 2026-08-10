@@ -30,14 +30,20 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
-class PasswordResetToken(Base):
-    __tablename__ = "password_reset_tokens"
+class GoogleIdentity(Base):
+    """Links a User to the Google account they signed in with (Sign in with Google) - kept as its
+    own table rather than columns on User so this feature needs no ALTER on the existing users
+    table (this repo has no Alembic; Base.metadata.create_all() only creates missing tables).
+
+    Unrelated to the app's other Google integration (Calendar sync, src/services/calendar_service.py) -
+    that's one shared service-account token for the whole app, not a per-user login identity."""
+
+    __tablename__ = "google_identities"
 
     id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    token_hash: Mapped[str] = mapped_column(unique=True, index=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
-    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
+    google_sub: Mapped[str] = mapped_column(unique=True, index=True)  # Google's stable subject id
+    email: Mapped[str] = mapped_column(default="")  # snapshot at link time, for audit only
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     user: Mapped["User"] = relationship()
@@ -69,6 +75,20 @@ class ConversationParticipant(Base):
 
     conversation: Mapped["Conversation"] = relationship(back_populates="participants")
     user: Mapped["User"] = relationship()
+
+
+class AIPermission(Base):
+    """Per (conversation, user) consent for the AI agent to read that conversation's messages.
+
+    Keyed per-user rather than per-conversation: each participant grants/revokes independently for
+    themselves, no consensus from other members required."""
+
+    __tablename__ = "ai_permissions"
+
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    granted: Mapped[bool] = mapped_column(default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
 
 class Message(Base):
@@ -149,7 +169,7 @@ class Reminder(Base):
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     fire_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(default="scheduled")  # "scheduled" | "fired" | "cancelled"
-    source: Mapped[str] = mapped_column(default="manual")  # "manual" | "agent"
+    source: Mapped[str] = mapped_column(default="manual")  # "manual" | "agent" | "proactive"
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     owner: Mapped["User | None"] = relationship()

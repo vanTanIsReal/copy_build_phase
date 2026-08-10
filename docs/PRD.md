@@ -35,8 +35,13 @@ dùng rời khỏi app chat và không bao giờ tự ý hành động thay họ
 - [x] Đăng ký bằng email + mật khẩu, mật khẩu hash bằng **bcrypt** (không lưu plaintext).
 - [x] Đăng nhập trả **JWT access token**; frontend gửi qua `Authorization: Bearer`.
 - [x] Mọi route ứng dụng nằm sau `ProtectedRoute`; chưa đăng nhập → redirect `/login`.
-- [x] Hai role: `user` và `admin`. Admin đầu tiên bootstrap qua `INITIAL_ADMIN_EMAIL`.
+- [x] Hai role: `user` và `admin`. Admin đầu tiên bootstrap qua `INITIAL_ADMIN_EMAIL` (áp dụng cho
+      cả tài khoản tạo qua Google, không riêng `/register`).
 - [x] Route `/admin/*` chặn bằng `AdminRoute` (FE) **và** `require_admin` dependency (BE).
+- [x] **Đăng nhập bằng Google** (cộng thêm, không thay email/mật khẩu): `POST /auth/google` xác
+      minh ID token, find-or-create qua bảng `google_identities` riêng — không đổi cấu trúc bảng
+      `users`/JWT hiện có. Chỉ tự liên kết vào tài khoản mật khẩu có sẵn khi Google xác nhận
+      `email_verified`.
 
 ### US-2 — Nhắn tin 1-1 và nhóm realtime 🟢
 
@@ -91,16 +96,20 @@ dùng rời khỏi app chat và không bao giờ tự ý hành động thay họ
 
 **Là** người dùng, **tôi muốn** agent tự phát hiện cam kết ngay khi tin nhắn tới.
 
-- [x] Sau mỗi tin nhắn mới (cả REST lẫn WebSocket): pre-filter regex (VI+EN) → hỏi LLM xác nhận.
+- [x] Sau mỗi tin nhắn mới (cả REST lẫn WebSocket): pre-filter regex (VI+EN) → kiểm tra người gửi đã
+      cấp `ai_permissions` cho hội thoại đó chưa (tắt là bỏ qua, không gọi LLM) → hỏi LLM xác nhận.
 - [x] Nếu là cam kết/lịch hẹn → tạo `Task` (`source="proactive"`, `status="suggested"`) cho người gửi.
 - [x] Đẩy WebSocket `task_suggested` → toast trỏ tới Tasks inbox.
 - [x] Chạy nền (`asyncio.create_task` / `BackgroundTasks`), **không chặn gửi tin nhắn**, không raise
-      ra ngoài. Pre-filter regex trước khi gọi LLM là tối ưu chi phí thực tế của hệ thống.
+      ra ngoài. Pre-filter regex + kiểm tra quyền trước khi gọi LLM là tối ưu chi phí thực tế của hệ
+      thống.
+- [x] **Accept** một suggestion có `due_at` trong `/tasks` (chính là bước xác nhận human-in-the-loop)
+      tự tạo thêm 1 sự kiện Google Calendar thật + 1 Reminder thật (`task_routes.py::
+      _add_to_calendar_and_reminder`) — best-effort, lỗi Google Calendar không chặn việc Accept task.
 
 ### US-8 — Memory 🟢
 
-- [x] **Memory hội thoại**: LangGraph checkpointer — `AsyncPostgresSaver` khi `DATABASE_URL` là
-      Postgres (bền vững qua restart), fallback `MemorySaver` với SQLite.
+- [x] **Memory hội thoại**: LangGraph checkpointer — `AsyncPostgresSaver`, bền vững qua restart.
 - [x] **Memory dài hạn**: bảng `memories` (category/title/detail) + CRUD + trang `/memory` có
       search và tab lọc theo category sinh động từ dữ liệu thật.
 
@@ -130,7 +139,7 @@ dùng rời khỏi app chat và không bao giờ tự ý hành động thay họ
 | **Bảo mật** | Mật khẩu bcrypt; JWT; không hardcode secret (đọc từ `.env`) | 🟢 |
 | **Bảo mật** | `/chat` và `/chat/resume` yêu cầu đăng nhập + kiểm tra quyền sở hữu `thread_id` | 🟢 |
 | **Quyền riêng tư** | Backend verify người gọi là participant của `conversation_id` | 🟢 |
-| **Quyền riêng tư** | Bảng quyền `ai_permissions` theo từng conversation (toggle hiện tại chỉ là state React) | 🔴 |
+| **Quyền riêng tư** | Bảng quyền `ai_permissions` theo từng conversation, mặc định chưa cấp quyền, `POST /api/v1/chat` từ chối (403) khi chưa cấp | 🟢 |
 | **Quyền riêng tư** | Minh bạch: UI báo rõ nội dung tin nhắn được gửi sang Gemini/Groq | 🟢 |
 | **Quyền riêng tư** | Mã hoá E2E thật | ⚪ Ngoài phạm vi (ghi rõ trong ROADMAP) |
 | **Độ trễ/chi phí** | Chỉ tóm tắt khi người dùng yêu cầu; pre-filter regex trước LLM ở proactive | 🟢 |
@@ -153,6 +162,9 @@ erDiagram
     conversations ||--o{ conversation_participants : "có"
     conversations ||--o{ messages : "chứa"
     conversations ||--o{ tasks : "sinh ra"
+    conversations ||--o{ ai_permissions : "có"
+    users ||--o{ ai_permissions : "cấp quyền"
+    users ||--o| google_identities : "đăng nhập bằng"
 
     users {
         string id PK
@@ -230,6 +242,19 @@ erDiagram
         string sync_token
         datetime updated_at
     }
+    ai_permissions {
+        string conversation_id PK
+        string user_id PK
+        boolean granted
+        datetime updated_at
+    }
+    google_identities {
+        string id PK
+        string user_id FK
+        string google_sub UK
+        string email
+        datetime created_at
+    }
 ```
 
 `conversation_participants` dùng **khoá chính kép** `(conversation_id, user_id)` — cả hai đồng thời
@@ -241,19 +266,19 @@ là khoá ngoại.
 - `conversations.type`: `direct` | `group`
 - `tasks.status`: `suggested` | `pending` | `in_progress` | `completed` | `dismissed`
 - `tasks.source`: `manual` | `proactive` · `tasks.priority`: `High` | `Medium` | `Low`
-- `reminders.status`: `scheduled` | `fired` | `cancelled` · `reminders.source`: `manual` | `agent`
+- `reminders.status`: `scheduled` | `fired` | `cancelled` · `reminders.source`: `manual` | `agent` | `proactive`
 
 Sự kiện lịch **không lưu trong DB** — nguồn sự thật là Google Calendar; `calendar_sync_state` chỉ giữ
 con trỏ đồng bộ (1 dòng, `id="default"`).
 
 ## 6. API Surface
 
-Tất cả dưới prefix `/api/v1`, đều yêu cầu JWT trừ `/auth/register` và `/auth/login`.
+Tất cả dưới prefix `/api/v1`, đều yêu cầu JWT trừ `/auth/register`, `/auth/login`, `/auth/google`.
 
 | Nhóm | Endpoint |
 | --- | --- |
-| **Auth** | `POST /auth/register` · `POST /auth/login` · `GET /auth/me` · `PATCH /auth/me` · `POST /auth/me/password` |
-| **Chat** | `GET /users` · `GET|POST /conversations` · `GET|POST /conversations/{id}/messages` · `POST /conversations/{id}/read` |
+| **Auth** | `POST /auth/register` · `POST /auth/login` · `POST /auth/google` · `GET /auth/me` · `PATCH /auth/me` · `POST /auth/me/password` |
+| **Chat** | `GET /users` · `GET|POST /conversations` · `GET|POST /conversations/{id}/messages` · `POST /conversations/{id}/read` · `GET|PUT /conversations/{id}/ai-permission` |
 | **Agent** | `POST /chat` · `POST /chat/resume` · `GET /status` |
 | **Tasks** | `GET|POST /tasks` · `PATCH /tasks/{id}/status` · `DELETE /tasks/{id}` |
 | **Calendar** | `GET|POST /calendar/events` · `PATCH|DELETE /calendar/events/{id}` |
@@ -295,10 +320,9 @@ trả lời, không gọi LLM lần 2 (tránh lỗi model tự sinh giả cú ph
 
 - **LLM:** đổi provider qua `LLM_PROVIDER` (`google` → `gemini-2.5-flash`, hoặc `groq`) — thiết kế
   này sinh ra từ sự cố hết quota free-tier thật.
-- **Database:** PostgreSQL (mặc định hiện tại) hoặc SQLite cho dev nhanh. Trên Windows + Postgres
-  **phải** chạy `python scripts/run_dev.py` thay vì `uvicorn` CLI (`AsyncPostgresSaver` cần
-  `SelectorEventLoop`; uvicorn CLI trên Windows luôn chọn `ProactorEventLoop` trước khi app được
-  import).
+- **Database:** PostgreSQL (bắt buộc, không còn hỗ trợ SQLite). Trên Windows **phải** chạy
+  `python scripts/run_dev.py` thay vì `uvicorn` CLI (`AsyncPostgresSaver` cần `SelectorEventLoop`;
+  uvicorn CLI trên Windows luôn chọn `ProactorEventLoop` trước khi app được import).
 - **Backend:** FastAPI + SQLAlchemy async · **Frontend:** React 18 + Vite + Bootstrap 5.
 - **Scheduler:** APScheduler với `SQLAlchemyJobStore`, timezone `Asia/Ho_Chi_Minh`.
 
@@ -307,7 +331,7 @@ trả lời, không gọi LLM lần 2 (tránh lỗi model tự sinh giả cú ph
 | Rủi ro | Mức | Giảm thiểu |
 | --- | --- | --- |
 | Chưa deploy online — yêu cầu bắt buộc của đề bài | **Cao** | Ưu tiên #1 trong ROADMAP; Dockerfile/compose đã sẵn |
-| Toggle quyền AI chưa có thật ở backend | Trung bình | Bảng `ai_permissions` — ưu tiên #2 |
+| Người dùng quên cấp quyền AI, tưởng lỗi | Thấp | `AIPanel.jsx` disable quick action + báo rõ "Permission required" khi chưa cấp quyền cho hội thoại đó |
 | Eval trích task chỉ 8 case | Trung bình | Coi là bằng chứng ban đầu, không báo cáo như benchmark |
 | Không có rate limiting | Trung bình | Bắt buộc làm trước khi mở public |
 | Nội dung tin nhắn gửi sang LLM bên thứ ba | Trung bình | Minh bạch trong UI; không lưu nội dung thô ngoài DB của app |

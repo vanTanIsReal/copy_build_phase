@@ -1,9 +1,12 @@
+from datetime import datetime
 from typing import Annotated, Literal
+from zoneinfo import ZoneInfo
 
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
 from src.agents.state import AgentState
+from src.config import get_settings
 from src.services.llm import get_llm
 
 
@@ -27,6 +30,8 @@ async def summarize_conversation(
         "bullet_points": "at most 6 short bullet points",
     }
     style_label = style.replace("_", " ")
+    settings = get_settings()
+    now = datetime.now(ZoneInfo(settings.calendar_timezone))
     llm = get_llm()
     prompt = (
         f"Summarize the following conversation in a {style_label} style "
@@ -34,7 +39,9 @@ async def summarize_conversation(
         "restate it in other formats (no mixing brief + detailed + bullet points), and do "
         "not add any preamble or closing remarks — output only the summary itself. "
         "Write the summary in Vietnamese (tiếng Việt), regardless of what language the "
-        "conversation below is in.\n\n"
+        "conversation below is in. If you mention relative dates/times (\"tomorrow\", \"next "
+        f"Monday\"), resolve them against the current date and time, {now.strftime('%A, %Y-%m-%d %H:%M')} "
+        f"({settings.calendar_timezone}).\n\n"
         f"{text}"
     )
     result = await llm.ainvoke(prompt)

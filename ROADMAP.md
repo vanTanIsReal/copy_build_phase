@@ -15,12 +15,12 @@ thành.
 | Hiển thị lịch cá nhân | 🟢 Xong | `/calendar` gọi Google Calendar API thật (CRUD đầy đủ) |
 | Memory hội thoại | 🟢 Xong | `AsyncPostgresSaver` khi `DATABASE_URL` là Postgres — bền vững qua restart backend |
 | Xử lý lỗi cơ bản | 🟢 Xong | `ChatResponse` có `status: "error"` trả lỗi thật; agent không gọi LLM lần 2 gây lỗi 400 |
-| Agent chủ động phát hiện cam kết | 🟢 Xong | `proactive_service.py` — pre-filter regex + LLM xác nhận, tạo Task gợi ý, đẩy realtime |
+| Agent chủ động phát hiện cam kết | 🟢 Xong | `proactive_service.py` — pre-filter regex + kiểm tra `ai_permissions` của người gửi + LLM xác nhận, tạo Task gợi ý, đẩy realtime. Nhận task với due_at rồi bấm **Accept** trong `/tasks` (chính là bước xác nhận human-in-the-loop) sẽ tự tạo thêm sự kiện Google Calendar + Reminder thật (`task_routes.py::_add_to_calendar_and_reminder`) |
 | Đồng bộ Google Calendar 2 chiều | 🟢 Xong | Ghi (app→Google) qua REST/agent tool; đọc thay đổi từ Google qua polling `syncToken` (`poll_calendar_changes`, mỗi 20s) — xem ghi chú bên dưới về giới hạn |
-| Dashboard "inbox nhiệm vụ" ưu tiên | 🟡 Một phần | `/tasks` sort theo `due_at` + `priority` (`_sort_key` trong `task_routes.py`), nhưng chưa phải 1 view "inbox" tách riêng khỏi danh sách task thường |
-| Cảnh báo vượt hạn mức token/chi phí | 🟡 Một phần | `usage_logs` + banner cảnh báo đỏ khi ≥80% `DAILY_TOKEN_BUDGET` trên Admin dashboard — nhưng chỉ hiện khi admin **chủ động mở trang**, không có push/email, không tự chặn gọi LLM khi vượt |
-| Đánh giá độ chính xác trích xuất task | 🟢 Xong (mẫu nhỏ) | `scripts/eval_extract_tasks.py` — Precision/Recall/F1 = 100% trên 8 case tay (VI+EN); nên coi là bằng chứng ban đầu, chưa phải benchmark quy mô lớn |
-| Ràng buộc: quyền riêng tư tin nhắn / agent chỉ đọc hội thoại được cấp quyền | 🟡 Một phần | `/api/v1/chat` đã chặn user A mượn nội dung hội thoại của user B qua `conversation_id` giả; **nhưng** toggle "Grant/Revoke Permission" trong `AIPanel.jsx` vẫn chỉ là state React cục bộ, chưa có bảng quyền hay kiểm tra ở backend |
+| Dashboard "inbox nhiệm vụ" ưu tiên | 🟢 Xong | `/tasks/inbox` (`TaskInboxPage.jsx`, nav "Inbox" trong Sidebar) — view tách riêng khỏi `/tasks`, nhóm theo 4 mức ưu tiên (cần quyết định / quá hạn / sắp đến hạn trong 48h / priority cao), realtime qua cùng kênh WebSocket đã có |
+| Cảnh báo vượt hạn mức token/chi phí | 🟢 Xong | `usage_service._maybe_alert_budget` đẩy WebSocket `usage_budget_alert` tới mọi admin đang online ngay khi vượt 80%/100% (edge-triggered, không lặp lại nếu không có ngưỡng mới vượt) — hiện ở bất kỳ trang nào admin đang mở (`BudgetAlertToast`), không chỉ khi mở Admin dashboard; **và** `usage_service.is_over_budget()` chặn hẳn cuộc gọi LLM mới (`/chat`, proactive detection) một khi đã chạm ngân sách — `/chat/resume` cố tình được miễn trừ để không làm treo một hành động con người đã xác nhận rồi. Verify thật qua UI (không phải chỉ unit test): xem WORKLOG.md |
+| Đánh giá độ chính xác trích xuất task | 🟢 Xong (mẫu nhỏ) | `scripts/eval_extract_tasks.py` — chấm riêng title (P/R/F1) và **date accuracy** (`due_at` có resolve đúng "ngày mai"/"thứ Sáu này" theo ngày chạy thật không — 2 thứ lệch pha, title đúng không đảm bảo ngày đúng). Hiện tại: Title F1 = 100%, Date accuracy = 100% trên 8 case tay (VI+EN, 7/8 case có ngày); nên coi là bằng chứng ban đầu, chưa phải benchmark quy mô lớn |
+| Ràng buộc: quyền riêng tư tin nhắn / agent chỉ đọc hội thoại được cấp quyền | 🟢 Xong | `/api/v1/chat` chặn user A mượn nội dung hội thoại của user B qua `conversation_id` giả, **và** bảng `ai_permissions` thật (`conversation_id`, `user_id`, `granted`) — mặc định **chưa cấp quyền**, `POST /api/v1/chat` từ chối (403) đọc bất kỳ `conversation_id` nào chưa được chính người dùng đó cấp quyền qua `GET/PUT /conversations/{id}/ai-permission`. Nút bật/tắt trong `ConversationHeader.jsx` (badge cạnh tên hội thoại) và `AIPanel.jsx` dùng chung 1 nguồn trạng thái, gọi API thật. `proactive_service.maybe_suggest_task` (dò cam kết chạy nền trên mọi tin nhắn mới) cũng kiểm tra quyền này trước khi gọi LLM — tắt là AI không đọc kể cả khi chạy nền, không riêng gì lúc mở AI panel |
 | Ràng buộc: tối ưu độ trễ/chi phí (cache embedding, batch LLM call) | ⚪ Không áp dụng được | App không dùng vector store/embedding ở đâu cả nên không có gì để cache; pre-filter regex trước khi gọi LLM (proactive detection) là tối ưu duy nhất thực sự áp dụng được |
 | Ràng buộc: human-in-the-loop trước khi tạo/gửi lịch, nhắc việc | 🟢 Xong | `interrupt()` bắt buộc cho mọi tool có tác dụng phụ (calendar CRUD, `create_reminder`) |
 
@@ -32,17 +32,9 @@ thành.
    frontend lên Vercel, Postgres quản lý (Supabase/Railway Postgres); thêm
    `.github/workflows/deploy.yml`. Đây cũng là điều kiện để nâng cấp đồng bộ Calendar từ polling lên
    webhook `events.watch` thật của Google (cần domain public HTTPS).
-2. **Quyền AI đọc hội thoại theo từng conversation** — bảng `ai_permissions` thật
-   (conversation_id, user_id, granted) + endpoint `GET/PUT`, thay cho toggle local trong
-   `AIPanel.jsx`; `/api/v1/chat` kiểm tra quyền này trước khi cho agent đọc nội dung.
-3. **Cảnh báo token/chi phí chủ động hơn** — hiện chỉ là banner thụ động trên Admin dashboard; cân
-   nhắc gửi qua kênh khác (email/WebSocket cho riêng admin) khi vượt ngưỡng, hoặc tự động hạn chế
-   gọi LLM khi vượt `DAILY_TOKEN_BUDGET` thay vì chỉ cảnh báo.
-4. **Dashboard "inbox ưu tiên" tách riêng** — tận dụng dữ liệu Task đã có (priority + due_at +
-   nguồn proactive), effort thấp vì API đã đủ dữ liệu.
-5. **Mở rộng eval harness** — bộ 8 case tay hiện tại chỉ đủ làm bằng chứng ban đầu; nên thêm case
+2. **Mở rộng eval harness** — bộ 8 case tay hiện tại chỉ đủ làm bằng chứng ban đầu; nên thêm case
    thật từ hội thoại người dùng (ẩn danh) để đo chính xác hơn trước khi báo cáo con số cuối.
-6. **Rate limiting** — chưa có trên bất kỳ endpoint nào; cần trước khi mở public thật (mục 1).
+3. **Rate limiting** — chưa có trên bất kỳ endpoint nào; cần trước khi mở public thật (mục 1).
 
 ## Ngoài phạm vi (quyết định có chủ đích)
 

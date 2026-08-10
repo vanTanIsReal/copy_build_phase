@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from src.config import get_settings
 from src.db import session as db_session
 from src.db.models import Task
-from src.services import usage_service
+from src.services import chat_service, usage_service
 from src.services.llm import get_llm
 from src.websocket.manager import manager
 
@@ -36,12 +36,25 @@ async def maybe_suggest_task(*, conversation_id: str, sender_id: str, content: s
     """Best-effort, fire-and-forget: if a new message looks like it contains a personal
     commitment/appointment/deadline, ask the LLM to confirm and, if so, drop a 'suggested' Task
     (same review flow as the manual Extract tasks action) for the sender to Accept/Dismiss.
-    Never raises - a failure here must not affect message delivery.
+    Requires the sender to have granted AI permission for this conversation (ai_permissions) -
+    silently skips otherwise, same as the explicit /chat endpoint. Never raises - a failure here
+    must not affect message delivery.
     """
     if not _looks_like_commitment(content):
         return
 
     try:
+        async with db_session.async_session_maker() as db:
+            permission = await chat_service.get_ai_permission(db, conversation_id, sender_id)
+        if permission is None or not permission.granted:
+            return
+
+        # Ràng buộc đề bài: tối ưu chi phí - đây là lệnh gọi LLM tự động chạy nền trên MỌI tin
+        # nhắn mới (không phải người dùng chủ động bấm), nên là nơi cần chặn trước tiên khi đã
+        # vượt ngân sách; bỏ qua lặng lẽ giống các điều kiện guard khác ở trên, không phải lỗi.
+        if await usage_service.is_over_budget():
+            return
+
         settings = get_settings()
         llm = get_llm()
         prompt = (

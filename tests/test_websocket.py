@@ -11,16 +11,21 @@ def ws_client(client, monkeypatch):
 
     Websockets need Starlette's sync TestClient (httpx's AsyncClient/ASGITransport doesn't
     support them). Entering it as a context manager fires app lifespan, so `init_db()` is
-    stubbed out here - the in-memory DB/tables already exist via the `client` fixture, and we
-    don't want lifespan touching the real on-disk database during tests. Same reasoning for
-    `scheduler.start()`/`.shutdown()` - its SQLAlchemyJobStore would otherwise create a real
-    `apscheduler_jobs` table in the on-disk DB just from the lifespan firing.
+    stubbed out here - the schema already exists via the session-scoped `_test_database`
+    fixture, and re-running `create_all` is harmless but pointless. Same reasoning for
+    `scheduler.start()`/`.shutdown()` (would touch the real `apscheduler_jobs` table for no
+    reason) and `init_checkpointer()`/`close_checkpointer()` (the checkpointer pool is already
+    open for the whole test session via `_test_database` - calling `init_checkpointer()` again
+    here would open a second pool and rebind the shared `agent` to it, then `close_checkpointer()`
+    would close that pool on exit and break every `/chat` test that runs afterwards).
     """
 
-    async def _noop_init_db():
+    async def _noop():
         return None
 
-    monkeypatch.setattr("src.main.init_db", _noop_init_db)
+    monkeypatch.setattr("src.main.init_db", _noop)
+    monkeypatch.setattr("src.main.init_checkpointer", _noop)
+    monkeypatch.setattr("src.main.close_checkpointer", _noop)
     monkeypatch.setattr("src.main.scheduler.start", lambda *a, **k: None)
     monkeypatch.setattr("src.main.scheduler.shutdown", lambda *a, **k: None)
     with TestClient(app) as tc:

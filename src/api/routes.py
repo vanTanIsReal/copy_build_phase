@@ -10,7 +10,7 @@ from src.auth.dependencies import get_current_user
 from src.db.models import User
 from src.db.session import get_db
 from src.models.schemas import ChatMessage, ChatRequest, ChatResponse, InterruptPayload, ResumeRequest
-from src.services import chat_service
+from src.services import chat_service, usage_service
 
 router = APIRouter()
 
@@ -65,9 +65,27 @@ async def chat(
         # Don't trust the client's word that `messages` came from a conversation it's allowed to
         # see - verify current_user is actually a participant before the agent processes them.
         await chat_service.assert_participant(db, request.conversation_id, current_user.id)
+        # Being a participant isn't consent for the AI to read this conversation - that's a
+        # separate, explicit per-user grant (AIPanel's Grant/Revoke permission toggle).
+        await chat_service.assert_ai_permission(db, request.conversation_id, current_user.id)
 
     thread_id = request.thread_id or str(uuid4())
     _check_thread_owner(thread_id, current_user)
+
+    # Ràng buộc đề bài: "tối ưu chi phí" - chặn hẳn cuộc gọi LLM mới (không chỉ cảnh báo) một khi
+    # đã chạm daily_token_budget. Chỉ áp dụng cho lượt chat MỚI - resume_chat() bên dưới cố tình
+    # không chặn, vì nó hoàn tất một hành động con người đã bấm xác nhận rồi (human-in-the-loop),
+    # chặn ở đó sẽ để interrupt() treo lơ lửng không cách nào hoàn tất hay huỷ.
+    if await usage_service.is_over_budget():
+        return ChatResponse(
+            response=(
+                "Đã vượt hạn mức token/chi phí AI hôm nay. Vui lòng thử lại vào ngày mai hoặc "
+                "liên hệ admin để tăng hạn mức."
+            ),
+            thread_id=thread_id,
+            status="error",
+        )
+
     _thread_owners.setdefault(thread_id, current_user.id)
     config = {"configurable": {"thread_id": thread_id}}
     context_text = _format_messages(request.messages) if request.messages else ""

@@ -8,6 +8,8 @@ from src.db.models import Conversation, ConversationParticipant, Message, User
 from src.db.session import get_db
 from src.models.auth_schemas import UserPublic
 from src.models.chat_schemas import (
+    AIPermissionOut,
+    AIPermissionUpdateRequest,
     ConversationCreateRequest,
     ConversationListResponse,
     ConversationSummary,
@@ -197,6 +199,35 @@ async def send_message(
         content=request.content,
     )
     return message_out
+
+
+@router.get("/conversations/{conversation_id}/ai-permission", response_model=AIPermissionOut)
+async def get_conversation_ai_permission(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AIPermissionOut:
+    await chat_service.assert_participant(db, conversation_id, current_user.id)
+    permission = await chat_service.get_ai_permission(db, conversation_id, current_user.id)
+    if permission is None:
+        return AIPermissionOut(conversation_id=conversation_id, granted=False, updated_at=None)
+    return AIPermissionOut(
+        conversation_id=conversation_id, granted=permission.granted, updated_at=permission.updated_at.isoformat()
+    )
+
+
+@router.put("/conversations/{conversation_id}/ai-permission", response_model=AIPermissionOut)
+async def update_conversation_ai_permission(
+    conversation_id: str,
+    request: AIPermissionUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AIPermissionOut:
+    await chat_service.assert_participant(db, conversation_id, current_user.id)
+    permission = await chat_service.set_ai_permission(db, conversation_id, current_user.id, request.granted)
+    return AIPermissionOut(
+        conversation_id=conversation_id, granted=permission.granted, updated_at=permission.updated_at.isoformat()
+    )
 
 
 @router.post("/conversations/{conversation_id}/read")

@@ -30,15 +30,21 @@ function describeInterrupt(interrupt) {
   return 'Xác nhận hành động này?'
 }
 
-export default function AIPanel({ open, onClose, messages = [], conversationId = null }) {
+export default function AIPanel({ open, onClose, messages = [], conversationId = null, granted = false, onToggleGrant }) {
   const { token } = useAuth()
-  const [granted, setGranted] = useState(true)
   const [scope, setScope] = useState('20 latest messages')
   const [runningAction, setRunningAction] = useState(null)
   const [resultTitle, setResultTitle] = useState('')
   const [result, setResult] = useState('')
   const [error, setError] = useState('')
   const [pending, setPending] = useState(null)
+
+  // Permission itself lives in ChatPage (shared with the header badge) - this just calls up and
+  // surfaces a failure locally, same as every other action in this panel.
+  const toggleGrant = async (next) => {
+    try { await onToggleGrant(next) }
+    catch (err) { setError(err.detail || 'Could not update AI permission.') }
+  }
 
   const scopedMessages = () => {
     const count = scopeToCount[scope]
@@ -160,8 +166,8 @@ export default function AIPanel({ open, onClose, messages = [], conversationId =
       <div className="ai-panel-header"><div className="ai-title-icon"><i className="bi bi-stars"/></div><div><h3>AI Assistant</h3><span>Context-aware help</span></div><button className="icon-btn ai-close" onClick={onClose}><i className="bi bi-x-lg"/></button></div>
       <div className={`permission-card ${granted ? 'granted' : ''}`}>
         <div className="permission-top"><div><i className={`bi ${granted ? 'bi-shield-check' : 'bi-shield-lock'}`}/></div><span><strong>{granted ? 'Permission granted' : 'Permission required'}</strong><small>{granted ? 'AI can read selected messages' : 'Allow AI to read this conversation'}</small></span>{granted && <span className="live-badge">Active</span>}</div>
-        {granted ? <><label>Permission scope</label><select value={scope} onChange={e=>setScope(e.target.value)} className="form-select"><option>20 latest messages</option><option>50 latest messages</option><option>Unread messages</option><option>Today's messages</option><option>Custom time range</option></select><button className="revoke-btn" onClick={()=>setGranted(false)}>Revoke permission</button></> : <button className="btn btn-primary w-100 mt-3" onClick={()=>setGranted(true)}><i className="bi bi-shield-check me-2"/>Grant Permission</button>}
-        <small className="d-block text-muted mt-2">Nội dung tin nhắn trong phạm vi trên sẽ được gửi tới OpenAI để xử lý.</small>
+        {granted ? <><label>Permission scope</label><select value={scope} onChange={e=>setScope(e.target.value)} className="form-select"><option>20 latest messages</option><option>50 latest messages</option><option>Unread messages</option><option>Today's messages</option><option>Custom time range</option></select><button className="revoke-btn" onClick={()=>toggleGrant(false)}>Revoke permission</button></> : <button className="btn btn-primary w-100 mt-3" onClick={()=>toggleGrant(true)} disabled={!conversationId}><i className="bi bi-shield-check me-2"/>Grant Permission</button>}
+        <small className="d-block text-muted mt-2">Nội dung tin nhắn trong phạm vi trên sẽ được gửi tới nhà cung cấp AI ngoài (Google Gemini, Groq, hoặc OpenAI, tuỳ cấu hình hệ thống) để xử lý.</small>
       </div>
       <div className="ai-section-title"><span>Quick actions</span><i className="bi bi-lightning-charge-fill"/></div>
       <div className="quick-grid">{actions.map(([icon,title,sub,color])=>{

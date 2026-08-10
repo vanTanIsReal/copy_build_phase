@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext'
 
 const nav = [
   ['assistant', 'bi-stars', 'AI Assistant'], ['chat', 'bi-chat-dots', 'Chats'], ['tasks', 'bi-check2-square', 'Tasks'],
+  ['tasks/inbox', 'bi-inbox', 'Inbox'],
   ['calendar', 'bi-calendar4-week', 'Calendar'], ['reminders', 'bi-bell', 'Reminders'],
   ['memory', 'bi-stars', 'Memory'], ['profile', 'bi-person', 'Profile'],
 ]
@@ -24,7 +25,9 @@ export default function Sidebar({ open, onClose }) {
         <nav className="sidebar-nav">
           <div className="nav-caption">Workspace</div>
           {nav.map(([path, icon, label]) => (
-            <NavLink key={path} to={`/${path}`} onClick={onClose} className={({ isActive }) => `side-link ${label === 'AI Assistant' ? 'assistant-link' : ''} ${isActive ? 'active' : ''}`}>
+            // `end` matters here: without it, `/tasks` would also read as "active" while on
+            // `/tasks/inbox` (NavLink prefix-matches by default), highlighting both at once.
+            <NavLink key={path} to={`/${path}`} end onClick={onClose} className={({ isActive }) => `side-link ${label === 'AI Assistant' ? 'assistant-link' : ''} ${isActive ? 'active' : ''}`}>
               <i className={`bi ${icon}`} /><span>{label}</span>{label === 'AI Assistant' && <span className="new-pill">New</span>}
             </NavLink>
           ))}

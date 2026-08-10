@@ -17,15 +17,15 @@ Trước khi code, luôn xác nhận tính năng đang chạm vào thuộc nhóm
 
 Đã hoạt động thật (có backend + database, KHÔNG được thay bằng mock)
 Đăng ký / Đăng nhập / Đăng xuất — bcrypt hash password, JWT auth, role user/admin. Các route /assistant, /chat, /tasks, ... được bảo vệ bởi ProtectedRoute; /admin/* thêm AdminRoute (FE) + require_admin (BE).
+Đăng nhập bằng Google — nút "Sign in with Google" trên /login và /register (component GoogleLogin từ @react-oauth/google), backend xác minh ID token qua POST /api/v1/auth/google (src/auth/google_oauth.py), find-or-create tài khoản qua bảng google_identities riêng (không đụng bảng users) — chỉ tự động link vào tài khoản mật khẩu có sẵn khi Google xác nhận email_verified=true. Cần tự tạo Google OAuth Client ID loại "Web application" và điền GOOGLE_OAUTH_CLIENT_ID (.env) + VITE_GOOGLE_CLIENT_ID (Frontend/.env) mới dùng được — xem .env.example.
 Nhắn tin 1-1 và nhóm real-time qua WebSocket, lịch sử tin nhắn, đếm tin nhắn chưa đọc.
 AI Agent chat: endpoint POST /api/v1/chat + /chat/resume, dùng LangGraph, 8 tool — 4 tool có tác dụng phụ (create/update/delete_calendar_event, create_reminder) BẮT BUỘC đi qua interrupt() chờ người dùng xác nhận.
 Tasks, Calendar (Google Calendar 2 chiều), Reminders (bền vững qua restart), Memory, Profile, AI Assistant (/assistant), Admin dashboard — tất cả đã nối API thật.
 Proactive detection: mỗi tin nhắn mới được lọc regex rồi hỏi LLM, tự tạo Task gợi ý và đẩy WebSocket.
-Theo dõi token: bảng usage_logs + cảnh báo trên Admin dashboard khi ≥80% DAILY_TOKEN_BUDGET.
+Theo dõi + chặn token: bảng usage_logs; ngay khi vượt 80%/100% DAILY_TOKEN_BUDGET, usage_service._maybe_alert_budget đẩy WebSocket usage_budget_alert tới mọi admin đang online (không chỉ khi mở /admin, hiện qua BudgetAlertToast.jsx ở bất kỳ trang nào); is_over_budget() chặn hẳn cuộc gọi LLM mới (/chat, proactive detection) khi đã chạm ngân sách — /chat/resume được miễn trừ để không treo interrupt() dở dang.
+AI đọc hội thoại chỉ khi được cấp quyền: bảng ai_permissions (conversation_id, user_id, granted), mặc định chưa cấp quyền, POST /api/v1/chat từ chối (403) nếu chưa được người dùng đó cấp; toggle Grant/Revoke Permission trong AIPanel.jsx gọi GET/PUT /conversations/{id}/ai-permission thật.
 
 Đã có nhưng chưa hoàn chỉnh
-Toggle "Grant/Revoke Permission" trong AIPanel.jsx vẫn chỉ là state React cục bộ — chưa có bảng ai_permissions ở backend.
-Cảnh báo token chỉ hiện khi admin chủ động mở trang; chưa push/email, chưa tự chặn gọi LLM khi vượt ngân sách.
 Chưa deploy online, chưa có rate limiting. Xem ROADMAP.md.
 
 ➡️ KHÔNG còn trang nào dùng Frontend/src/data/mockData.js (file vẫn tồn tại nhưng không được import ở đâu). Khi được yêu cầu "sửa lỗi trang Tasks" hay tương tự, đây là bug logic thật, không phải việc nối API. Trạng thái chi tiết theo từng yêu cầu đề bài: docs/PRD.md và ROADMAP.md.
@@ -35,7 +35,7 @@ Kiến trúc thư mục
 │   ├── agents/             # Agent LangGraph (planner, tools, state)
 │   ├── api/                # REST routes: auth, chat (người-với-người), agent chat
 │   ├── auth/                # Hash mật khẩu, tạo/kiểm tra JWT
-│   ├── db/                  # SQLAlchemy models + session (SQLite/PostgreSQL)
+│   ├── db/                  # SQLAlchemy models + session (PostgreSQL)
 │   ├── models/               # Pydantic schemas
 │   ├── services/              # chat_service, scheduler, llm, calendar_service, reminder_service, proactive_service, usage_service
 │   ├── websocket/              # Kênh real-time cho chat
@@ -51,8 +51,8 @@ Kiến trúc thư mục
         └── router/                    # React Router + ProtectedRoute
 Công nghệ sử dụng
 Layer	Công nghệ
-AI Agent	LangGraph + LangChain (OpenAI, `gpt-4o-mini`)
-Backend	FastAPI, SQLAlchemy (async) + SQLite/PostgreSQL, JWT (PyJWT) + bcrypt, WebSocket
+AI Agent	LangGraph + LangChain (Google Gemini, Groq, hoặc OpenAI, đổi qua LLM_PROVIDER trong .env)
+Backend	FastAPI, SQLAlchemy (async) + PostgreSQL, JWT (PyJWT) + bcrypt, WebSocket
 Frontend	React 18, Vite, React Router, React Hook Form, Bootstrap 5, Framer Motion
 Test	pytest, pytest-asyncio, httpx
 Lint	ruff
@@ -66,17 +66,17 @@ bash
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-cp .env.example .env             # điền OPENAI_API_KEY nếu cần AI chat
+cp .env.example .env             # điền GOOGLE_API_KEY (hoặc GROQ_API_KEY + LLM_PROVIDER=groq, hoặc OPENAI_API_KEY + LLM_PROVIDER=openai nếu Gemini hết quota) nếu cần AI chat
 
 # Chạy dev server
 uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 # hoặc nếu có make: make run
-# Windows + DATABASE_URL là PostgreSQL: dùng `python scripts/run_dev.py` thay vì lệnh uvicorn ở
-# trên — agent memory bền vững (AsyncPostgresSaver) cần SelectorEventLoop, nhưng uvicorn CLI trên
+# Windows: LUÔN dùng `python scripts/run_dev.py` thay vì lệnh uvicorn ở trên, không phải tuỳ chọn —
+# agent memory bền vững (AsyncPostgresSaver) cần SelectorEventLoop, nhưng uvicorn CLI trên
 # Windows luôn chọn ProactorEventLoop trước khi app được import, không có cờ CLI nào sửa được.
 Health check: GET http://localhost:8000/health → {"status":"ok",...}
 Swagger UI: http://localhost:8000/docs
-DB mặc định: SQLite tại sqlite:///./data/app.db; đổi DATABASE_URL sang postgresql://... nếu muốn Postgres (xem README.md)
+DB: PostgreSQL bắt buộc qua DATABASE_URL trong .env (không có default, không còn hỗ trợ SQLite) — xem README.md để tạo database. Test suite dùng database Postgres riêng (orbit_test mặc định, đổi qua TEST_DATABASE_URL).
 Nếu sửa .env mà hành vi backend không đổi, kiểm tra có tiến trình uvicorn/scripts/run_dev.py cũ nào còn sống trên port 8000 trước khi nghi code sai — uvicorn --reload trên Windows để lại tiến trình con (spawn qua multiprocessing) vẫn giữ cổng dù tiến trình cha đã bị tắt, nhiều bản cũ/mới có thể cùng nhận request. Kiểm tra: netstat -ano | findstr :8000 rồi Stop-Process -Id <pid> -Force cho từng tiến trình tìm thấy, sau đó khởi động lại.
 Frontend
 bash
@@ -114,5 +114,5 @@ ROADMAP.md — bảng đối chiếu từng yêu cầu đề bài với trạng 
 WORKLOG.md — nhật ký công việc theo ngày của cả nhóm, xem để biết ai đang làm phần nào trước khi động vào.
 docs/guide/ — tài liệu khóa học AI20K (setup, LangGraph, FastAPI, testing, deploy).
 Lưu ý an toàn khi code
-Không hardcode OPENAI_API_KEY hay bất kỳ secret nào vào code — luôn đọc từ .env.
+Không hardcode GOOGLE_API_KEY, GROQ_API_KEY hay bất kỳ secret nào vào code — luôn đọc từ .env.
 Khi agent thao tác với Google Calendar hoặc tạo nhắc nhở, giữ nguyên bước xác nhận người dùng trước khi gọi API thật; đây là yêu cầu thiết kế cốt lõi của sản phẩm (human-in-the-loop), không phải chi tiết có thể lược bỏ để "cho gọn".

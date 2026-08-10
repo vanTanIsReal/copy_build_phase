@@ -50,6 +50,15 @@ export function AuthProvider({ children }) {
     setToken(data.access_token)
   }
 
+  // Handles both first-time signup and returning login transparently (find-or-create on the
+  // backend) - same as login/register above, just fed a Google ID token instead of a password.
+  const loginWithGoogle = async (idToken) => {
+    const data = await authApi.googleAuth(idToken)
+    localStorage.setItem(TOKEN_KEY, data.access_token)
+    setUser(data.user)
+    setToken(data.access_token)
+  }
+
   const logout = () => {
     localStorage.removeItem(TOKEN_KEY)
     setToken(null)
@@ -68,7 +77,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, token, loading, isAdmin, login, register, logout, updateProfile, changePassword }}
+      value={{ user, token, loading, isAdmin, login, register, loginWithGoogle, logout, updateProfile, changePassword }}
     >
       {children}
     </AuthContext.Provider>

@@ -1,16 +1,9 @@
-from pathlib import Path
-
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from src.config import get_settings
 
 settings = get_settings()
-
-if settings.database_url.startswith("sqlite:///"):
-    db_path = settings.database_url.removeprefix("sqlite:///")
-    if db_path not in (":memory:", ""):
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
 # SQLAlchemyJobStore uses a *sync* engine, so it needs its own driver: psycopg2 (default for
 # "postgresql://") isn't installed, but psycopg3 is (already pulled in for the LangGraph
