@@ -49,6 +49,20 @@ class GoogleIdentity(Base):
     user: Mapped["User"] = relationship()
 
 
+class GoogleCalendarCredential(Base):
+    """OAuth credentials for one user's Google Calendar."""
+
+    __tablename__ = "google_calendar_credentials"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    credentials_json: Mapped[str] = mapped_column(Text)
+    google_email: Mapped[str] = mapped_column(default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    user: Mapped["User"] = relationship()
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 
@@ -154,7 +168,7 @@ class CalendarSyncState(Base):
 
     __tablename__ = "calendar_sync_state"
 
-    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: "default")
+    id: Mapped[str] = mapped_column(primary_key=True)
     sync_token: Mapped[str | None] = mapped_column(default=None)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 

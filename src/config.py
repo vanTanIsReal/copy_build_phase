@@ -38,10 +38,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
     initial_admin_email: str = ""
-    # "Sign in with Google" - Web application OAuth Client ID (audience for ID-token verification).
-    # Distinct from google_credentials_path/google_token_path below (those are for the Calendar
-    # integration's single shared Desktop-app token, unrelated to per-user login). No client secret
-    # needed - only ID-token verification, never an authorization-code exchange.
+    # Web application OAuth Client ID used for both identity login and per-user Calendar consent.
     google_oauth_client_id: str = ""
 
     # Vector Store
@@ -49,7 +46,8 @@ class Settings(BaseSettings):
 
     # Google Calendar
     google_credentials_path: str = "./secrets/credentials.json"
-    google_token_path: str = "./secrets/token.json"
+    # OAuth client configuration only. User Calendar tokens are stored per-user in PostgreSQL.
+    google_token_path: str = "./secrets/token.json"  # legacy setting; no longer read by the app
     google_calendar_id: str = "primary"
     calendar_timezone: str = "Asia/Ho_Chi_Minh"
 

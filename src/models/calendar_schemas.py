@@ -1,6 +1,15 @@
 from pydantic import BaseModel, Field
 
 
+class GoogleCalendarConnectRequest(BaseModel):
+    code: str
+
+
+class GoogleCalendarConnectionOut(BaseModel):
+    connected: bool
+    google_email: str | None = None
+
+
 class CalendarEventOut(BaseModel):
     id: str
     title: str

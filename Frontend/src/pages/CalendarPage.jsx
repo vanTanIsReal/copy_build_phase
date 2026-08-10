@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
+import { useGoogleLogin } from '@react-oauth/google'
 import FullCalendar from '@fullcalendar/react'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import timeGridPlugin from '@fullcalendar/timegrid'
@@ -7,7 +8,7 @@ import interactionPlugin from '@fullcalendar/interaction'
 import PageHeader from '../components/common/PageHeader'
 import NewEventModal from '../components/calendar/NewEventModal'
 import { useAuth } from '../context/AuthContext'
-import { listCalendarEvents, deleteCalendarEvent } from '../api/calendar'
+import { connectGoogleCalendar, deleteCalendarEvent, getCalendarConnection, listCalendarEvents } from '../api/calendar'
 import { getColor } from '../utils/avatar'
 import { HANOI_TZ, formatDateTime } from '../utils/datetime'
 
@@ -20,6 +21,8 @@ export default function CalendarPage() {
   const [selected, setSelected] = useState(null)
   const [newEventOpen, setNewEventOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [connected, setConnected] = useState(null)
+  const [connecting, setConnecting] = useState(false)
 
   const refresh = () => {
     setLoading(true); setError('')
@@ -29,7 +32,32 @@ export default function CalendarPage() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { refresh() }, [token])
+  useEffect(() => {
+    setLoading(true)
+    getCalendarConnection(token)
+      .then(status => {
+        setConnected(status.connected)
+        if (status.connected) refresh()
+        else setLoading(false)
+      })
+      .catch(err => { setError(err.detail || 'Could not check Google Calendar connection.'); setLoading(false) })
+  }, [token])
+
+  const startGoogleConnect = useGoogleLogin({
+    flow: 'auth-code',
+    scope: 'https://www.googleapis.com/auth/calendar',
+    onSuccess: async ({ code }) => {
+      setConnecting(true); setError('')
+      try {
+        await connectGoogleCalendar(token, code)
+        setConnected(true)
+        refresh()
+      } catch (err) {
+        setError(err.detail || 'Could not connect Google Calendar.')
+      } finally { setConnecting(false) }
+    },
+    onError: () => setError('Google authorization was cancelled or failed.'),
+  })
 
   const upsertEvent = (event) => setEvents(prev => [...prev.filter(e => e.id !== event.id), { ...event, color: getColor(event.id) }])
   const removeEvent = (eventId) => setEvents(prev => prev.filter(e => e.id !== eventId))
@@ -54,9 +82,18 @@ export default function CalendarPage() {
   }
 
   return <div className="page-container calendar-page">
-    <PageHeader eyebrow="Schedule" title="Calendar" description="Your Google Calendar events, all in one place." action={<button className="btn btn-primary" onClick={() => setNewEventOpen(true)}><i className="bi bi-plus-lg me-2"/>New event</button>}/>
+    <PageHeader eyebrow="Schedule" title="Calendar" description="Your private Google Calendar events, all in one place." action={connected ? <button className="btn btn-primary" onClick={() => setNewEventOpen(true)}><i className="bi bi-plus-lg me-2"/>New event</button> : null}/>
     {error && <div className="auth-error mb-3">{error}</div>}
-    {loading ? <p className="text-muted small">Loading calendar...</p> : (
+    {connected === false ? (
+      <section className="content-card text-center py-5">
+        <i className="bi bi-google fs-1 text-primary" />
+        <h3 className="mt-3">Connect your Google Calendar</h3>
+        <p className="text-muted">Sign in with Google and grant Calendar access. Each Orbit account only sees its own calendar.</p>
+        <button className="btn btn-primary" onClick={() => startGoogleConnect()} disabled={connecting}>
+          {connecting ? 'Connecting...' : 'Connect Google Calendar'}
+        </button>
+      </section>
+    ) : loading ? <p className="text-muted small">Loading calendar...</p> : (
       <div className="calendar-layout"><section className="content-card calendar-card"><FullCalendar plugins={[dayGridPlugin,timeGridPlugin,interactionPlugin]} initialView="dayGridMonth" timeZone={HANOI_TZ} headerToolbar={{left:'prev,next today',center:'title',right:'dayGridMonth,timeGridWeek,timeGridDay'}} events={events} eventClick={({event:e})=>setSelected(e)} height="auto"/></section>
         <aside className="detected-sidebar"><div className="detected-head"><span><i className="bi bi-stars"/></span><div><h3>AI-detected events</h3><p>Active</p></div></div><p className="text-muted small">Orbit đang tự động rà tin nhắn tìm cam kết/lịch hẹn. Khi phát hiện, việc gợi ý sẽ xuất hiện trong <Link to="/tasks">Tasks → AI suggestions</Link> để bạn Accept/Dismiss trước khi tạo event thật.</p></aside>
       </div>

@@ -1,5 +1,14 @@
 import { apiFetch } from './client'
 
+export const getCalendarConnection = (token) =>
+  apiFetch('/calendar/connection', { token })
+
+export const connectGoogleCalendar = (token, code) =>
+  apiFetch('/calendar/connection', { method: 'POST', token, body: { code } })
+
+export const disconnectGoogleCalendar = (token) =>
+  apiFetch('/calendar/connection', { method: 'DELETE', token })
+
 export const listCalendarEvents = (token, { time_min, time_max } = {}) => {
   const params = new URLSearchParams()
   if (time_min) params.set('time_min', time_min)

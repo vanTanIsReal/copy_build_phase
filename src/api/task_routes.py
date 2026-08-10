@@ -96,9 +96,12 @@ async def _add_to_calendar_and_reminder(task: Task, owner_id: str) -> None:
     start_iso = task.due_at.isoformat()
     end_iso = (task.due_at + timedelta(minutes=30)).isoformat()
     try:
-        event = calendar_service.create_event(summary=task.title, start_iso=start_iso, end_iso=end_iso)
+        service = await calendar_service.get_user_calendar_service(owner_id)
+        event = calendar_service.create_event(
+            summary=task.title, start_iso=start_iso, end_iso=end_iso, service=service
+        )
         await calendar_service.broadcast_change(
-            "calendar_event_created", {"event": calendar_service.to_out_dict(event)}
+            "calendar_event_created", {"event": calendar_service.to_out_dict(event)}, owner_id
         )
     except Exception:  # noqa: BLE001 - best-effort, must not block the task Accept
         logger.exception("Auto-create calendar event for accepted task %s failed", task.id)
