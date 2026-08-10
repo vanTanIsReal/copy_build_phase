@@ -20,6 +20,7 @@ export default function TopNavbar({ onMenu }) {
   const inputRef = useRef(null)
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const normalized = query.trim().toLowerCase()
   const results = useMemo(() => normalized
     ? destinations.filter(item => `${item.label} ${item.keywords}`.toLowerCase().includes(normalized))
@@ -42,12 +43,85 @@ export default function TopNavbar({ onMenu }) {
   }
   const onLogout = () => { logout(); navigate('/login') }
 
-  return <header className="top-navbar">
-    <button className="icon-btn mobile-menu" onClick={onMenu} aria-label="Open menu"><i className="bi bi-list" /></button>
-    <div className="global-search" onFocus={()=>setOpen(true)} onBlur={()=>setTimeout(()=>setOpen(false),120)}>
-      <i className="bi bi-search"/><input ref={inputRef} aria-label="Search" placeholder="Search pages and features..." value={query} onChange={e=>{setQuery(e.target.value);setOpen(true)}} onKeyDown={onKeyDown}/><kbd>Ctrl K</kbd>
-      {open&&<div className="global-search-results">{results.map(item=><button type="button" key={item.path} onMouseDown={e=>e.preventDefault()} onClick={()=>choose(item)}><i className={`bi ${item.icon}`}/><span>{item.label}</span><i className="bi bi-arrow-right-short"/></button>)}{!results.length&&<p>No matching page or feature.</p>}</div>}
-    </div>
-    <div className="nav-actions"><button className="icon-btn"><i className="bi bi-question-circle" /></button><button className="icon-btn notification-btn"><i className="bi bi-bell" /><span /></button><button className="nav-avatar">{getInitials(user?.display_name)}</button><button className="icon-btn" onClick={onLogout} aria-label="Log out" title="Log out"><i className="bi bi-box-arrow-right" /></button></div>
-  </header>
+  return (
+    <header className="top-navbar">
+      <button className="icon-btn mobile-menu" onClick={onMenu} aria-label="Open menu"><i className="bi bi-list" /></button>
+      <div className="global-search" onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 120)}>
+        <i className="bi bi-search" />
+        <input ref={inputRef} aria-label="Search" placeholder="Search pages and features..." value={query} onChange={e => { setQuery(e.target.value); setOpen(true) }} onKeyDown={onKeyDown} />
+        <kbd>Ctrl K</kbd>
+        {open && (
+          <div className="global-search-results">
+            {results.map(item => (
+              <button type="button" key={item.path} onMouseDown={e => e.preventDefault()} onClick={() => choose(item)}>
+                <i className={`bi ${item.icon}`} /><span>{item.label}</span><i className="bi bi-arrow-right-short" />
+              </button>
+            ))}
+            {!results.length && <p>No matching page or feature.</p>}
+          </div>
+        )}
+      </div>
+
+      <div className="nav-actions">
+        <button
+          className="icon-btn"
+          title="Trợ giúp & Hướng dẫn"
+          onClick={() => setHelpOpen(true)}
+        >
+          <i className="bi bi-question-circle" />
+        </button>
+        <button
+          className="icon-btn notification-btn"
+          title="Xem thông báo & Nhắc nhở"
+          onClick={() => navigate('/reminders')}
+        >
+          <i className="bi bi-bell" />
+          <span />
+        </button>
+        <button className="nav-avatar" title="Hồ sơ cá nhân" onClick={() => navigate('/profile')}>
+          {getInitials(user?.display_name)}
+        </button>
+        <button className="icon-btn" onClick={onLogout} aria-label="Log out" title="Đăng xuất">
+          <i className="bi bi-box-arrow-right" />
+        </button>
+      </div>
+
+      {helpOpen && (
+        <div className="modal show d-block" tabIndex="-1" style={{ background: 'rgba(20,30,50,.4)' }} onClick={() => setHelpOpen(false)}>
+          <div className="modal-dialog modal-dialog-centered" onClick={e => e.stopPropagation()}>
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title"><i className="bi bi-patch-question me-2" />Hướng dẫn & Hỏi đáp nhanh</h5>
+                <button className="btn-close" onClick={() => setHelpOpen(false)} />
+              </div>
+              <div className="modal-body">
+                <div className="d-flex flex-column gap-3">
+                  <div>
+                    <strong>🤖 AI Assistant (`/assistant`)</strong>
+                    <p className="small text-muted mb-0">Hỏi tự do về lịch trình, công việc, tạo nhắc nhở và quản lý sự kiện Google Calendar bằng ngôn ngữ tự nhiên.</p>
+                  </div>
+                  <div>
+                    <strong>💬 Chats (`/chat`)</strong>
+                    <p className="small text-muted mb-0">Nhắn tin 1-1 hoặc tạo nhóm. AI sẽ tự động lắng nghe và trích xuất công việc/hạn chót từ hội thoại.</p>
+                  </div>
+                  <div>
+                    <strong>📅 Calendar & Reminders</strong>
+                    <p className="small text-muted mb-0">Đồng bộ lịch Google Calendar 2 chiều và nhận thông báo nhắc nhở theo thời gian thực.</p>
+                  </div>
+                  <div>
+                    <strong>💡 AI Credits trong Sidebar</strong>
+                    <p className="small text-muted mb-0">Là phần trăm hạn ngạch Token OpenAI đã sử dụng trong ngày (nhằm quản lý chi phí và tránh lạm dụng hệ thống).</p>
+                  </div>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-primary btn-sm" onClick={() => { setHelpOpen(false); navigate('/assistant') }}>Hỏi AI ngay</button>
+                <button className="btn btn-light btn-sm" onClick={() => setHelpOpen(false)}>Đóng</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </header>
+  )
 }

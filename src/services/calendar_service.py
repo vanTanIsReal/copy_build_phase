@@ -1,6 +1,8 @@
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 
+from fastapi import HTTPException, status
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -18,12 +20,29 @@ _SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 def get_calendar_service():
     settings = get_settings()
-    creds = Credentials.from_authorized_user_file(settings.google_token_path, _SCOPES)
-    if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-        with open(settings.google_token_path, "w") as f:
-            f.write(creds.to_json())
-    return build("calendar", "v3", credentials=creds)
+    if not os.path.exists(settings.google_token_path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Chưa kết nối Google Calendar (thiếu file ./secrets/token.json). Vui lòng cấu hình Google OAuth để dùng tính năng Lịch."
+        )
+    try:
+        creds = Credentials.from_authorized_user_file(settings.google_token_path, _SCOPES)
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            with open(settings.google_token_path, "w") as f:
+                f.write(creds.to_json())
+        return build("calendar", "v3", credentials=creds)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Chưa kết nối Google Calendar (thiếu file ./secrets/token.json). Vui lòng cấu hình Google OAuth để dùng tính năng Lịch."
+        )
+    except Exception as e:
+        logger.error(f"Failed to initialize Google Calendar service: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Lỗi xác thực Google Calendar: {str(e)}"
+        )
 
 
 def list_events(time_min_iso: str, time_max_iso: str, max_results: int = 50) -> list[dict]:
