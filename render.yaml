@@ -38,6 +38,16 @@ services:
         value: Asia/Ho_Chi_Minh
       - key: CALENDAR_POLL_INTERVAL_SECONDS
         value: "20"
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+      - key: RATE_LIMIT_AUTH
+        value: 10/minute
+      - key: RATE_LIMIT_REGISTER
+        value: 5/minute
+      - key: RATE_LIMIT_CHAT
+        value: 15/minute
+      - key: RATE_LIMIT_CRUD
+        value: 60/minute
       # --- Secrets / values that differ from dev - entered by hand in the Render dashboard when
       # applying this Blueprint (sync: false = Render prompts for a value, never stores it here) ---
       - key: DATABASE_URL

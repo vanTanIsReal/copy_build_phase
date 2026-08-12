@@ -100,7 +100,10 @@ export default function AIPanel({ open, onClose, messages = [], conversationId =
     if (!messages.length) { setError('No messages in this conversation yet.'); setResult(''); return }
     setRunningAction('Summarize'); setError(''); setResult(''); setPending(null)
     try {
-      const res = await chatWithAgent(token, { message: 'Summarize this conversation.', scope: buildScope(), conversation_id: conversationId })
+      const res = await chatWithAgent(token, {
+        message: 'Summarize this conversation.', scope: buildScope(), conversation_id: conversationId,
+        quick_action: 'summarize',
+      })
       if (handleAgentResult(res)) return
       setResultTitle('Summary'); setResult(res.response)
     } catch (err) { setError(err.detail || 'Could not summarize this conversation.') }
@@ -111,7 +114,10 @@ export default function AIPanel({ open, onClose, messages = [], conversationId =
     if (!messages.length) { setError('No messages in this conversation yet.'); setResult(''); return }
     setRunningAction('Extract tasks'); setError(''); setResult(''); setPending(null)
     try {
-      const res = await chatWithAgent(token, { message: 'Extract tasks from this conversation.', scope: buildScope(), conversation_id: conversationId })
+      const res = await chatWithAgent(token, {
+        message: 'Extract tasks from this conversation.', scope: buildScope(), conversation_id: conversationId,
+        quick_action: 'extract_tasks',
+      })
       if (handleAgentResult(res)) return
       const items = parseJsonArray(res.response)
       // source: 'proactive' (not 'manual') even though a person clicked the button - these titles

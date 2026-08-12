@@ -25,6 +25,15 @@ class MessageScope(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=5000, description="Tin nhắn từ user")
     thread_id: str | None = Field(default=None, description="Conversation thread id; generated if omitted")
+    quick_action: Literal["summarize", "extract_tasks"] | None = Field(
+        default=None,
+        description=(
+            "Set by AIPanel's deterministic Quick Actions (Summarize/Extract tasks) so the server "
+            "skips the planner's LLM call and the whole LangGraph run - the planner always routes "
+            "these two to the same tool anyway. `message` is still required (kept for display/"
+            "backwards compat) but is ignored when this is set."
+        ),
+    )
     messages: list[ChatMessage] | None = Field(
         default=None,
         description="Raw message history to summarize (read by summarize_conversation via state)",

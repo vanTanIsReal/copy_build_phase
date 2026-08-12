@@ -78,6 +78,17 @@ class Settings(BaseSettings):
     # changes made directly in Google Calendar are picked up by polling with a syncToken instead)
     calendar_poll_interval_seconds: int = Field(default=20, ge=5)
 
+    # Rate limiting (slowapi, in-memory - single uvicorn worker/single Render instance, no Redis).
+    # Complements daily_token_budget above, doesn't replace it: budget caps $ cost across the whole
+    # app per day, this caps request burst/abuse per user or IP per minute. See src/api/rate_limit.py.
+    # Off by default in tests (tests/conftest.py sets RATE_LIMIT_ENABLED=false before app import) so
+    # fixtures that register several users per session don't trip the auth-endpoint limit themselves.
+    rate_limit_enabled: bool = True
+    rate_limit_auth: str = "10/minute"  # /auth/login, /auth/google - per IP
+    rate_limit_register: str = "5/minute"  # /auth/register - per IP, stricter than login
+    rate_limit_chat: str = "15/minute"  # POST /chat (fresh turns only, not /chat/resume) - per user
+    rate_limit_crud: str = "60/minute"  # everything else authenticated - per user, generous safety net
+
 
 @lru_cache
 def get_settings() -> Settings:

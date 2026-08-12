@@ -5,8 +5,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.api.rate_limit import crud_rate_limit
 from src.auth.dependencies import require_admin
-from src.config import get_settings
 from src.db.models import Conversation, Memory, Message, Reminder, Task, User
 from src.db.session import get_db
 from src.models.admin_schemas import (
@@ -17,12 +17,13 @@ from src.models.admin_schemas import (
     AdminStats,
     AdminTaskOut,
     AdminUserOut,
+    UpdateBudgetRequest,
     UpdateRoleRequest,
     UpdateStatusRequest,
 )
 from src.services import reminder_service, usage_service
 
-router = APIRouter(dependencies=[Depends(require_admin)])
+router = APIRouter(dependencies=[Depends(require_admin), Depends(crud_rate_limit)])
 
 
 async def _get_user_or_404(user_id: str, db: AsyncSession) -> User:
@@ -48,7 +49,7 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> AdminStats:
         await db.execute(select(func.count()).select_from(User).where(User.created_at >= since))
     ).scalar_one()
 
-    budget = get_settings().daily_token_budget
+    budget = await usage_service.get_daily_token_budget()
     usage = await usage_service.get_usage_today()
     budget_used_pct = round(usage["total_tokens"] / budget * 100, 1) if budget else 0.0
 
@@ -62,6 +63,20 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> AdminStats:
         daily_token_budget=budget,
         budget_used_pct=budget_used_pct,
     )
+
+
+@router.patch("/settings/budget", response_model=AdminStats)
+async def update_daily_token_budget(
+    request: UpdateBudgetRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+) -> AdminStats:
+    """Runtime override for Settings.daily_token_budget (the .env value) - previously the only way
+    to raise the budget was editing .env + restarting the server, which the in-app error message
+    ("liên hệ admin để tăng hạn mức") implied an admin could just do from here. Takes effect
+    immediately for the next usage_service.is_over_budget()/_maybe_alert_budget() check, no restart."""
+    await usage_service.set_daily_token_budget(request.daily_token_budget, updated_by=current_user.id)
+    return await get_stats(db=db)
 
 
 @router.get("/users", response_model=list[AdminUserOut])

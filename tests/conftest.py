@@ -12,6 +12,12 @@ os.environ["DATABASE_URL"] = os.environ.get(
 # Selects NullPool in src/db/session.py (see comment there) - tests run the app from more than
 # one event loop, which pooled asyncpg connections can't safely be shared across.
 os.environ.setdefault("APP_ENV", "test")
+# Off by default: the `client` fixture below reuses one `app` (and one in-memory slowapi limiter
+# on app.state.limiter) for the whole session, and fixtures like auth_headers/admin_auth_headers/
+# other_auth_headers each hit /auth/register once per test - dozens of tests in one session would
+# otherwise trip the real register limit against the test suite itself, not against real abuse.
+# tests/test_api/test_rate_limiting.py re-enables it explicitly to test the limiter itself.
+os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 
 import pytest
 import pytest_asyncio

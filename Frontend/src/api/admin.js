@@ -2,6 +2,9 @@ import { apiFetch } from './client'
 
 export const getStats = (token) => apiFetch('/admin/stats', { token })
 
+export const updateDailyTokenBudget = (token, dailyTokenBudget) =>
+  apiFetch('/admin/settings/budget', { method: 'PATCH', token, body: { daily_token_budget: dailyTokenBudget } })
+
 export const listUsers = (token, q) =>
   apiFetch(`/admin/users${q ? `?q=${encodeURIComponent(q)}` : ''}`, { token })
 

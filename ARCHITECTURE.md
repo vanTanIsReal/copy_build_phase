@@ -224,7 +224,18 @@ ngoài `ci.yml` (lint + test trên GitHub Actions). Đây là hạng mục lớn
   qua kể cả để test nhanh (quy ước trong `CLAUDE.md`).
 - `/api/v1/chat` verify current_user là participant của `conversation_id` trước khi agent xử lý —
   chặn user A mượn nội dung hội thoại của user B qua request tự chế.
-- Rate limiting: **chưa có** trên API endpoints — cân nhắc nếu deploy thật và mở public.
+- Rate limiting: **đã có** (slowapi, in-memory, phù hợp vì app chạy 1 uvicorn worker/1 instance,
+  không cần Redis) — `src/api/rate_limit.py`. Auth (`/register` 5/phút, `/login`+`/google` 10/phút)
+  và `/chat` (15/phút) theo IP/user khoá riêng qua `@limiter.limit(...)`; CRUD còn lại (tasks,
+  reminders, memories, calendar, conversations/messages, admin) 60/phút/user qua dependency dùng
+  chung `Depends(crud_rate_limit)` gắn ở từng router (không dùng `Limiter(default_limits=...)` +
+  `SlowAPIMiddleware` như tài liệu slowapi gợi ý mặc định — bản FastAPI đang pin không còn làm
+  phẳng route của `include_router()` vào `app.routes`, khiến middleware đó không tìm thấy handler
+  và coi mọi route là exempt; đã xác nhận bằng test, không phải suy đoán). `/health`, `/status`,
+  `/chat/resume` cố tình miễn (`@limiter.exempt`) — resume hoàn tất 1 hành động human-in-the-loop
+  đã xác nhận, chặn ở đó có thể treo `interrupt()`. Bổ sung cho `DAILY_TOKEN_BUDGET`
+  (`usage_service.is_over_budget()`), không thay thế: budget chặn theo $ tổng/ngày, rate limit
+  chặn burst/abuse theo phút.
 - Quyền AI đọc hội thoại: bảng `ai_permissions` (`conversation_id`, `user_id`, `granted`) thật ở
   backend — mỗi participant tự cấp/thu hồi quyền cho AI đọc hội thoại đó, độc lập với các thành
   viên khác (không cần đồng thuận cả nhóm). `POST /api/v1/chat` (`src/api/routes.py`) gọi

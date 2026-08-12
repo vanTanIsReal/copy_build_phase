@@ -350,6 +350,118 @@ async def test_chat_resume_not_blocked_by_budget(client, auth_headers, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_chat_quick_action_summarize_skips_planner_calls_llm_once(client, auth_headers, monkeypatch):
+    """★ batch LLM call: AIPanel's Summarize button must skip the planner's LLM call entirely and
+    call the tool's own logic exactly once, not twice."""
+    from src.agents.tools import summarize_tool
+
+    def _planner_must_not_run():
+        raise AssertionError("planner LLM must not be called for a quick_action request")
+
+    monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", _planner_must_not_run)
+
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke.return_value = AsyncMock(content="Tóm tắt ngắn gọn.", usage_metadata=None)
+    monkeypatch.setattr(summarize_tool, "get_llm", lambda: fake_llm)
+
+    response = await client.post(
+        "/api/v1/chat",
+        json={
+            "message": "Summarize this conversation.",
+            "quick_action": "summarize",
+            "messages": [{"role": "user", "sender": "Alice", "content": "hi"}],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "completed"
+    assert data["response"] == "Tóm tắt ngắn gọn."
+    assert data["thread_id"]
+    fake_llm.ainvoke.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_chat_quick_action_extract_tasks_skips_planner_calls_llm_once(client, auth_headers, monkeypatch):
+    from src.agents.tools import task_tool
+
+    def _planner_must_not_run():
+        raise AssertionError("planner LLM must not be called for a quick_action request")
+
+    monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", _planner_must_not_run)
+
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke.return_value = AsyncMock(content="[]", usage_metadata=None)
+    monkeypatch.setattr(task_tool, "get_llm", lambda: fake_llm)
+
+    response = await client.post(
+        "/api/v1/chat",
+        json={
+            "message": "Extract tasks from this conversation.",
+            "quick_action": "extract_tasks",
+            "messages": [{"role": "user", "sender": "Alice", "content": "hi"}],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "completed"
+    assert data["response"] == "[]"
+    fake_llm.ainvoke.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_chat_quick_action_still_blocked_when_over_daily_token_budget(client, auth_headers, monkeypatch):
+    from src.services import quick_action_service, usage_service
+
+    async def _over_budget():
+        return True
+
+    monkeypatch.setattr(usage_service, "is_over_budget", _over_budget)
+
+    async def _must_not_run(*args, **kwargs):
+        raise AssertionError("quick action must not run when over the daily token budget")
+
+    monkeypatch.setattr(quick_action_service, "run_quick_action", _must_not_run)
+
+    response = await client.post(
+        "/api/v1/chat",
+        json={"message": "Summarize this conversation.", "quick_action": "summarize"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "error"
+    assert "hạn mức" in data["response"]
+
+
+@pytest.mark.asyncio
+async def test_chat_quick_action_rejects_when_ai_permission_not_granted(client, auth_headers, other_auth_headers):
+    """Quick Actions go through the same participant/ai_permission guards as any other /chat
+    request - a conversation_id doesn't bypass them just because quick_action is set."""
+    other_me = await client.get("/api/v1/auth/me", headers=other_auth_headers)
+    other_id = other_me.json()["id"]
+    conv = await client.post(
+        "/api/v1/conversations", json={"type": "direct", "participant_ids": [other_id]}, headers=auth_headers
+    )
+    conversation_id = conv.json()["id"]
+    # AI permission for this conversation was never granted - default deny.
+
+    response = await client.post(
+        "/api/v1/chat",
+        json={
+            "message": "Summarize this conversation.",
+            "quick_action": "summarize",
+            "conversation_id": conversation_id,
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_agent_status(client):
     response = await client.get("/api/v1/status")
     assert response.status_code == 200

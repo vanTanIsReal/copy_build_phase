@@ -42,6 +42,8 @@ dependencies = [
     # httpx: also a runtime dep now (src/services/google_credentials.py calls Google's revoke
     # endpoint on disconnect), not just a test tool - kept here instead of the dev extras below.
     "httpx>=0.28.0",
+    # Rate limiting
+    "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]

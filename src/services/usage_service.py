@@ -6,8 +6,10 @@ from sqlalchemy import func, select
 
 from src.config import get_settings
 from src.db import session as db_session
-from src.db.models import UsageLog, User
+from src.db.models import SystemConfig, UsageLog, User
 from src.websocket.manager import manager
+
+_SYSTEM_CONFIG_ID = "default"
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +52,35 @@ async def log_usage(*, provider: str, model: str, usage_metadata: dict | None) -
         logger.exception("Failed to log LLM usage")
 
 
+async def get_daily_token_budget() -> int:
+    """The effective daily token budget: an admin-set override (SystemConfig, PATCH
+    /admin/settings/budget) if one exists, otherwise the .env default (Settings.daily_token_budget)
+    - a deployment that never touches the Admin dashboard keeps working exactly as before."""
+    async with db_session.async_session_maker() as db:
+        config = await db.get(SystemConfig, _SYSTEM_CONFIG_ID)
+    if config is not None and config.daily_token_budget is not None:
+        return config.daily_token_budget
+    return get_settings().daily_token_budget
+
+
+async def set_daily_token_budget(value: int, *, updated_by: str | None) -> int:
+    """Admin-only write path (src/api/admin_routes.py) - upserts the single SystemConfig row."""
+    async with db_session.async_session_maker() as db:
+        config = await db.get(SystemConfig, _SYSTEM_CONFIG_ID)
+        if config is None:
+            config = SystemConfig(id=_SYSTEM_CONFIG_ID)
+            db.add(config)
+        config.daily_token_budget = value
+        config.updated_by = updated_by
+        await db.commit()
+    return value
+
+
 async def _maybe_alert_budget(*, before_tokens: int, after_tokens: int) -> None:
     """Push a WebSocket alert to every connected admin the moment today's usage crosses 80% or
     100% of daily_token_budget - so it surfaces wherever an admin already is in the app, not only
     when they happen to open the Admin dashboard (see ROADMAP.md, mục 'Cảnh báo token/chi phí')."""
-    budget = get_settings().daily_token_budget
+    budget = await get_daily_token_budget()
     if not budget:
         return
     before_pct = before_tokens / budget * 100
@@ -98,7 +124,7 @@ async def is_over_budget() -> bool:
     """True once today's usage has reached (not just approached) daily_token_budget. Used to
     block *new* LLM calls - never to interrupt one already in flight or a human-approved action
     that's just completing (see routes.py::resume_chat for why resume is exempt)."""
-    budget = get_settings().daily_token_budget
+    budget = await get_daily_token_budget()
     if not budget:
         return False
     usage = await get_usage_today()

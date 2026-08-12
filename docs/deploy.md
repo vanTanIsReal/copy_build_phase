@@ -152,8 +152,9 @@ Thực hiện trên chính `https://<vercel-url>`, KHÔNG dùng localhost:
 
 ## Ngoài phạm vi tài liệu này (cố ý, không làm ở đây)
 
-Alembic migrations, rate limiting, structured logging/monitoring, global exception handler, security
-headers — đã ghi nhận là nợ kỹ thuật ở [ROADMAP.md](../ROADMAP.md)/[ARCHITECTURE.md](../ARCHITECTURE.md),
-để lại cho phiên làm việc riêng sau khi deploy ổn định. Webhook `events.watch` thật cho Calendar
+Alembic migrations, structured logging/monitoring, global exception handler, security headers — đã
+ghi nhận là nợ kỹ thuật ở [ROADMAP.md](../ROADMAP.md)/[ARCHITECTURE.md](../ARCHITECTURE.md), để lại
+cho phiên làm việc riêng sau khi deploy ổn định. (Rate limiting đã xong — xem `RATE_LIMIT_*` trong
+[render.yaml](../render.yaml).) Webhook `events.watch` thật cho Calendar
 (thay polling) có thể làm ngay sau khi có domain public HTTPS thật từ tài liệu này, nhưng là 1 thay
 đổi tách biệt.

@@ -7,16 +7,16 @@ from langgraph.prebuilt import InjectedState
 
 from src.agents.state import AgentState
 from src.config import get_settings
+from src.services import usage_service
 from src.services.llm import get_llm
 
 
-@tool
-async def extract_tasks(
-    state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
-) -> str:
-    """Extract action items, tasks, and appointments mentioned in the conversation the user is
-    currently asking about, as a JSON array."""
-    text = (state or {}).get("context", "")
+async def generate_tasks_json(context: str) -> str:
+    """Build the prompt, call the LLM once, log usage, and return the raw JSON array text. This is
+    the real logic - `extract_tasks` below is a thin @tool wrapper around it for the LangGraph
+    path; `quick_action_service` calls this directly for AIPanel's Extract tasks button (routes.py
+    bypasses the planner entirely there, see ROADMAP.md "batch LLM call")."""
+    text = context or ""
     if not text.strip():
         return "[]"
 
@@ -35,4 +35,16 @@ async def extract_tasks(
         f"{text}"
     )
     result = await llm.ainvoke(prompt)
+    await usage_service.log_usage(
+        provider=settings.llm_provider, model=settings.model_name, usage_metadata=result.usage_metadata
+    )
     return result.content
+
+
+@tool
+async def extract_tasks(
+    state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
+) -> str:
+    """Extract action items, tasks, and appointments mentioned in the conversation the user is
+    currently asking about, as a JSON array."""
+    return await generate_tasks_json((state or {}).get("context", ""))

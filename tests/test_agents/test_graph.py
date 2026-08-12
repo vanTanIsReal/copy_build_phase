@@ -88,7 +88,7 @@ async def test_terminal_tool_ends_without_second_llm_call(monkeypatch, fake_llm_
     from src.agents.tools import summarize_tool
 
     fake_tool_llm = AsyncMock()
-    fake_tool_llm.ainvoke.return_value = AsyncMock(content="A short summary.")
+    fake_tool_llm.ainvoke.return_value = AsyncMock(content="A short summary.", usage_metadata=None)
     monkeypatch.setattr(summarize_tool, "get_llm", lambda: fake_tool_llm)
 
     planner_llm = fake_llm_factory(
