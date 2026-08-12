@@ -46,7 +46,8 @@ async def list_conversations(
         (
             await db.execute(
                 select(ConversationParticipant.conversation_id).where(
-                    ConversationParticipant.user_id == current_user.id
+                    ConversationParticipant.user_id == current_user.id,
+                    ConversationParticipant.hidden_at.is_(None),  # "deleted" (for me) - see hide_conversation
                 )
             )
         )
@@ -178,3 +179,37 @@ async def mark_conversation_read(
 ):
     await chat_service.mark_read(db, conversation_id, current_user.id)
     return {"status": "ok"}
+
+
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conversation(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """"Delete" a conversation for the current user only - hides it from their own list without
+    touching it for other participants. Not to be confused with the hard, everyone-loses-it delete
+    at admin_routes.delete_conversation (moderation-only, /admin/conversations/{id})."""
+    await chat_service.hide_conversation(db, conversation_id, current_user.id)
+
+
+@router.post("/conversations/{conversation_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
+async def leave_conversation(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Leave a group conversation for good (400 if it's a direct 1-1 - use delete_conversation
+    above there instead). Remaining members are notified in real time so their member count/roster
+    stays accurate without a manual refresh."""
+    remaining_ids = await chat_service.leave_group(db, conversation_id, current_user.id)
+    if remaining_ids:
+        await manager.broadcast_to_users(
+            remaining_ids,
+            {
+                "type": "conversation_member_left",
+                "conversation_id": conversation_id,
+                "user_id": current_user.id,
+                "display_name": current_user.display_name,
+            },
+        )

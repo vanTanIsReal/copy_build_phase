@@ -8,7 +8,7 @@ import NewConversationModal from '../components/chat/NewConversationModal'
 import { useAuth } from '../context/AuthContext'
 import { useConversations } from '../hooks/useConversations'
 import { useMessages } from '../hooks/useMessages'
-import { getAiPermission, markRead, setAiPermission } from '../api/chat'
+import { deleteConversation, getAiPermission, leaveConversation, markRead, setAiPermission } from '../api/chat'
 
 export default function ChatPage() {
   const { token, user } = useAuth()
@@ -38,17 +38,25 @@ export default function ChatPage() {
   stateRef.current = { selectedId, userId: user?.id }
 
   useEffect(() => subscribe((data) => {
-    if (data.type !== 'new_message') return
-    const { selectedId, userId } = stateRef.current
-    const msg = data.message
-    if (msg.conversation_id === selectedId) setMessages(prev => [...prev, msg])
-    setConversations(prev => {
-      const idx = prev.findIndex(c => c.id === msg.conversation_id)
-      if (idx === -1) return prev
-      const bumpUnread = msg.conversation_id !== selectedId && msg.sender_id !== userId
-      const updated = { ...prev[idx], last_message: msg, updated_at: msg.created_at, unread_count: bumpUnread ? (prev[idx].unread_count || 0) + 1 : prev[idx].unread_count }
-      return [updated, ...prev.slice(0, idx), ...prev.slice(idx + 1)]
-    })
+    if (data.type === 'new_message') {
+      const { selectedId, userId } = stateRef.current
+      const msg = data.message
+      if (msg.conversation_id === selectedId) setMessages(prev => [...prev, msg])
+      setConversations(prev => {
+        const idx = prev.findIndex(c => c.id === msg.conversation_id)
+        if (idx === -1) return prev
+        const bumpUnread = msg.conversation_id !== selectedId && msg.sender_id !== userId
+        const updated = { ...prev[idx], last_message: msg, updated_at: msg.created_at, unread_count: bumpUnread ? (prev[idx].unread_count || 0) + 1 : prev[idx].unread_count }
+        return [updated, ...prev.slice(0, idx), ...prev.slice(idx + 1)]
+      })
+    }
+    // Someone else left a group we're still in - keep the member count/roster in the header and
+    // "N members" line accurate without a manual refresh.
+    if (data.type === 'conversation_member_left') {
+      setConversations(prev => prev.map(c => c.id === data.conversation_id
+        ? { ...c, participants: c.participants.filter(p => p.id !== data.user_id) }
+        : c))
+    }
   }), [subscribe, setMessages, setConversations])
 
   const selectedConversation = conversations.find(c => c.id === selectedId) || null
@@ -68,13 +76,34 @@ export default function ChatPage() {
     setMobileChat(true)
   }
 
+  // Shared by delete (hide-for-me) and leave (real membership removal) - both end the same way on
+  // this side: the conversation drops out of the list and, if it was open, the chat pane closes.
+  const closeConversation = (id) => {
+    setConversations(prev => prev.filter(c => c.id !== id))
+    if (id === selectedId) { setSelectedId(null); setMobileChat(false) }
+  }
+
+  const onDeleteConversation = () => {
+    if (!selectedId) return
+    const id = selectedId
+    deleteConversation(token, id).then(() => closeConversation(id))
+      .catch(err => alert(err.detail || 'Could not delete this conversation.'))
+  }
+
+  const onLeaveConversation = () => {
+    if (!selectedId) return
+    const id = selectedId
+    leaveConversation(token, id).then(() => closeConversation(id))
+      .catch(err => alert(err.detail || 'Could not leave this group.'))
+  }
+
   return (
     <div className={`chat-layout ${mobileChat ? 'show-chat' : ''}`}>
       <ConversationList conversations={conversations} selectedId={selectedId} onSelect={onSelect} onNewConversation={() => setNewConvoOpen(true)} />
       <section className="conversation-pane">
         {selectedConversation ? (
           <>
-            <ConversationHeader conversation={selectedConversation} onBack={() => setMobileChat(false)} onAI={() => setAiOpen(true)} aiGranted={aiGranted} onToggleAi={onToggleAi} />
+            <ConversationHeader conversation={selectedConversation} onBack={() => setMobileChat(false)} onAI={() => setAiOpen(true)} aiGranted={aiGranted} onToggleAi={onToggleAi} onDelete={onDeleteConversation} onLeave={onLeaveConversation} />
             <MessageArea conversation={selectedConversation} messages={messages} currentUserId={user?.id} onSend={onSend} />
           </>
         ) : (
