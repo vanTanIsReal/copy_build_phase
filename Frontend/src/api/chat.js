@@ -5,8 +5,14 @@ export const listUsers = (token, search) =>
 
 export const listConversations = (token) => apiFetch('/conversations', { token })
 
+export const listGroups = (token, search) =>
+  apiFetch(`/groups${search ? `?search=${encodeURIComponent(search)}` : ''}`, { token })
+
 export const createConversation = (token, { type, participant_ids, name }) =>
   apiFetch('/conversations', { method: 'POST', token, body: { type, participant_ids, name } })
+
+export const joinConversation = (token, conversationId) =>
+  apiFetch(`/conversations/${conversationId}/join`, { method: 'POST', token })
 
 export const getMessages = (token, conversationId, { before, limit = 50 } = {}) => {
   const params = new URLSearchParams({ limit: String(limit) })

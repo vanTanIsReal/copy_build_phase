@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.rate_limit import crud_rate_limit
 from src.auth.dependencies import get_current_user
+from src.config import get_settings
 from src.db.models import Conversation, ConversationParticipant, Message, User
 from src.db.session import get_db
 from src.models.auth_schemas import UserPublic
@@ -13,6 +14,8 @@ from src.models.chat_schemas import (
     ConversationCreateRequest,
     ConversationListResponse,
     ConversationSummary,
+    GroupSearchResponse,
+    GroupSearchResult,
     MessageListResponse,
     MessageOut,
     SendMessageRequest,
@@ -42,6 +45,9 @@ async def list_conversations(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ConversationListResponse:
+    if get_settings().app_env == "development":
+        await chat_service.ensure_demo_groups(db, current_user.id)
+
     conversation_ids = (
         (
             await db.execute(
@@ -68,6 +74,36 @@ async def list_conversations(
     return ConversationListResponse(conversations=summaries)
 
 
+@router.get("/groups", response_model=GroupSearchResponse)
+async def list_groups(
+    search: str | None = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> GroupSearchResponse:
+    if get_settings().app_env == "development":
+        await chat_service.ensure_demo_groups(db, current_user.id)
+
+    stmt = select(Conversation).where(Conversation.type == "group")
+    if search:
+        stmt = stmt.where(Conversation.name.ilike(f"%{search}%"))
+    conversations = (await db.execute(stmt.order_by(Conversation.updated_at.desc()))).scalars().all()
+
+    groups = []
+    for conversation in conversations:
+        summary = await chat_service.build_conversation_summary(db, conversation, current_user.id)
+        groups.append(
+            GroupSearchResult(
+                id=summary.id,
+                name=summary.name,
+                member_count=len(summary.participants),
+                is_member=any(participant.id == current_user.id for participant in summary.participants),
+                last_message=summary.last_message,
+                updated_at=summary.updated_at,
+            )
+        )
+    return GroupSearchResponse(groups=groups)
+
+
 @router.post("/conversations", response_model=ConversationSummary)
 async def create_conversation(
     request: ConversationCreateRequest,
@@ -89,6 +125,31 @@ async def create_conversation(
         conversation = await chat_service.create_group_conversation(
             db, current_user.id, request.participant_ids, request.name
         )
+    return await chat_service.build_conversation_summary(db, conversation, current_user.id)
+
+
+@router.post("/conversations/{conversation_id}/join", response_model=ConversationSummary)
+async def join_group(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ConversationSummary:
+    conversation = await db.get(Conversation, conversation_id)
+    if conversation is None or conversation.type != "group":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
+
+    participant = (
+        await db.execute(
+            select(ConversationParticipant).where(
+                ConversationParticipant.conversation_id == conversation_id,
+                ConversationParticipant.user_id == current_user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if participant is None:
+        db.add(ConversationParticipant(conversation_id=conversation_id, user_id=current_user.id))
+        await db.commit()
+
     return await chat_service.build_conversation_summary(db, conversation, current_user.id)
 
 

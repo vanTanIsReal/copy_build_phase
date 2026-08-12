@@ -11,6 +11,12 @@ export const googleAuth = (id_token) => apiFetch('/auth/google', { method: 'POST
 
 export const getMe = (token) => apiFetch('/auth/me', { token })
 
+export const requestPasswordReset = (email) =>
+  apiFetch('/auth/forgot-password', { method: 'POST', body: { email } })
+
+export const resetPassword = ({ token, password }) =>
+  apiFetch('/auth/reset-password', { method: 'POST', body: { token, password } })
+
 export const updateProfile = (token, updates) => apiFetch('/auth/me', { method: 'PATCH', token, body: updates })
 
 export const changePassword = (token, { current_password, new_password }) =>

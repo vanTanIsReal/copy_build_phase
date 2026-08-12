@@ -49,6 +49,20 @@ class GoogleIdentity(Base):
     user: Mapped["User"] = relationship()
 
 
+class GoogleCalendarCredential(Base):
+    """OAuth credentials for one user's Google Calendar."""
+
+    __tablename__ = "google_calendar_credentials"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    credentials_json: Mapped[str] = mapped_column(Text)
+    google_email: Mapped[str] = mapped_column(default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    user: Mapped["User"] = relationship()
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 
@@ -116,12 +130,6 @@ class Task(Base):
     status: Mapped[str] = mapped_column(default="suggested")
     # "suggested" | "pending" | "in_progress" | "completed" | "dismissed"
     source: Mapped[str] = mapped_column(default="manual")  # "manual" | "proactive"
-    # id of the Message that proposed this commitment (proactive_service) - anchors dedup (an
-    # overlapping re-scan of the same window doesn't duplicate) and retraction (a later "huỷ nhé"/
-    # rescheduling message can find and dismiss every Task it spawned). NULL for source="manual".
-    source_message_id: Mapped[str | None] = mapped_column(
-        ForeignKey("messages.id", ondelete="SET NULL"), default=None, index=True
-    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     owner: Mapped["User"] = relationship()
@@ -141,11 +149,7 @@ class UsageLog(Base):
 
 
 class SystemConfig(Base):
-    """Single-row table (fixed id) for runtime-editable settings that would otherwise only live in
-    .env - currently just daily_token_budget, so an admin can raise/lower it from the Admin
-    dashboard without a server restart. NULL daily_token_budget means "no override yet" - callers
-    fall back to Settings.daily_token_budget (the .env default), so a deployment that never
-    touches this stays on exactly the old behavior."""
+    """Runtime-editable application settings stored as a single row."""
 
     __tablename__ = "system_config"
 
@@ -168,39 +172,16 @@ class Memory(Base):
     owner: Mapped["User"] = relationship()
 
 
-class GoogleCalendarCredential(Base):
-    """Per-user Google Calendar OAuth credential (authorization-code flow, access_type=offline).
-    A row existing = this user has connected their own Google Calendar; no row = Calendar features
-    are unavailable to them - there is no shared/fallback calendar under the per-user model.
+class CalendarSyncState(Base):
+    """Single-row table (id is always "default") holding the Google Calendar incremental sync
+    cursor, so calendar_service.poll_calendar_changes can resume where it left off across polls
+    and server restarts instead of re-scanning the whole calendar every time."""
 
-    Different from GoogleIdentity: that table only records "this user signed in with this Google
-    account" (ID token, can't call any API with it). This table holds a real refresh token that
-    can act on the user's Calendar on their behalf. A user can have a GoogleIdentity without this
-    (logged in with Google, never connected Calendar) or this without a GoogleIdentity (logged in
-    with a password, connected Calendar separately) - the two are unrelated.
+    __tablename__ = "calendar_sync_state"
 
-    refresh_token_enc/access_token_enc are Fernet-encrypted (src/auth/crypto.py) - a Calendar
-    refresh token is a long-lived secret; leaking it means indefinite read/write access to the
-    user's calendar until they manually revoke it, unlike e.g. a password hash which is one-way.
-
-    sync_token lives on this same row (not a separate table) since it's 1:1 with the credential -
-    replaces the old single-row app-wide calendar_sync_state from when Calendar was one shared
-    account for everyone."""
-
-    __tablename__ = "google_calendar_credentials"
-
-    id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
-    google_email: Mapped[str] = mapped_column(default="")  # connected account, for display only
-    refresh_token_enc: Mapped[str] = mapped_column(Text)
-    access_token_enc: Mapped[str | None] = mapped_column(Text, default=None)
-    token_expiry: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
-    scopes: Mapped[str] = mapped_column(default="")  # space-separated
-    sync_token: Mapped[str | None] = mapped_column(Text, default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    id: Mapped[str] = mapped_column(primary_key=True)
+    sync_token: Mapped[str | None] = mapped_column(default=None)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
-
-    user: Mapped["User"] = relationship()
 
 
 class Reminder(Base):

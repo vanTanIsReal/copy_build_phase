@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
@@ -25,3 +27,13 @@ def create_access_token(user_id: str) -> str:
 def decode_access_token(token: str) -> str:
     payload = jwt.decode(token, settings.secret_key, algorithms=[settings.jwt_algorithm])
     return payload["sub"]
+
+
+def create_password_reset_token() -> tuple[str, str]:
+    """Return the raw reset token and its non-reversible database value."""
+    raw_token = secrets.token_urlsafe(32)
+    return raw_token, hash_password_reset_token(raw_token)
+
+
+def hash_password_reset_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
