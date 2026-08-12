@@ -1,8 +1,5 @@
-const browserOrigin = window.location.origin
-const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || `${browserOrigin}/api/v1`
-export const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || `${wsProtocol}//${window.location.host}/api/v1/ws`
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+export const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000/api/v1/ws'
 
 export class ApiError extends Error {
   constructor(status, detail) {

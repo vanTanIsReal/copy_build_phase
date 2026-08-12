@@ -6,6 +6,12 @@ from langgraph.types import interrupt
 
 from src.agents.state import AgentState
 from src.services import calendar_service
+from src.services.google_credentials import CalendarNotConnected
+
+_NOT_CONNECTED_MSG = (
+    "This account hasn't connected Google Calendar yet - tell them to go to the Calendar page and "
+    "click 'Connect Google Calendar' first."
+)
 
 
 @tool
@@ -38,19 +44,21 @@ async def create_calendar_event(
     if not decision or not decision.get("approved"):
         return "Calendar event was not created (user declined)."
 
-    draft.update(decision.get("edits") or {})
     user_id = (state or {}).get("user_id")
-    service = await calendar_service.get_user_calendar_service(user_id)
-    created = calendar_service.create_event(
-        summary=draft["summary"],
-        start_iso=draft["start"],
-        end_iso=draft["end"],
-        description=draft["description"],
-        attendees=draft["attendees"],
-        service=service,
-    )
+    draft.update(decision.get("edits") or {})
+    try:
+        created = await calendar_service.create_event(
+            user_id,
+            summary=draft["summary"],
+            start_iso=draft["start"],
+            end_iso=draft["end"],
+            description=draft["description"],
+            attendees=draft["attendees"],
+        )
+    except CalendarNotConnected:
+        return _NOT_CONNECTED_MSG
     await calendar_service.broadcast_change(
-        "calendar_event_created", {"event": calendar_service.to_out_dict(created)}, user_id
+        user_id, "calendar_event_created", {"event": calendar_service.to_out_dict(created)}
     )
     return f"Event created: {created.get('htmlLink', created.get('id'))}"
 
@@ -69,8 +77,11 @@ async def list_calendar_events(
         time_max_iso: End of the range as an ISO 8601 datetime string.
         max_results: Maximum number of events to return.
     """
-    service = await calendar_service.get_user_calendar_service((state or {}).get("user_id"))
-    items = calendar_service.list_events(time_min_iso, time_max_iso, max_results, service=service)
+    user_id = (state or {}).get("user_id")
+    try:
+        items = await calendar_service.list_events(user_id, time_min_iso, time_max_iso, max_results)
+    except CalendarNotConnected:
+        return _NOT_CONNECTED_MSG
     if not items:
         return "No events found in that range."
     return "\n".join(
@@ -104,27 +115,28 @@ async def update_calendar_event(
     if not decision or not decision.get("approved"):
         return "Calendar event was not updated (user declined)."
 
-    draft.update(decision.get("edits") or {})
     user_id = (state or {}).get("user_id")
-    service = await calendar_service.get_user_calendar_service(user_id)
-    updated = calendar_service.update_event(
-        event_id=draft["event_id"],
-        summary=draft["summary"],
-        start_iso=draft["start"],
-        end_iso=draft["end"],
-        description=draft["description"],
-        service=service,
-    )
+    draft.update(decision.get("edits") or {})
+    try:
+        updated = await calendar_service.update_event(
+            user_id,
+            event_id=draft["event_id"],
+            summary=draft["summary"],
+            start_iso=draft["start"],
+            end_iso=draft["end"],
+            description=draft["description"],
+        )
+    except CalendarNotConnected:
+        return _NOT_CONNECTED_MSG
     await calendar_service.broadcast_change(
-        "calendar_event_updated", {"event": calendar_service.to_out_dict(updated)}, user_id
+        user_id, "calendar_event_updated", {"event": calendar_service.to_out_dict(updated)}
     )
     return f"Event updated: {updated.get('htmlLink', updated.get('id'))}"
 
 
 @tool
 async def delete_calendar_event(
-    event_id: str,
-    state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
+    event_id: str, state: Annotated[AgentState, InjectedState] = None  # type: ignore[assignment]
 ) -> str:
     """Draft the deletion of an existing Google Calendar event (found via list_calendar_events).
     Requires the user's explicit confirmation before it is actually deleted.
@@ -137,7 +149,9 @@ async def delete_calendar_event(
         return "Calendar event was not deleted (user declined)."
 
     user_id = (state or {}).get("user_id")
-    service = await calendar_service.get_user_calendar_service(user_id)
-    calendar_service.delete_event(event_id, service=service)
-    await calendar_service.broadcast_change("calendar_event_deleted", {"event_id": event_id}, user_id)
+    try:
+        await calendar_service.delete_event(user_id, event_id)
+    except CalendarNotConnected:
+        return _NOT_CONNECTED_MSG
+    await calendar_service.broadcast_change(user_id, "calendar_event_deleted", {"event_id": event_id})
     return "Event deleted."

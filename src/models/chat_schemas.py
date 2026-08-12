@@ -34,19 +34,6 @@ class ConversationListResponse(BaseModel):
     conversations: list[ConversationSummary]
 
 
-class GroupSearchResult(BaseModel):
-    id: str
-    name: str
-    member_count: int
-    is_member: bool
-    last_message: MessageOut | None
-    updated_at: str
-
-
-class GroupSearchResponse(BaseModel):
-    groups: list[GroupSearchResult]
-
-
 class MessageListResponse(BaseModel):
     messages: list[MessageOut]
     has_more: bool

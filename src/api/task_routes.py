@@ -6,17 +6,19 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.rate_limit import crud_rate_limit
 from src.auth.dependencies import get_current_user
 from src.config import get_settings
 from src.db.models import Task, User
 from src.db.session import get_db
 from src.models.task_schemas import TaskCreateRequest, TaskOut, UpdateTaskStatusRequest
 from src.services import calendar_service, reminder_service
+from src.services.google_credentials import CalendarNotConnected
 from src.websocket.manager import manager
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(crud_rate_limit)])
 
 _PRIORITY_RANK = {"High": 0, "Medium": 1, "Low": 2}
 
@@ -96,13 +98,12 @@ async def _add_to_calendar_and_reminder(task: Task, owner_id: str) -> None:
     start_iso = task.due_at.isoformat()
     end_iso = (task.due_at + timedelta(minutes=30)).isoformat()
     try:
-        service = await calendar_service.get_user_calendar_service(owner_id)
-        event = calendar_service.create_event(
-            summary=task.title, start_iso=start_iso, end_iso=end_iso, service=service
-        )
+        event = await calendar_service.create_event(owner_id, summary=task.title, start_iso=start_iso, end_iso=end_iso)
         await calendar_service.broadcast_change(
-            "calendar_event_created", {"event": calendar_service.to_out_dict(event)}, owner_id
+            owner_id, "calendar_event_created", {"event": calendar_service.to_out_dict(event)}
         )
+    except CalendarNotConnected:
+        logger.info("Skipped auto-create calendar event for task %s - owner hasn't connected Calendar", task.id)
     except Exception:  # noqa: BLE001 - best-effort, must not block the task Accept
         logger.exception("Auto-create calendar event for accepted task %s failed", task.id)
 

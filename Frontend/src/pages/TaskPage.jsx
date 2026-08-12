@@ -35,10 +35,7 @@ export default function TaskPage() {
 
   const suggestions = tasks.filter(t => t.status === 'suggested')
   const mainTasks = tasks.filter(t => t.status !== 'suggested' && t.status !== 'dismissed')
-  const normalizedQuery = query.trim().toLowerCase()
-  const shownTasks = mainTasks.filter(t => [
-    t.title, t.priority, t.status, t.source, t.due_at ? formatDue(t.due_at) : '',
-  ].some(value => String(value || '').toLowerCase().includes(normalizedQuery)))
+  const shownTasks = mainTasks.filter(t => t.title.toLowerCase().includes(query.toLowerCase()))
   const completed = mainTasks.filter(t => t.status === 'completed').length
   const overdue = mainTasks.filter(t => t.status === 'pending' && t.due_at && new Date(t.due_at) < new Date()).length
   const pending = mainTasks.length - completed - overdue
