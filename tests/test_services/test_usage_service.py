@@ -152,3 +152,60 @@ async def test_set_daily_token_budget_upserts_not_duplicates(client):
         rows = (await db.execute(select(usage_service.SystemConfig))).scalars().all()
     assert len(rows) == 1
     assert rows[0].daily_token_budget == 200
+
+
+# ---------------------------------------------------------------- AI Usage report (admin page)
+
+
+@pytest.mark.asyncio
+async def test_get_usage_today_breaks_down_cost_by_priced_and_unpriced_models(client):
+    # gemini-2.5-flash is in the priced table, "totally-made-up-model" isn't.
+    await usage_service.log_usage(
+        provider="google", model="gemini-2.5-flash", usage_metadata={"input_tokens": 1_000_000, "output_tokens": 0, "total_tokens": 1_000_000}
+    )
+    await usage_service.log_usage(
+        provider="google", model="totally-made-up-model", usage_metadata={"input_tokens": 500, "output_tokens": 0, "total_tokens": 500}
+    )
+
+    usage = await usage_service.get_usage_today()
+    assert usage["total_tokens"] == 1_000_500
+    assert usage["request_count"] == 2
+    assert usage["estimated_cost_usd"] == pytest.approx(0.30, abs=1e-6)  # 1M input tokens @ $0.30/M
+    assert usage["unpriced_tokens"] == 500
+
+
+@pytest.mark.asyncio
+async def test_get_usage_report_groups_by_day_and_model(client):
+    await usage_service.log_usage(
+        provider="openai", model="gpt-4o-mini", usage_metadata={"input_tokens": 200, "output_tokens": 100, "total_tokens": 300}
+    )
+
+    report = await usage_service.get_usage_report(days=7)
+    assert report["days"] == 7
+    assert len(report["daily"]) == 7
+    today = report["daily"][-1]
+    assert today["total_tokens"] == 300
+    assert report["totals"]["total_tokens"] == 300
+    assert report["models"] == [
+        {
+            "provider": "openai", "model": "gpt-4o-mini", "prompt_tokens": 200, "completion_tokens": 100,
+            "total_tokens": 300, "request_count": 1, "estimated_cost_usd": report["models"][0]["estimated_cost_usd"], "unpriced_tokens": 0,
+        }
+    ]
+    assert report["models"][0]["estimated_cost_usd"] > 0
+
+
+@pytest.mark.asyncio
+async def test_get_usage_report_ignores_usage_outside_the_window(client):
+    from datetime import UTC, datetime, timedelta
+
+    async with db_session.async_session_maker() as db:
+        old = UsageLog(provider="openai", model="gpt-4o-mini", prompt_tokens=1, completion_tokens=1, total_tokens=2)
+        db.add(old)
+        await db.flush()
+        old.created_at = datetime.now(UTC) - timedelta(days=30)
+        await db.commit()
+
+    report = await usage_service.get_usage_report(days=7)
+    assert report["totals"]["total_tokens"] == 0
+    assert report["models"] == []

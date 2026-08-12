@@ -247,3 +247,163 @@ async def test_admin_reminders_include_ownerless_reminders(client, admin_auth_he
     assert listed["owner_id"] is None
     assert listed["owner_email"] is None
     assert listed["owner_display_name"] is None
+
+
+# ---------------------------------------------------------------- system health / AI management / AI usage / audit log
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_access_ai_platform_routes(client, auth_headers):
+    for path in ("/api/v1/admin/system-health", "/api/v1/admin/ai-management", "/api/v1/admin/ai-usage", "/api/v1/admin/audit-log"):
+        resp = await client.get(path, headers=auth_headers)
+        assert resp.status_code == 403, path
+
+
+@pytest.mark.asyncio
+async def test_admin_can_view_system_health(client, admin_auth_headers):
+    resp = await client.get("/api/v1/admin/system-health", headers=admin_auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["overall_status"] in ("operational", "degraded", "down")
+    keys = {c["key"] for c in body["components"]}
+    assert {"database", "scheduler", "websocket", "llm", "calendar"} <= keys
+
+
+@pytest.mark.asyncio
+async def test_admin_can_view_ai_management(client, admin_auth_headers):
+    resp = await client.get("/api/v1/admin/ai-management", headers=admin_auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["provider"]
+    assert body["model"]
+    assert "model_options" in body
+    assert isinstance(body["configured_providers"], list)
+
+
+@pytest.mark.asyncio
+async def test_admin_can_update_ai_management(client, admin_auth_headers):
+    """Test .env configures all 3 providers, so google/gemini-2.5-flash is always selectable."""
+    resp = await client.patch(
+        "/api/v1/admin/ai-management",
+        json={"provider": "google", "model": "gemini-2.5-flash", "temperature": 0.4},
+        headers=admin_auth_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["provider"] == "google"
+    assert body["model"] == "gemini-2.5-flash"
+    assert body["temperature"] == 0.4
+
+    # Reflected back on a plain GET too, not just the PATCH response.
+    again = await client.get("/api/v1/admin/ai-management", headers=admin_auth_headers)
+    assert again.json()["provider"] == "google"
+    assert again.json()["model"] == "gemini-2.5-flash"
+
+
+@pytest.mark.asyncio
+async def test_ai_management_rejects_unsupported_model(client, admin_auth_headers):
+    resp = await client.patch(
+        "/api/v1/admin/ai-management",
+        json={"provider": "google", "model": "not-a-real-model", "temperature": 0.7},
+        headers=admin_auth_headers,
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_ai_management_rejects_unconfigured_provider(client, admin_auth_headers, monkeypatch):
+    from src.services import ai_config_service
+
+    monkeypatch.setattr(ai_config_service, "configured_providers", lambda: ["google"])
+    resp = await client.patch(
+        "/api/v1/admin/ai-management",
+        json={"provider": "openai", "model": "gpt-4o-mini", "temperature": 0.7},
+        headers=admin_auth_headers,
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_admin_can_view_ai_usage_report(client, admin_auth_headers):
+    from src.services import usage_service
+
+    await usage_service.log_usage(
+        provider="google", model="gemini-2.5-flash", usage_metadata={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150}
+    )
+
+    resp = await client.get("/api/v1/admin/ai-usage?days=7", headers=admin_auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["days"] == 7
+    assert body["totals"]["total_tokens"] >= 150
+    assert len(body["daily"]) == 7
+    today = body["daily"][-1]
+    assert today["total_tokens"] >= 150
+    model_row = next(m for m in body["models"] if m["provider"] == "google" and m["model"] == "gemini-2.5-flash")
+    assert model_row["total_tokens"] >= 150
+    assert model_row["estimated_cost_usd"] > 0  # gemini-2.5-flash is in the priced table
+
+
+@pytest.mark.asyncio
+async def test_admin_actions_are_recorded_in_audit_log(client, admin_auth_headers, auth_headers):
+    alice = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()
+    await client.patch(f"/api/v1/admin/users/{alice['id']}/role", json={"role": "admin"}, headers=admin_auth_headers)
+    await client.patch(f"/api/v1/admin/users/{alice['id']}/role", json={"role": "user"}, headers=admin_auth_headers)
+    await client.patch("/api/v1/admin/settings/budget", json={"daily_token_budget": 12345}, headers=admin_auth_headers)
+
+    resp = await client.get("/api/v1/admin/audit-log", headers=admin_auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    actions = [item["action"] for item in body["items"]]
+    assert actions.count("user.role_changed") == 2
+    assert "platform.budget_changed" in actions
+    role_change = next(item for item in body["items"] if item["action"] == "user.role_changed")
+    assert role_change["actor_type"] == "admin"
+    assert role_change["actor_email"] == "admin@example.com"
+    assert role_change["target_type"] == "user"
+    assert role_change["target_id"] == alice["id"]
+
+
+@pytest.mark.asyncio
+async def test_audit_log_filters_by_query_and_actor_type(client, admin_auth_headers, auth_headers):
+    task = (await client.post("/api/v1/tasks", json={"title": "To be deleted"}, headers=auth_headers)).json()
+    await client.delete(f"/api/v1/admin/tasks/{task['id']}", headers=admin_auth_headers)
+
+    resp = await client.get("/api/v1/admin/audit-log?q=task.deleted", headers=admin_auth_headers)
+    assert resp.status_code == 200
+    assert all(item["action"] == "task.deleted" for item in resp.json()["items"])
+    assert any(item["target_id"] == task["id"] for item in resp.json()["items"])
+
+    resp = await client.get("/api/v1/admin/audit-log?actor_type=system", headers=admin_auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["items"] == []  # nothing logs as "system" yet - every call site is an admin action
+
+
+@pytest.mark.asyncio
+async def test_deleting_memory_reminder_conversation_are_all_audited(
+    client, admin_auth_headers, auth_headers, other_auth_headers
+):
+    memory = (
+        await client.post("/api/v1/memories", json={"category": "Work", "title": "M"}, headers=auth_headers)
+    ).json()
+    reminder = (
+        await client.post(
+            "/api/v1/reminders", json={"title": "R", "due_at_iso": "2026-08-10T15:00:00"}, headers=auth_headers
+        )
+    ).json()
+    bob = (await client.get("/api/v1/auth/me", headers=other_auth_headers)).json()
+    conv = (
+        await client.post(
+            "/api/v1/conversations", json={"type": "direct", "participant_ids": [bob["id"]]}, headers=auth_headers
+        )
+    ).json()
+
+    await client.delete(f"/api/v1/admin/memories/{memory['id']}", headers=admin_auth_headers)
+    await client.delete(f"/api/v1/admin/reminders/{reminder['id']}", headers=admin_auth_headers)
+    await client.delete(f"/api/v1/admin/conversations/{conv['id']}", headers=admin_auth_headers)
+
+    resp = await client.get("/api/v1/admin/audit-log", headers=admin_auth_headers)
+    actions_and_targets = {(item["action"], item["target_id"]) for item in resp.json()["items"]}
+    assert ("memory.deleted", memory["id"]) in actions_and_targets
+    assert ("reminder.deleted", reminder["id"]) in actions_and_targets
+    assert ("conversation.deleted", conv["id"]) in actions_and_targets

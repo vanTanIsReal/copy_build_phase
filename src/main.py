@@ -19,7 +19,7 @@ from src.api.routes import router
 from src.api.task_routes import router as task_router
 from src.config import get_settings
 from src.db.session import init_db
-from src.services import calendar_service
+from src.services import ai_config_service, calendar_service
 from src.services.scheduler import scheduler
 from src.websocket.routes import router as ws_router
 
@@ -29,6 +29,9 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     print(f"Starting {settings.app_name} in {settings.app_env} mode")
     await init_db()
+    # Restore whatever provider/model/temperature an admin last picked via the AI Management page
+    # (system_config, not .env) - a no-op if nobody has ever touched that page.
+    await ai_config_service.load_saved_ai_configuration()
     await init_checkpointer()
     scheduler.start()
     scheduler.add_job(

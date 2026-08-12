@@ -13,6 +13,7 @@ const getInitials = (name) => (name || '?').trim().split(/\s+/).map(w => w[0]).s
 const adminNav = [
   ['admin', 'bi-speedometer2', 'Dashboard'], ['admin/users', 'bi-people', 'Users'], ['admin/conversations', 'bi-chat-square-text', 'Conversations'],
   ['admin/user-data', 'bi-database', 'User data'],
+  ['admin/ai-management', 'bi-robot', 'AI Management'], ['admin/ai-usage', 'bi-bar-chart-line', 'AI Usage'], ['admin/audit-log', 'bi-shield-check', 'Audit Log'],
 ]
 
 export default function Sidebar({ open, onClose }) {
