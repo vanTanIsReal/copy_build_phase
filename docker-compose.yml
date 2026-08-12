@@ -25,6 +25,8 @@ services:
     environment:
       DATABASE_URL: postgresql://orbit:${POSTGRES_PASSWORD:-orbit_dev_password}@db:5432/orbit
       CORS_ORIGINS: http://localhost:3000
+    volumes:
+      - ./secrets:/app/secrets:ro
     depends_on:
       db:
         condition: service_healthy
@@ -39,6 +41,8 @@ services:
     build:
       context: ./Frontend
       dockerfile: Dockerfile
+      args:
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
     ports:
       - "3000:80"
     depends_on:

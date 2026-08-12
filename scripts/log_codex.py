@@ -10,7 +10,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -115,21 +115,37 @@ def iter_prompts(session_root: Path, repo_root: str, cutoff):
                     if item.get("type") == "session_meta":
                         session_id = payload.get("session_id") or payload.get("id", "")
                         continue
-                    if (item.get("type") != "event_msg"
-                            or payload.get("type") != "user_message"):
-                        continue
                     timestamp = item.get("timestamp", "")
                     timestamp_dt = parse_time(timestamp)
                     if cutoff and timestamp_dt and timestamp_dt < cutoff:
                         continue
-                    prompt = payload.get("message", "")
+
+                    prompt = ""
+                    prompt_id = str(line_no)
+                    # Older Codex transcript format.
+                    if (item.get("type") == "event_msg"
+                            and payload.get("type") == "user_message"):
+                        prompt = payload.get("message", "")
+                    # Current Codex Desktop transcript format.
+                    elif (item.get("type") == "response_item"
+                          and payload.get("type") == "message"
+                          and payload.get("role") == "user"):
+                        prompt_id = payload.get("id") or str(line_no)
+                        prompt = "\n".join(
+                            part.get("text", "")
+                            for part in (payload.get("content") or [])
+                            if isinstance(part, dict) and part.get("type") == "input_text"
+                        )
+                    else:
+                        continue
+
                     if not isinstance(prompt, str) or not prompt.strip():
                         continue
                     prompt = prompt.strip()
                     if (prompt.startswith("<environment_context>")
                             and prompt.endswith("</environment_context>")):
                         continue
-                    yield session_id or transcript.stem, line_no, timestamp, prompt
+                    yield session_id or transcript.stem, prompt_id, timestamp, prompt
         except OSError:
             continue
 
@@ -154,7 +170,7 @@ def main():
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "session.jsonl"
     seen = logged_ids(log_dir)
-    cutoff = None if args.all else datetime.now(timezone.utc) - timedelta(hours=max(args.hours, 0))
+    cutoff = None if args.all else datetime.now(UTC) - timedelta(hours=max(args.hours, 0))
     repo_root = norm_path(str(repo_path))
     repo = git("remote", "get-url", "origin").split("/")[-1].removesuffix(".git")
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
@@ -162,8 +178,8 @@ def main():
     student = git("config", "user.email") or os.environ.get("USERNAME", "unknown")
 
     entries = []
-    for session_id, line_no, ts, prompt in iter_prompts(sessions, repo_root, cutoff):
-        entry_id = f"codex-{session_id}-{line_no}"
+    for session_id, prompt_id, ts, prompt in iter_prompts(sessions, repo_root, cutoff):
+        entry_id = f"codex-{session_id}-{prompt_id}"
         if entry_id in seen:
             continue
         entries.append({
