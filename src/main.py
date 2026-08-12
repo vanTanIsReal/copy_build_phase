@@ -2,6 +2,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from src.agents.graph import close_checkpointer, init_checkpointer
 from src.api.admin_routes import router as admin_router
@@ -10,6 +13,7 @@ from src.api.calendar_routes import public_router as calendar_public_router
 from src.api.calendar_routes import router as calendar_router
 from src.api.chat_routes import router as chat_router
 from src.api.memory_routes import router as memory_router
+from src.api.rate_limit import limiter
 from src.api.reminder_routes import router as reminder_router
 from src.api.routes import router
 from src.api.task_routes import router as task_router
@@ -56,6 +60,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Rate limiting (slowapi) - see src/api/rate_limit.py. Routes opt in individually via
+# @limiter.limit(...); anything undecorated (e.g. /health, /chat/resume) is never limited.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
 app.include_router(router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
@@ -69,5 +79,6 @@ app.include_router(memory_router, prefix="/api/v1", tags=["memory"])
 
 
 @app.get("/health")
+@limiter.exempt
 async def health():
     return {"status": "ok", "env": settings.app_env}

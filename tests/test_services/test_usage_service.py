@@ -108,3 +108,47 @@ async def test_log_usage_no_alert_when_no_admin_users(client, auth_headers, monk
 
     await usage_service.log_usage(provider="openai", model="gpt-4o-mini", usage_metadata={"total_tokens": 150})
     broadcast.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_daily_token_budget_falls_back_to_env_when_no_override(client, monkeypatch):
+    monkeypatch.setattr(usage_service, "get_settings", lambda: _settings(1234))
+    assert await usage_service.get_daily_token_budget() == 1234
+
+
+@pytest.mark.asyncio
+async def test_set_daily_token_budget_overrides_env_value(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(usage_service, "get_settings", lambda: _settings(1234))
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+
+    await usage_service.set_daily_token_budget(9999, updated_by=me.json()["id"])
+
+    assert await usage_service.get_daily_token_budget() == 9999
+
+
+@pytest.mark.asyncio
+async def test_set_daily_token_budget_is_used_by_is_over_budget(client, monkeypatch):
+    """★ the whole point: an admin-set override must actually change blocking behavior, not just
+    be readable somewhere - no restart, takes effect on the very next check."""
+    monkeypatch.setattr(usage_service, "get_settings", lambda: _settings(1_000_000))  # env says huge budget
+
+    async def _usage():
+        return {"total_tokens": 50, "request_count": 1, "since": None}
+
+    monkeypatch.setattr(usage_service, "get_usage_today", _usage)
+    assert await usage_service.is_over_budget() is False  # 50 << 1,000,000
+
+    await usage_service.set_daily_token_budget(10, updated_by=None)  # admin lowers it below current usage
+
+    assert await usage_service.is_over_budget() is True  # 50 >= 10 now, without touching .env
+
+
+@pytest.mark.asyncio
+async def test_set_daily_token_budget_upserts_not_duplicates(client):
+    await usage_service.set_daily_token_budget(100, updated_by=None)
+    await usage_service.set_daily_token_budget(200, updated_by=None)
+
+    async with db_session.async_session_maker() as db:
+        rows = (await db.execute(select(usage_service.SystemConfig))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].daily_token_budget == 200

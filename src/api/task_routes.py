@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.rate_limit import crud_rate_limit
 from src.auth.dependencies import get_current_user
 from src.config import get_settings
 from src.db.models import Task, User
@@ -17,7 +18,7 @@ from src.websocket.manager import manager
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(crud_rate_limit)])
 
 _PRIORITY_RANK = {"High": 0, "Medium": 1, "Low": 2}
 

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.models.memory_schemas import MemoryOut
 from src.models.reminder_schemas import ReminderOut
@@ -30,6 +30,11 @@ class AdminStats(BaseModel):
 
 class UpdateRoleRequest(BaseModel):
     role: Literal["user", "admin"]
+
+
+class UpdateBudgetRequest(BaseModel):
+    # 0 means "unlimited" (matches usage_service.is_over_budget's existing `if not budget` treatment).
+    daily_token_budget: int = Field(..., ge=0)
 
 
 class UpdateStatusRequest(BaseModel):

@@ -29,6 +29,32 @@ async def test_admin_can_view_stats(client, admin_auth_headers, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_non_admin_cannot_update_budget(client, auth_headers):
+    resp = await client.patch("/api/v1/admin/settings/budget", json={"daily_token_budget": 5000}, headers=auth_headers)
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_can_update_budget_and_it_reflects_in_stats(client, admin_auth_headers):
+    resp = await client.patch(
+        "/api/v1/admin/settings/budget", json={"daily_token_budget": 5000}, headers=admin_auth_headers
+    )
+    assert resp.status_code == 200
+    assert resp.json()["daily_token_budget"] == 5000
+
+    stats_resp = await client.get("/api/v1/admin/stats", headers=admin_auth_headers)
+    assert stats_resp.json()["daily_token_budget"] == 5000
+
+
+@pytest.mark.asyncio
+async def test_update_budget_rejects_negative_value(client, admin_auth_headers):
+    resp = await client.patch(
+        "/api/v1/admin/settings/budget", json={"daily_token_budget": -1}, headers=admin_auth_headers
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_admin_can_list_users(client, admin_auth_headers, auth_headers):
     resp = await client.get("/api/v1/admin/users", headers=admin_auth_headers)
     assert resp.status_code == 200

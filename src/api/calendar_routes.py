@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import HTMLResponse
 from starlette.concurrency import run_in_threadpool
 
+from src.api.rate_limit import crud_rate_limit
 from src.auth.dependencies import get_current_user
 from src.config import get_settings
 from src.db.models import User
@@ -20,7 +21,7 @@ from src.services.google_credentials import CalendarNotConnected
 logger = logging.getLogger(__name__)
 
 # Main router: every route needs the app's own login (unchanged from before).
-router = APIRouter(dependencies=[Depends(get_current_user)])
+router = APIRouter(dependencies=[Depends(get_current_user), Depends(crud_rate_limit)])
 
 # Public router: only Google's OAuth callback. The user's identity travels through the signed
 # `state` param, not a Bearer token - Google redirects the browser here directly, with no

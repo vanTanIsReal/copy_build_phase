@@ -2,12 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.rate_limit import crud_rate_limit
 from src.auth.dependencies import get_current_user
 from src.db.models import Memory, User
 from src.db.session import get_db
 from src.models.memory_schemas import MemoryCreateRequest, MemoryOut, MemoryUpdateRequest
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(crud_rate_limit)])
 
 
 def _to_out(memory: Memory) -> MemoryOut:

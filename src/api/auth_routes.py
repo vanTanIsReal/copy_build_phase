@@ -1,10 +1,11 @@
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
+from src.api.rate_limit import limiter
 from src.auth import google_oauth
 from src.auth.dependencies import get_current_user
 from src.auth.security import create_access_token, hash_password, verify_password
@@ -44,16 +45,19 @@ def _initial_role_for(email: str) -> str:
 
 
 @router.post("/register", response_model=AuthResponse)
-async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
-    existing = (await db.execute(select(User).where(User.email == request.email))).scalar_one_or_none()
+@limiter.limit(get_settings().rate_limit_register)
+async def register(
+    request: Request, body: RegisterRequest, db: AsyncSession = Depends(get_db)
+) -> AuthResponse:
+    existing = (await db.execute(select(User).where(User.email == body.email))).scalar_one_or_none()
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
     user = User(
-        email=request.email,
-        password_hash=hash_password(request.password),
-        display_name=request.display_name,
-        role=_initial_role_for(request.email),
+        email=body.email,
+        password_hash=hash_password(body.password),
+        display_name=body.display_name,
+        role=_initial_role_for(body.email),
     )
     db.add(user)
     await db.commit()
@@ -64,9 +68,10 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db))
 
 
 @router.post("/login", response_model=AuthResponse)
-async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
-    user = (await db.execute(select(User).where(User.email == request.email))).scalar_one_or_none()
-    if user is None or not verify_password(request.password, user.password_hash):
+@limiter.limit(get_settings().rate_limit_auth)
+async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
+    user = (await db.execute(select(User).where(User.email == body.email))).scalar_one_or_none()
+    if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     token = create_access_token(user.id)
@@ -74,12 +79,15 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)) -> Au
 
 
 @router.post("/google", response_model=AuthResponse)
-async def google_auth(request: GoogleAuthRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
+@limiter.limit(get_settings().rate_limit_auth)
+async def google_auth(
+    request: Request, body: GoogleAuthRequest, db: AsyncSession = Depends(get_db)
+) -> AuthResponse:
     """Sign in (or sign up on first use) with a Google ID token from the frontend's <GoogleLogin/>
     button. One endpoint handles both login and signup transparently - there's nothing to
     distinguish client-side, same as the button itself is identical on /login and /register."""
     try:
-        claims = await run_in_threadpool(google_oauth.verify_google_id_token, request.id_token)
+        claims = await run_in_threadpool(google_oauth.verify_google_id_token, body.id_token)
     except google_oauth.GoogleTokenError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Google token") from None
 

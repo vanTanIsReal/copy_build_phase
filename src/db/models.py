@@ -140,6 +140,21 @@ class UsageLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
 
 
+class SystemConfig(Base):
+    """Single-row table (fixed id) for runtime-editable settings that would otherwise only live in
+    .env - currently just daily_token_budget, so an admin can raise/lower it from the Admin
+    dashboard without a server restart. NULL daily_token_budget means "no override yet" - callers
+    fall back to Settings.daily_token_budget (the .env default), so a deployment that never
+    touches this stays on exactly the old behavior."""
+
+    __tablename__ = "system_config"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: "default")
+    daily_token_budget: Mapped[int | None] = mapped_column(default=None)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+    updated_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), default=None)
+
+
 class Memory(Base):
     __tablename__ = "memories"
 

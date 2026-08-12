@@ -2,6 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.rate_limit import crud_rate_limit
 from src.auth.dependencies import get_current_user
 from src.db.models import Conversation, ConversationParticipant, Message, User
 from src.db.session import get_db
@@ -19,7 +20,7 @@ from src.models.chat_schemas import (
 from src.services import chat_service, proactive_service
 from src.websocket.manager import manager
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(crud_rate_limit)])
 
 
 @router.get("/users", response_model=list[UserPublic])
