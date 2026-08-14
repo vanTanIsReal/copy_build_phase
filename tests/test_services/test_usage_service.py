@@ -1,0 +1,211 @@
+import types
+from unittest.mock import AsyncMock
+
+import pytest
+from sqlalchemy import select
+
+from src.db import session as db_session
+from src.db.models import UsageLog
+from src.services import usage_service
+
+
+def _settings(budget: int):
+    return types.SimpleNamespace(daily_token_budget=budget, calendar_timezone="Asia/Ho_Chi_Minh")
+
+
+@pytest.mark.asyncio
+async def test_is_over_budget_false_when_under(monkeypatch):
+    monkeypatch.setattr(usage_service, "get_settings", lambda: _settings(1000))
+
+    async def _usage():
+        return {"total_tokens": 500, "request_count": 1, "since": None}
+
+    monkeypatch.setattr(usage_service, "get_usage_today", _usage)
+    assert await usage_service.is_over_budget() is False
+
+
+@pytest.mark.asyncio
+async def test_is_over_budget_true_when_at_or_over(monkeypatch):
+    monkeypatch.setattr(usage_service, "get_settings", lambda: _settings(1000))
+
+    async def _usage():
+        return {"total_tokens": 1000, "request_count": 1, "since": None}
+
+    monkeypatch.setattr(usage_service, "get_usage_today", _usage)
+    assert await usage_service.is_over_budget() is True
+
+
+@pytest.mark.asyncio
+async def test_is_over_budget_false_when_budget_is_zero(monkeypatch):
+    # 0 means "unlimited" (matches AdminStats' existing `if budget else 0.0` treatment) - never block.
+    monkeypatch.setattr(usage_service, "get_settings", lambda: _settings(0))
+    assert await usage_service.is_over_budget() is False
+
+
+@pytest.mark.asyncio
+async def test_log_usage_still_writes_a_row(client):
+    await usage_service.log_usage(
+        provider="openai", model="gpt-4o-mini", usage_metadata={"input_tokens": 3, "output_tokens": 4, "total_tokens": 7}
+    )
+    async with db_session.async_session_maker() as db:
+        rows = (await db.execute(select(UsageLog))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].total_tokens == 7
+
+
+@pytest.mark.asyncio
+async def test_log_usage_alerts_admins_on_warning_crossing(client, admin_auth_headers, monkeypatch):
+    monkeypatch.setattr(usage_service, "get_settings", lambda: _settings(100))
+    broadcast = AsyncMock()
+    monkeypatch.setattr(usage_service.manager, "broadcast_to_users", broadcast)
+
+    # before=0 -> after=85 crosses the 80% warning threshold.
+    await usage_service.log_usage(provider="openai", model="gpt-4o-mini", usage_metadata={"total_tokens": 85})
+
+    broadcast.assert_awaited_once()
+    admin_ids, payload = broadcast.call_args.args
+    me = await client.get("/api/v1/auth/me", headers=admin_auth_headers)
+    assert me.json()["id"] in admin_ids
+    assert payload["type"] == "usage_budget_alert"
+    assert payload["level"] == "warning"
+    assert payload["used_pct"] == 85.0
+
+
+@pytest.mark.asyncio
+async def test_log_usage_alerts_exceeded_not_warning_when_crossing_both_at_once(client, admin_auth_headers, monkeypatch):
+    monkeypatch.setattr(usage_service, "get_settings", lambda: _settings(100))
+    broadcast = AsyncMock()
+    monkeypatch.setattr(usage_service.manager, "broadcast_to_users", broadcast)
+
+    # before=0 -> after=100 jumps past both thresholds in one call - only the more severe one fires.
+    await usage_service.log_usage(provider="openai", model="gpt-4o-mini", usage_metadata={"total_tokens": 100})
+
+    broadcast.assert_awaited_once()
+    _, payload = broadcast.call_args.args
+    assert payload["level"] == "exceeded"
+
+
+@pytest.mark.asyncio
+async def test_log_usage_no_alert_when_no_new_threshold_crossed(client, admin_auth_headers, monkeypatch):
+    monkeypatch.setattr(usage_service, "get_settings", lambda: _settings(100))
+    broadcast = AsyncMock()
+    monkeypatch.setattr(usage_service.manager, "broadcast_to_users", broadcast)
+
+    await usage_service.log_usage(provider="openai", model="gpt-4o-mini", usage_metadata={"total_tokens": 150})
+    broadcast.assert_awaited_once()
+    broadcast.reset_mock()
+
+    # Already over 100% from the call above - no *new* crossing, so no repeat alert.
+    await usage_service.log_usage(provider="openai", model="gpt-4o-mini", usage_metadata={"total_tokens": 10})
+    broadcast.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_log_usage_no_alert_when_no_admin_users(client, auth_headers, monkeypatch):
+    monkeypatch.setattr(usage_service, "get_settings", lambda: _settings(100))
+    broadcast = AsyncMock()
+    monkeypatch.setattr(usage_service.manager, "broadcast_to_users", broadcast)
+
+    await usage_service.log_usage(provider="openai", model="gpt-4o-mini", usage_metadata={"total_tokens": 150})
+    broadcast.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_daily_token_budget_falls_back_to_env_when_no_override(client, monkeypatch):
+    monkeypatch.setattr(usage_service, "get_settings", lambda: _settings(1234))
+    assert await usage_service.get_daily_token_budget() == 1234
+
+
+@pytest.mark.asyncio
+async def test_set_daily_token_budget_overrides_env_value(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(usage_service, "get_settings", lambda: _settings(1234))
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+
+    await usage_service.set_daily_token_budget(9999, updated_by=me.json()["id"])
+
+    assert await usage_service.get_daily_token_budget() == 9999
+
+
+@pytest.mark.asyncio
+async def test_set_daily_token_budget_is_used_by_is_over_budget(client, monkeypatch):
+    """★ the whole point: an admin-set override must actually change blocking behavior, not just
+    be readable somewhere - no restart, takes effect on the very next check."""
+    monkeypatch.setattr(usage_service, "get_settings", lambda: _settings(1_000_000))  # env says huge budget
+
+    async def _usage():
+        return {"total_tokens": 50, "request_count": 1, "since": None}
+
+    monkeypatch.setattr(usage_service, "get_usage_today", _usage)
+    assert await usage_service.is_over_budget() is False  # 50 << 1,000,000
+
+    await usage_service.set_daily_token_budget(10, updated_by=None)  # admin lowers it below current usage
+
+    assert await usage_service.is_over_budget() is True  # 50 >= 10 now, without touching .env
+
+
+@pytest.mark.asyncio
+async def test_set_daily_token_budget_upserts_not_duplicates(client):
+    await usage_service.set_daily_token_budget(100, updated_by=None)
+    await usage_service.set_daily_token_budget(200, updated_by=None)
+
+    async with db_session.async_session_maker() as db:
+        rows = (await db.execute(select(usage_service.SystemConfig))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].daily_token_budget == 200
+
+
+# ---------------------------------------------------------------- AI Usage report (admin page)
+
+
+@pytest.mark.asyncio
+async def test_get_usage_today_breaks_down_cost_by_priced_and_unpriced_models(client):
+    # gemini-2.5-flash is in the priced table, "totally-made-up-model" isn't.
+    await usage_service.log_usage(
+        provider="google", model="gemini-2.5-flash", usage_metadata={"input_tokens": 1_000_000, "output_tokens": 0, "total_tokens": 1_000_000}
+    )
+    await usage_service.log_usage(
+        provider="google", model="totally-made-up-model", usage_metadata={"input_tokens": 500, "output_tokens": 0, "total_tokens": 500}
+    )
+
+    usage = await usage_service.get_usage_today()
+    assert usage["total_tokens"] == 1_000_500
+    assert usage["request_count"] == 2
+    assert usage["estimated_cost_usd"] == pytest.approx(0.30, abs=1e-6)  # 1M input tokens @ $0.30/M
+    assert usage["unpriced_tokens"] == 500
+
+
+@pytest.mark.asyncio
+async def test_get_usage_report_groups_by_day_and_model(client):
+    await usage_service.log_usage(
+        provider="openai", model="gpt-4o-mini", usage_metadata={"input_tokens": 200, "output_tokens": 100, "total_tokens": 300}
+    )
+
+    report = await usage_service.get_usage_report(days=7)
+    assert report["days"] == 7
+    assert len(report["daily"]) == 7
+    today = report["daily"][-1]
+    assert today["total_tokens"] == 300
+    assert report["totals"]["total_tokens"] == 300
+    assert report["models"] == [
+        {
+            "provider": "openai", "model": "gpt-4o-mini", "prompt_tokens": 200, "completion_tokens": 100,
+            "total_tokens": 300, "request_count": 1, "estimated_cost_usd": report["models"][0]["estimated_cost_usd"], "unpriced_tokens": 0,
+        }
+    ]
+    assert report["models"][0]["estimated_cost_usd"] > 0
+
+
+@pytest.mark.asyncio
+async def test_get_usage_report_ignores_usage_outside_the_window(client):
+    from datetime import UTC, datetime, timedelta
+
+    async with db_session.async_session_maker() as db:
+        old = UsageLog(provider="openai", model="gpt-4o-mini", prompt_tokens=1, completion_tokens=1, total_tokens=2)
+        db.add(old)
+        await db.flush()
+        old.created_at = datetime.now(UTC) - timedelta(days=30)
+        await db.commit()
+
+    report = await usage_service.get_usage_report(days=7)
+    assert report["totals"]["total_tokens"] == 0
+    assert report["models"] == []

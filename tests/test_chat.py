@@ -125,43 +125,143 @@ async def test_list_users_excludes_self(client, auth_headers, other_auth_headers
     assert "alice@example.com" not in emails
 
 
-@pytest.mark.asyncio
-async def test_development_seeds_demo_groups(client, auth_headers):
-    first = await client.get("/api/v1/conversations", headers=auth_headers)
-    assert first.status_code == 200
-    names = {conversation["name"] for conversation in first.json()["conversations"]}
-    assert {"Product Launch Team", "Leadership Circle", "Design System Crew"}.issubset(names)
+# ---------------------------------------------------------------- delete (hide) conversation
 
-    second = await client.get("/api/v1/conversations", headers=auth_headers)
-    assert second.status_code == 200
-    second_names = [conversation["name"] for conversation in second.json()["conversations"]]
-    assert second_names.count("Product Launch Team") == 1
+
+async def _ids(resp):
+    return {c["id"] for c in resp.json()["conversations"]}
 
 
 @pytest.mark.asyncio
-async def test_search_and_join_group(client, auth_headers, other_auth_headers):
-    carol = (
+async def test_delete_conversation_hides_it_for_caller_only(client, auth_headers, other_auth_headers):
+    other_id = await _other_user_id(client, other_auth_headers)
+    conv = (
         await client.post(
-            "/api/v1/auth/register",
-            json={"email": "group-carol@example.com", "password": "password123", "display_name": "Carol"},
+            "/api/v1/conversations", json={"type": "direct", "participant_ids": [other_id]}, headers=auth_headers
         )
     ).json()
-    group = (
+
+    resp = await client.delete(f"/api/v1/conversations/{conv['id']}", headers=auth_headers)
+    assert resp.status_code == 204
+
+    assert conv["id"] not in await _ids(await client.get("/api/v1/conversations", headers=auth_headers))
+    assert conv["id"] in await _ids(await client.get("/api/v1/conversations", headers=other_auth_headers))
+
+
+@pytest.mark.asyncio
+async def test_delete_conversation_reappears_after_new_message(client, auth_headers, other_auth_headers):
+    other_id = await _other_user_id(client, other_auth_headers)
+    conv = (
+        await client.post(
+            "/api/v1/conversations", json={"type": "direct", "participant_ids": [other_id]}, headers=auth_headers
+        )
+    ).json()
+    await client.delete(f"/api/v1/conversations/{conv['id']}", headers=auth_headers)
+
+    await client.post(f"/api/v1/conversations/{conv['id']}/messages", json={"content": "hi"}, headers=other_auth_headers)
+
+    assert conv["id"] in await _ids(await client.get("/api/v1/conversations", headers=auth_headers))
+
+
+@pytest.mark.asyncio
+async def test_delete_conversation_requires_participant(client, auth_headers, other_auth_headers):
+    other_id = await _other_user_id(client, other_auth_headers)
+    conv = (
+        await client.post(
+            "/api/v1/conversations", json={"type": "direct", "participant_ids": [other_id]}, headers=auth_headers
+        )
+    ).json()
+
+    third = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "carol2@example.com", "password": "password123", "display_name": "Carol"},
+    )
+    carol_headers = {"Authorization": f"Bearer {third.json()['access_token']}"}
+
+    resp = await client.delete(f"/api/v1/conversations/{conv['id']}", headers=carol_headers)
+    assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------- leave group
+
+
+@pytest.mark.asyncio
+async def test_leave_group_removes_member_and_notifies_others(client, auth_headers, other_auth_headers):
+    other_id = await _other_user_id(client, other_auth_headers)
+    conv = (
         await client.post(
             "/api/v1/conversations",
-            json={"type": "group", "participant_ids": [carol["user"]["id"]], "name": "Remote Demo Group"},
-            headers=other_auth_headers,
+            json={"type": "group", "participant_ids": [other_id], "name": "Team"},
+            headers=auth_headers,
         )
     ).json()
 
-    search = await client.get("/api/v1/groups?search=Remote", headers=auth_headers)
-    assert search.status_code == 200
-    result = next(item for item in search.json()["groups"] if item["id"] == group["id"])
-    assert result["is_member"] is False
+    resp = await client.post(f"/api/v1/conversations/{conv['id']}/leave", headers=other_auth_headers)
+    assert resp.status_code == 204
 
-    joined = await client.post(f"/api/v1/conversations/{group['id']}/join", headers=auth_headers)
-    assert joined.status_code == 200
-    assert len(joined.json()["participants"]) == 3
+    # The leaver loses access outright (not just hidden from their list).
+    assert (await client.get(f"/api/v1/conversations/{conv['id']}/messages", headers=other_auth_headers)).status_code == 403
 
-    conversations = await client.get("/api/v1/conversations", headers=auth_headers)
-    assert group["id"] in {item["id"] for item in conversations.json()["conversations"]}
+    # The remaining member's roster reflects the departure.
+    listed = await client.get("/api/v1/conversations", headers=auth_headers)
+    summary = next(c for c in listed.json()["conversations"] if c["id"] == conv["id"])
+    assert len(summary["participants"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_leave_group_last_member_deletes_conversation(client, auth_headers, other_auth_headers):
+    other_id = await _other_user_id(client, other_auth_headers)
+    conv = (
+        await client.post(
+            "/api/v1/conversations",
+            json={"type": "group", "participant_ids": [other_id], "name": "Team"},
+            headers=auth_headers,
+        )
+    ).json()
+
+    await client.post(f"/api/v1/conversations/{conv['id']}/leave", headers=other_auth_headers)
+    resp = await client.post(f"/api/v1/conversations/{conv['id']}/leave", headers=auth_headers)
+    assert resp.status_code == 204
+
+    # Nobody left to be a participant of it - the conversation itself is gone.
+    assert (await client.get(f"/api/v1/conversations/{conv['id']}/messages", headers=auth_headers)).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_leave_direct_conversation_rejected(client, auth_headers, other_auth_headers):
+    other_id = await _other_user_id(client, other_auth_headers)
+    conv = (
+        await client.post(
+            "/api/v1/conversations", json={"type": "direct", "participant_ids": [other_id]}, headers=auth_headers
+        )
+    ).json()
+
+    resp = await client.post(f"/api/v1/conversations/{conv['id']}/leave", headers=auth_headers)
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_leave_group_requires_participant(client, auth_headers, other_auth_headers):
+    other_id = await _other_user_id(client, other_auth_headers)
+    conv = (
+        await client.post(
+            "/api/v1/conversations",
+            json={"type": "group", "participant_ids": [other_id], "name": "Team"},
+            headers=auth_headers,
+        )
+    ).json()
+
+    third = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "carol3@example.com", "password": "password123", "display_name": "Carol"},
+    )
+    carol_headers = {"Authorization": f"Bearer {third.json()['access_token']}"}
+
+    resp = await client.post(f"/api/v1/conversations/{conv['id']}/leave", headers=carol_headers)
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_leave_group_nonexistent_conversation(client, auth_headers):
+    resp = await client.post("/api/v1/conversations/does-not-exist/leave", headers=auth_headers)
+    assert resp.status_code == 404

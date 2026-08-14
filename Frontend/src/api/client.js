@@ -1,8 +1,5 @@
-const browserOrigin = window.location.origin
-const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || `${browserOrigin}/api/v1`
-export const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || `${wsProtocol}//${window.location.host}/api/v1/ws`
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+export const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000/api/v1/ws'
 
 export class ApiError extends Error {
   constructor(status, detail) {
@@ -15,11 +12,16 @@ export class ApiError extends Error {
 export async function apiFetch(path, { method = 'GET', body, token } = {}) {
   const headers = { 'Content-Type': 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
+  let res
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
+  } catch {
+    throw new ApiError(0, 'Backend is unavailable. Start the backend and verify its database connection.')
+  }
   if (!res.ok) {
     const payload = await res.json().catch(() => null)
     throw new ApiError(res.status, payload?.detail || res.statusText)

@@ -34,19 +34,6 @@ class ConversationListResponse(BaseModel):
     conversations: list[ConversationSummary]
 
 
-class GroupSearchResult(BaseModel):
-    id: str
-    name: str
-    member_count: int
-    is_member: bool
-    last_message: MessageOut | None
-    updated_at: str
-
-
-class GroupSearchResponse(BaseModel):
-    groups: list[GroupSearchResult]
-
-
 class MessageListResponse(BaseModel):
     messages: list[MessageOut]
     has_more: bool
@@ -54,3 +41,13 @@ class MessageListResponse(BaseModel):
 
 class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=5000)
+
+
+class AIPermissionOut(BaseModel):
+    conversation_id: str
+    granted: bool
+    updated_at: str | None = None
+
+
+class AIPermissionUpdateRequest(BaseModel):
+    granted: bool

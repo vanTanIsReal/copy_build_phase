@@ -6,7 +6,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Command
 
-from src.agents.graph import agent
+from src.agents import graph as agent_graph
 from src.config import get_settings
 from src.services import reminder_service
 
@@ -52,14 +52,14 @@ async def test_create_reminder_interrupts_then_schedules(client, monkeypatch, fa
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
     config = _config()
-    result = await agent.ainvoke({"messages": [HumanMessage(content="remind me")]}, config)
+    result = await agent_graph.agent.ainvoke({"messages": [HumanMessage(content="remind me")]}, config)
 
     interrupts = result.get("__interrupt__")
     assert interrupts is not None
     assert interrupts[0].value["type"] == "reminder"
     assert not recorded_jobs
 
-    result2 = await agent.ainvoke(Command(resume={"approved": True}), config)
+    result2 = await agent_graph.agent.ainvoke(Command(resume={"approved": True}), config)
     final = result2["messages"][-1]
     assert "scheduled to fire" in final.content
     assert len(recorded_jobs) == 1
@@ -73,7 +73,7 @@ async def test_create_reminder_interrupts_then_schedules(client, monkeypatch, fa
 
 
 @pytest.mark.asyncio
-async def test_fire_reminder_marks_status_and_pushes_to_owner(client, monkeypatch):
+async def test_fire_reminder_marks_status_and_pushes_to_owner(client, auth_headers, monkeypatch):
     pushed = []
 
     async def fake_broadcast(user_ids, payload):
@@ -82,16 +82,17 @@ async def test_fire_reminder_marks_status_and_pushes_to_owner(client, monkeypatc
     monkeypatch.setattr(reminder_service.manager, "broadcast_to_users", fake_broadcast)
     monkeypatch.setattr(reminder_service.scheduler, "add_job", lambda *a, **k: None)
 
+    owner_id = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()["id"]
     reminder = await reminder_service.schedule_reminder(
-        owner_id="user-1", title="Test", due_at_iso="2026-08-10T15:00:00", lead_minutes=30
+        owner_id=owner_id, title="Test", due_at_iso="2026-08-10T15:00:00", lead_minutes=30
     )
 
     await reminder_service._fire_reminder_job(reminder.id)
 
-    reminders = await reminder_service.list_reminders(owner_id="user-1")
+    reminders = await reminder_service.list_reminders(owner_id=owner_id)
     assert reminders[0].status == "fired"
     assert pushed == [
-        (["user-1"], {"type": "reminder_fired", "reminder": {"id": reminder.id, "title": "Test", "message": ""}})
+        ([owner_id], {"type": "reminder_fired", "reminder": {"id": reminder.id, "title": "Test", "message": ""}})
     ]
 
 

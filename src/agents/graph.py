@@ -1,5 +1,4 @@
 from langchain_core.messages import ToolMessage
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 from psycopg_pool import AsyncConnectionPool
@@ -47,28 +46,18 @@ def build_graph(checkpointer):
 
 
 _settings = get_settings()
-_use_postgres = _settings.database_url.startswith("postgresql")
 
 # `AsyncPostgresSaver` must be constructed inside a *running* event loop (it calls
 # asyncio.get_running_loop() in __init__), which isn't available yet at module-import time -
-# so the Postgres path is built later, from init_checkpointer() during FastAPI's lifespan.
-# The default MemorySaver has no such requirement, so it (and `agent`) is ready immediately,
-# same as before - teammates on the default SQLite setup and the test suite (which never
-# awaits an init hook) are unaffected.
-if _use_postgres:
-    checkpointer, checkpointer_pool, agent = None, None, None
-else:
-    checkpointer, checkpointer_pool = MemorySaver(), None
-    agent = build_graph(checkpointer)
+# so it's built later, from init_checkpointer() during FastAPI's lifespan. `agent` stays None
+# until then; no /chat call can succeed before init_checkpointer() has been awaited once.
+checkpointer, checkpointer_pool, agent = None, None, None
 
 
 async def init_checkpointer() -> None:
-    """Build the Postgres checkpointer/pool and compile `agent` with it. No-op when
-    DATABASE_URL isn't Postgres (agent is already built). Must be awaited once, inside the
-    event loop that will go on to serve requests, before any /chat call."""
+    """Build the Postgres checkpointer/pool and compile `agent` with it. Must be awaited once,
+    inside the event loop that will go on to serve requests, before any /chat call."""
     global checkpointer, checkpointer_pool, agent
-    if not _use_postgres:
-        return
 
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 

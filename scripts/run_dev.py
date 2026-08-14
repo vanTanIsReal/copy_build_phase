@@ -1,15 +1,11 @@
-"""Dev server launcher for Windows + PostgreSQL.
+"""Dev server launcher for Windows.
 
 Why this exists instead of `uvicorn src.main:app --reload ...`: AsyncPostgresSaver (the agent's
-persistent memory, used when DATABASE_URL is Postgres) needs psycopg's async mode, which cannot
-run on Windows' default ProactorEventLoop - it needs SelectorEventLoop. uvicorn's CLI only takes
-`--loop auto|asyncio|uvloop`, and on win32 both `auto` and `asyncio` resolve to ProactorEventLoop
-before our app even gets imported, so there's no CLI flag that fixes this. Calling uvicorn.run()
-directly and passing the loop *class* (not one of those three strings) sidesteps that: uvicorn
-only special-cases the string names and returns anything else - including a class - unchanged.
-
-On SQLite (DATABASE_URL not Postgres), this launcher is equivalent to the plain uvicorn CLI -
-still fine to use, just not required.
+persistent memory - the project requires Postgres, no SQLite fallback) needs psycopg's async
+mode, which cannot run on Windows' default ProactorEventLoop - it needs SelectorEventLoop.
+Uvicorn's Windows subprocess setup selects SelectorEventLoop when reload is enabled.  We also set
+the policy in the parent process, then pass the supported ``"asyncio"`` loop name.  Passing an
+event-loop class used to work in older Uvicorn releases, but raises ``KeyError`` in Uvicorn 0.35+.
 
 Usage:
     python scripts/run_dev.py
@@ -25,7 +21,4 @@ import uvicorn  # noqa: E402
 if __name__ == "__main__":
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-        loop = asyncio.SelectorEventLoop
-    else:
-        loop = "auto"
-    uvicorn.run("src.main:app", host="0.0.0.0", port=8000, reload=True, loop=loop)
+    uvicorn.run("src.main:app", host="0.0.0.0", port=8000, reload=True, loop="asyncio")

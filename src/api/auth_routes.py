@@ -1,34 +1,26 @@
-from datetime import UTC, datetime, timedelta
-from urllib.parse import quote
+import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete, select
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
+from src.api.rate_limit import limiter
+from src.auth import google_oauth
 from src.auth.dependencies import get_current_user
-from src.auth.security import (
-    create_access_token,
-    create_password_reset_token,
-    hash_password,
-    hash_password_reset_token,
-    verify_password,
-)
+from src.auth.security import create_access_token, hash_password, verify_password
 from src.config import get_settings
-from src.db.models import PasswordResetToken, User
+from src.db.models import GoogleIdentity, User
 from src.db.session import get_db
 from src.models.auth_schemas import (
     AuthResponse,
     ChangePasswordRequest,
-    ForgotPasswordRequest,
-    ForgotPasswordResponse,
+    GoogleAuthRequest,
     LoginRequest,
-    MessageResponse,
     RegisterRequest,
-    ResetPasswordRequest,
     UpdateProfileRequest,
     UserPublic,
 )
-from src.services.email import send_password_reset_email
 
 router = APIRouter()
 
@@ -45,25 +37,28 @@ def _to_public(user: User) -> UserPublic:
     )
 
 
-def _resolve_role(email: str, settings) -> str:
-    initial_admin_email = settings.initial_admin_email.strip().lower()
+def _initial_role_for(email: str) -> str:
+    """The first account registered with INITIAL_ADMIN_EMAIL (any auth method) bootstraps as
+    admin - shared by /register and /google so the rule isn't duplicated/drifting between them."""
+    initial_admin_email = get_settings().initial_admin_email.strip().lower()
     return "admin" if initial_admin_email and email.lower() == initial_admin_email else "user"
 
 
 @router.post("/register", response_model=AuthResponse)
-async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
-    existing = (await db.execute(select(User).where(User.email == request.email))).scalar_one_or_none()
+@limiter.limit(get_settings().rate_limit_register)
+async def register(
+    request: Request, body: RegisterRequest, db: AsyncSession = Depends(get_db)
+) -> AuthResponse:
+    email = body.email.strip().lower()
+    existing = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
-    settings = get_settings()
-    role = _resolve_role(request.email, settings)
-
     user = User(
-        email=request.email,
-        password_hash=hash_password(request.password),
-        display_name=request.display_name,
-        role=role,
+        email=email,
+        password_hash=hash_password(body.password),
+        display_name=body.display_name,
+        role=_initial_role_for(email),
     )
     db.add(user)
     await db.commit()
@@ -74,78 +69,80 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db))
 
 
 @router.post("/login", response_model=AuthResponse)
-async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
-    user = (await db.execute(select(User).where(User.email == request.email))).scalar_one_or_none()
-    if user is None or not verify_password(request.password, user.password_hash):
+@limiter.limit(get_settings().rate_limit_auth)
+async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
+    email = body.email.strip().lower()
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
-
-    settings = get_settings()
-    desired_role = _resolve_role(request.email, settings)
-    if user.role != desired_role:
-        user.role = desired_role
-        await db.commit()
-        await db.refresh(user)
 
     token = create_access_token(user.id)
     return AuthResponse(access_token=token, user=_to_public(user))
 
 
-@router.post("/forgot-password", response_model=ForgotPasswordResponse)
-async def forgot_password(
-    request: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)
-) -> ForgotPasswordResponse:
-    """Start a password reset without revealing whether an email is registered."""
-    user = (await db.execute(select(User).where(User.email == request.email))).scalar_one_or_none()
-    raw_token = None
+@router.post("/google", response_model=AuthResponse)
+@limiter.limit(get_settings().rate_limit_auth)
+async def google_auth(
+    request: Request, body: GoogleAuthRequest, db: AsyncSession = Depends(get_db)
+) -> AuthResponse:
+    """Sign in (or sign up on first use) with a Google ID token from the frontend's <GoogleLogin/>
+    button. One endpoint handles both login and signup transparently - there's nothing to
+    distinguish client-side, same as the button itself is identical on /login and /register."""
+    try:
+        claims = await run_in_threadpool(google_oauth.verify_google_id_token, body.id_token)
+    except google_oauth.GoogleTokenError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Google token") from None
 
-    if user is not None:
-        await db.execute(delete(PasswordResetToken).where(PasswordResetToken.user_id == user.id))
-        raw_token, token_hash = create_password_reset_token()
-        reset_token = PasswordResetToken(
-            user_id=user.id,
-            token_hash=token_hash,
-            expires_at=datetime.now(UTC) + timedelta(minutes=get_settings().password_reset_expire_minutes),
+    google_sub = str(claims.get("sub", "")).strip()
+    email = str(claims.get("email", "")).strip().lower()
+    email_verified = claims.get("email_verified") is True
+    if not google_sub or not email or not email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Google did not provide a verified email address",
         )
-        db.add(reset_token)
-        await db.commit()
 
-    settings = get_settings()
-    if raw_token and settings.app_env == "production":
-        reset_url = f"{settings.frontend_url.rstrip('/')}/reset-password?token={quote(raw_token)}"
-        await send_password_reset_email(user.email, reset_url)
-
-    response_token = raw_token if raw_token and settings.app_env != "production" else None
-    return ForgotPasswordResponse(
-        message="If an account exists for that email, a password reset link has been created.",
-        reset_token=response_token,
-    )
-
-
-@router.post("/reset-password", response_model=MessageResponse)
-async def reset_password(request: ResetPasswordRequest, db: AsyncSession = Depends(get_db)) -> MessageResponse:
-    reset_record = (
-        await db.execute(
-            select(PasswordResetToken).where(PasswordResetToken.token_hash == hash_password_reset_token(request.token))
-        )
+    identity = (
+        await db.execute(select(GoogleIdentity).where(GoogleIdentity.google_sub == google_sub))
     ).scalar_one_or_none()
-    if reset_record is None or reset_record.used_at is not None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token")
 
-    now = datetime.now(UTC)
-    expires_at = reset_record.expires_at
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=UTC)
-    if expires_at <= now:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token")
+    if identity is not None:
+        user = await db.get(User, identity.user_id)
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Google identity is linked to a missing account; contact an administrator",
+            )
+    else:
+        user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+        if user is not None and not email_verified:
+            # Don't silently attach a Google identity to an existing account on the strength of an
+            # email Google itself won't vouch for - that would be an account-takeover vector.
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email not verified by Google; sign in with your password instead",
+            )
+        if user is None:
+            user = User(
+                email=email,
+                # Unusable, never-shared password - password_hash stays NOT NULL without adding a
+                # nullable column to `users`. Password login on this account will just always 401
+                # (correct: nobody ever set a password for it) until/unless they set one later.
+                password_hash=hash_password(secrets.token_urlsafe(32)),
+                display_name=claims.get("name") or email.split("@")[0],
+                role=_initial_role_for(email),
+            )
+            db.add(user)
+            await db.flush()
+        db.add(GoogleIdentity(user_id=user.id, google_sub=google_sub, email=email))
+        await db.commit()
+        await db.refresh(user)
 
-    user = await db.get(User, reset_record.user_id)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has been disabled")
 
-    user.password_hash = hash_password(request.password)
-    reset_record.used_at = now
-    await db.commit()
-    return MessageResponse(message="Password has been reset. You can now sign in.")
+    token = create_access_token(user.id)
+    return AuthResponse(access_token=token, user=_to_public(user))
 
 
 @router.get("/me", response_model=UserPublic)

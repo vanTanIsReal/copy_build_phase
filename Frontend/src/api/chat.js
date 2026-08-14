@@ -5,14 +5,8 @@ export const listUsers = (token, search) =>
 
 export const listConversations = (token) => apiFetch('/conversations', { token })
 
-export const listGroups = (token, search) =>
-  apiFetch(`/groups${search ? `?search=${encodeURIComponent(search)}` : ''}`, { token })
-
 export const createConversation = (token, { type, participant_ids, name }) =>
   apiFetch('/conversations', { method: 'POST', token, body: { type, participant_ids, name } })
-
-export const joinConversation = (token, conversationId) =>
-  apiFetch(`/conversations/${conversationId}/join`, { method: 'POST', token })
 
 export const getMessages = (token, conversationId, { before, limit = 50 } = {}) => {
   const params = new URLSearchParams({ limit: String(limit) })
@@ -25,3 +19,18 @@ export const sendMessage = (token, conversationId, content) =>
 
 export const markRead = (token, conversationId) =>
   apiFetch(`/conversations/${conversationId}/read`, { method: 'POST', token })
+
+// "Delete conversation" - hides it from MY list only, doesn't touch it for other participants
+// (see src/services/chat_service.py::hide_conversation). Reappears automatically on new activity.
+export const deleteConversation = (token, conversationId) =>
+  apiFetch(`/conversations/${conversationId}`, { method: 'DELETE', token })
+
+// Leaves a group for good - only valid for type "group" (backend 400s for "direct").
+export const leaveConversation = (token, conversationId) =>
+  apiFetch(`/conversations/${conversationId}/leave`, { method: 'POST', token })
+
+export const getAiPermission = (token, conversationId) =>
+  apiFetch(`/conversations/${conversationId}/ai-permission`, { token })
+
+export const setAiPermission = (token, conversationId, granted) =>
+  apiFetch(`/conversations/${conversationId}/ai-permission`, { method: 'PUT', token, body: { granted } })

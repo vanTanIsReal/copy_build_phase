@@ -5,13 +5,11 @@ export const register = ({ email, password, display_name }) =>
 
 export const login = ({ email, password }) => apiFetch('/auth/login', { method: 'POST', body: { email, password } })
 
+// One endpoint handles both first-time signup and returning login for a Google account - see
+// src/api/auth_routes.py::google_auth.
+export const googleAuth = (id_token) => apiFetch('/auth/google', { method: 'POST', body: { id_token } })
+
 export const getMe = (token) => apiFetch('/auth/me', { token })
-
-export const requestPasswordReset = (email) =>
-  apiFetch('/auth/forgot-password', { method: 'POST', body: { email } })
-
-export const resetPassword = ({ token, password }) =>
-  apiFetch('/auth/reset-password', { method: 'POST', body: { token, password } })
 
 export const updateProfile = (token, updates) => apiFetch('/auth/me', { method: 'PATCH', token, body: updates })
 

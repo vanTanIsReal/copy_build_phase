@@ -11,7 +11,7 @@ class ReminderOut(BaseModel):
     due_at: datetime
     fire_at: datetime
     status: Literal["scheduled", "fired", "cancelled"]
-    source: Literal["manual", "agent"]
+    source: Literal["manual", "agent", "proactive"]
     created_at: datetime
 
 

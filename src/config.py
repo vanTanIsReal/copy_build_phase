@@ -20,40 +20,56 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     cors_origins: str = "http://localhost:3000"
 
-    # LLM (OpenAI)
-    llm_provider: Literal["openai"] = "openai"
+    # LLM
+    llm_provider: Literal["google", "groq", "openai"] = "google"
+    google_api_key: str = ""
+    groq_api_key: str = ""
     openai_api_key: str = ""
-    model_name: str = "gpt-4o-mini"
+    model_name: str = "gemini-2.5-flash"
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     daily_token_budget: int = Field(default=200_000, ge=0)
 
-    # Database
-    database_url: str = "sqlite:///./data/app.db"
+    # Database — PostgreSQL only, no SQLite fallback. Required: no default, so a missing/misconfigured
+    # DATABASE_URL fails fast at startup instead of silently falling back to a file-based DB.
+    database_url: str
 
     # Auth
     secret_key: str = "dev-insecure-secret-change-me"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
     initial_admin_email: str = ""
-    password_reset_expire_minutes: int = 30
-    frontend_url: str = "http://localhost:5173"
-
-    # Email / password reset
-    smtp_host: str = ""
-    smtp_port: int = Field(default=587, ge=1, le=65535)
-    smtp_username: str = ""
-    smtp_password: str = ""
-    smtp_from_email: str = ""
-    smtp_use_tls: bool = True
+    # "Sign in with Google" - Web application OAuth Client ID (audience for ID-token verification
+    # only, never an authorization-code exchange, so no client secret needed). Distinct from the
+    # Calendar OAuth client below - two separate Google Cloud OAuth Clients on purpose, so a user
+    # can log in without ever being asked for Calendar access, and vice versa.
+    google_oauth_client_id: str = ""
 
     # Vector Store
     chroma_persist_dir: str = "./data/chroma"
 
-    # Google Calendar
-    google_credentials_path: str = "./secrets/credentials.json"
-    google_token_path: str = "./secrets/token.json"
-    google_calendar_id: str = "primary"
+    # Google Calendar - per-user OAuth (each user connects their own Calendar from the Calendar
+    # page via a real redirect + backend callback; there is no shared/fallback calendar). This IS
+    # an authorization-code exchange (to get a refresh_token we can use outside the browser), so
+    # unlike google_oauth_client_id above, this Client needs a secret. Create a separate "Web
+    # application" OAuth Client for this in Google Cloud Console - see .env.example. calendarId is
+    # always "primary" now (credential is already the user's own), so no google_calendar_id setting.
+    google_calendar_client_id: str = ""
+    google_calendar_client_secret: str = ""
+    google_calendar_redirect_uri: str = "http://localhost:8000/api/v1/calendar/oauth/callback"
     calendar_timezone: str = "Asia/Ho_Chi_Minh"
+
+    # Fernet key encrypting refresh_token/access_token at rest (src/auth/crypto.py) - a Calendar
+    # refresh token is a long-lived secret (unlike a password hash, it's directly usable to read/
+    # write someone's calendar until they revoke it), so unlike most other secrets in this app it
+    # gets encrypted, not just kept out of git. Generate with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Never rotate after users have connected - doing so turns every stored refresh_token into
+    # garbage and forces everyone to reconnect.
+    credential_encryption_key: str = ""
+
+    # Frontend origin, used as postMessage's targetOrigin on the OAuth callback page so only our
+    # own frontend (not an arbitrary embedded/opener page) can receive the "connected" signal.
+    frontend_origin: str = "http://localhost:5173"
 
     # Reminders / scheduler
     scheduler_timezone: str = "Asia/Ho_Chi_Minh"
@@ -61,6 +77,17 @@ class Settings(BaseSettings):
     # Calendar polling (no public HTTPS URL yet for Google's real push/webhook channels, so
     # changes made directly in Google Calendar are picked up by polling with a syncToken instead)
     calendar_poll_interval_seconds: int = Field(default=20, ge=5)
+
+    # Rate limiting (slowapi, in-memory - single uvicorn worker/single Render instance, no Redis).
+    # Complements daily_token_budget above, doesn't replace it: budget caps $ cost across the whole
+    # app per day, this caps request burst/abuse per user or IP per minute. See src/api/rate_limit.py.
+    # Off by default in tests (tests/conftest.py sets RATE_LIMIT_ENABLED=false before app import) so
+    # fixtures that register several users per session don't trip the auth-endpoint limit themselves.
+    rate_limit_enabled: bool = True
+    rate_limit_auth: str = "10/minute"  # /auth/login, /auth/google - per IP
+    rate_limit_register: str = "5/minute"  # /auth/register - per IP, stricter than login
+    rate_limit_chat: str = "15/minute"  # POST /chat (fresh turns only, not /chat/resume) - per user
+    rate_limit_crud: str = "60/minute"  # everything else authenticated - per user, generous safety net
 
 
 @lru_cache

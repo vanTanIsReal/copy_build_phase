@@ -2,17 +2,17 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.rate_limit import crud_rate_limit
 from src.auth.dependencies import get_current_user
-from src.config import get_settings
 from src.db.models import Conversation, ConversationParticipant, Message, User
 from src.db.session import get_db
 from src.models.auth_schemas import UserPublic
 from src.models.chat_schemas import (
+    AIPermissionOut,
+    AIPermissionUpdateRequest,
     ConversationCreateRequest,
     ConversationListResponse,
     ConversationSummary,
-    GroupSearchResponse,
-    GroupSearchResult,
     MessageListResponse,
     MessageOut,
     SendMessageRequest,
@@ -20,7 +20,7 @@ from src.models.chat_schemas import (
 from src.services import chat_service, proactive_service
 from src.websocket.manager import manager
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(crud_rate_limit)])
 
 
 @router.get("/users", response_model=list[UserPublic])
@@ -42,14 +42,12 @@ async def list_conversations(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ConversationListResponse:
-    if get_settings().app_env == "development":
-        await chat_service.ensure_demo_groups(db, current_user.id)
-
     conversation_ids = (
         (
             await db.execute(
                 select(ConversationParticipant.conversation_id).where(
-                    ConversationParticipant.user_id == current_user.id
+                    ConversationParticipant.user_id == current_user.id,
+                    ConversationParticipant.hidden_at.is_(None),  # "deleted" (for me) - see hide_conversation
                 )
             )
         )
@@ -69,36 +67,6 @@ async def list_conversations(
     )
     summaries = [await chat_service.build_conversation_summary(db, c, current_user.id) for c in conversations]
     return ConversationListResponse(conversations=summaries)
-
-
-@router.get("/groups", response_model=GroupSearchResponse)
-async def list_groups(
-    search: str | None = Query(default=None),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> GroupSearchResponse:
-    if get_settings().app_env == "development":
-        await chat_service.ensure_demo_groups(db, current_user.id)
-
-    stmt = select(Conversation).where(Conversation.type == "group")
-    if search:
-        stmt = stmt.where(Conversation.name.ilike(f"%{search}%"))
-    conversations = (await db.execute(stmt.order_by(Conversation.updated_at.desc()))).scalars().all()
-
-    groups = []
-    for conversation in conversations:
-        summary = await chat_service.build_conversation_summary(db, conversation, current_user.id)
-        groups.append(
-            GroupSearchResult(
-                id=summary.id,
-                name=summary.name,
-                member_count=len(summary.participants),
-                is_member=any(participant.id == current_user.id for participant in summary.participants),
-                last_message=summary.last_message,
-                updated_at=summary.updated_at,
-            )
-        )
-    return GroupSearchResponse(groups=groups)
 
 
 @router.post("/conversations", response_model=ConversationSummary)
@@ -122,31 +90,6 @@ async def create_conversation(
         conversation = await chat_service.create_group_conversation(
             db, current_user.id, request.participant_ids, request.name
         )
-    return await chat_service.build_conversation_summary(db, conversation, current_user.id)
-
-
-@router.post("/conversations/{conversation_id}/join", response_model=ConversationSummary)
-async def join_group(
-    conversation_id: str,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> ConversationSummary:
-    conversation = await db.get(Conversation, conversation_id)
-    if conversation is None or conversation.type != "group":
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
-
-    participant = (
-        await db.execute(
-            select(ConversationParticipant).where(
-                ConversationParticipant.conversation_id == conversation_id,
-                ConversationParticipant.user_id == current_user.id,
-            )
-        )
-    ).scalar_one_or_none()
-    if participant is None:
-        db.add(ConversationParticipant(conversation_id=conversation_id, user_id=current_user.id))
-        await db.commit()
-
     return await chat_service.build_conversation_summary(db, conversation, current_user.id)
 
 
@@ -199,6 +142,35 @@ async def send_message(
     return message_out
 
 
+@router.get("/conversations/{conversation_id}/ai-permission", response_model=AIPermissionOut)
+async def get_conversation_ai_permission(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AIPermissionOut:
+    await chat_service.assert_participant(db, conversation_id, current_user.id)
+    permission = await chat_service.get_ai_permission(db, conversation_id, current_user.id)
+    if permission is None:
+        return AIPermissionOut(conversation_id=conversation_id, granted=False, updated_at=None)
+    return AIPermissionOut(
+        conversation_id=conversation_id, granted=permission.granted, updated_at=permission.updated_at.isoformat()
+    )
+
+
+@router.put("/conversations/{conversation_id}/ai-permission", response_model=AIPermissionOut)
+async def update_conversation_ai_permission(
+    conversation_id: str,
+    request: AIPermissionUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AIPermissionOut:
+    await chat_service.assert_participant(db, conversation_id, current_user.id)
+    permission = await chat_service.set_ai_permission(db, conversation_id, current_user.id, request.granted)
+    return AIPermissionOut(
+        conversation_id=conversation_id, granted=permission.granted, updated_at=permission.updated_at.isoformat()
+    )
+
+
 @router.post("/conversations/{conversation_id}/read")
 async def mark_conversation_read(
     conversation_id: str,
@@ -207,3 +179,37 @@ async def mark_conversation_read(
 ):
     await chat_service.mark_read(db, conversation_id, current_user.id)
     return {"status": "ok"}
+
+
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conversation(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """"Delete" a conversation for the current user only - hides it from their own list without
+    touching it for other participants. Not to be confused with the hard, everyone-loses-it delete
+    at admin_routes.delete_conversation (moderation-only, /admin/conversations/{id})."""
+    await chat_service.hide_conversation(db, conversation_id, current_user.id)
+
+
+@router.post("/conversations/{conversation_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
+async def leave_conversation(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Leave a group conversation for good (400 if it's a direct 1-1 - use delete_conversation
+    above there instead). Remaining members are notified in real time so their member count/roster
+    stays accurate without a manual refresh."""
+    remaining_ids = await chat_service.leave_group(db, conversation_id, current_user.id)
+    if remaining_ids:
+        await manager.broadcast_to_users(
+            remaining_ids,
+            {
+                "type": "conversation_member_left",
+                "conversation_id": conversation_id,
+                "user_id": current_user.id,
+                "display_name": current_user.display_name,
+            },
+        )
