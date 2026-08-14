@@ -115,7 +115,12 @@ def build_authorization_url(user_id: str) -> str:
     url, _ = flow.authorization_url(
         access_type="offline",
         prompt="consent",
-        include_granted_scopes="true",
+        # Do not enable incremental authorization here. Google can otherwise merge scopes
+        # previously granted to another OAuth client in the same Cloud project (for example the
+        # openid/email/profile scopes used by Sign in with Google). oauthlib correctly notices
+        # that the token response no longer matches this Flow's Calendar-only scope and aborts
+        # with "Scope has changed", even though Google issued a valid token.
+        include_granted_scopes="false",
     )
     return url
 

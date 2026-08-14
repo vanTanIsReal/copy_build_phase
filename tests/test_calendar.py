@@ -162,6 +162,13 @@ async def test_oauth_url_requires_auth(client):
 
 
 @pytest.mark.asyncio
+async def test_oauth_url_does_not_merge_scopes_from_other_google_clients(client, auth_headers):
+    resp = await client.get("/api/v1/calendar/oauth/url", headers=auth_headers)
+    assert resp.status_code == 200
+    assert "include_granted_scopes=false" in resp.json()["url"]
+
+
+@pytest.mark.asyncio
 async def test_callback_rejects_bad_state(client):
     resp = await client.get("/api/v1/calendar/oauth/callback", params={"code": "x", "state": "not-a-jwt"})
     assert resp.status_code == 400
