@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react'
-import PageHeader from '../../components/common/PageHeader'
-import AdminTaskTable from '../../components/admin/AdminTaskTable'
-import AdminReminderTable from '../../components/admin/AdminReminderTable'
-import AdminMemoryTable from '../../components/admin/AdminMemoryTable'
-import { useAuth } from '../../context/AuthContext'
+import PageHeader from '../../src/components/common/PageHeader'
+import AdminTaskTable from './AdminTaskTable'
+import AdminReminderTable from './AdminReminderTable'
+import AdminMemoryTable from './AdminMemoryTable'
+import { useAuth } from '../../src/context/AuthContext'
 import {
   listUsers,
   listTasks, deleteTask,
   listReminders, deleteReminder,
   listMemories, deleteMemory,
-} from '../../api/admin'
+} from '../../src/api/admin'
 
 const TABS = [
   { key: 'tasks', label: 'Tasks' },

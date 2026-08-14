@@ -40,6 +40,24 @@ export function AuthProvider({ children }) {
     setToken(data.access_token)
   }
 
+  // Used only by the separate Frontend/admin app (AdminLoginPage/AdminRegisterPage) - same
+  // localStorage/state wiring as login/register above, hitting the admin-only endpoints.
+  const loginAdmin = async (email, password) => {
+    const data = await authApi.adminLogin({ email, password })
+    localStorage.setItem(TOKEN_KEY, data.access_token)
+    setUser(data.user)
+    setToken(data.access_token)
+    return data
+  }
+
+  const registerAdmin = async (email, password, display_name, bootstrapKey) => {
+    const data = await authApi.registerAdmin({ email, password, display_name, bootstrap_key: bootstrapKey })
+    localStorage.setItem(TOKEN_KEY, data.access_token)
+    setUser(data.user)
+    setToken(data.access_token)
+    return data
+  }
+
   const logout = () => {
     localStorage.removeItem(TOKEN_KEY)
     setToken(null)
@@ -58,7 +76,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, token, loading, isAdmin, login, register, loginWithGoogle, logout, updateProfile, changePassword }}
+      value={{ user, token, loading, isAdmin, login, register, loginAdmin, registerAdmin, loginWithGoogle, logout, updateProfile, changePassword }}
     >
       {children}
     </AuthContext.Provider>

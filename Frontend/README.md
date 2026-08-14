@@ -52,6 +52,10 @@ cd orbit-ai-assistant
 
 Nếu repository dùng tên thư mục khác, hãy thay `orbit-ai-assistant` bằng tên thư mục vừa clone.
 
+> **Lưu ý:** `Frontend/` hiện chứa 2 app Vite riêng, không tự chạy được nữa — `cd Frontend/user` (app
+> người dùng, cổng 5173) hoặc `cd Frontend/admin` (app quản trị, cổng 5174) trước khi làm các bước
+> `npm install`/`npm run dev` bên dưới. Xem README.md ở gốc repo để biết chi tiết cả 2 app.
+
 ### 3. Cài đặt thư viện
 
 ```bash
@@ -119,12 +123,13 @@ npm.cmd run dev
 
 Hoặc mở Command Prompt thay vì PowerShell rồi chạy lại các lệnh `npm` thông thường.
 
-### Cổng 5173 đang được sử dụng
+### Cổng 5173 (hoặc 5174) đang được sử dụng
 
-Chạy ứng dụng bằng cổng khác:
+Cổng 5174 giờ dành riêng cho app admin (`Frontend/admin/`) — đang chạy song song thì đừng dùng
+`--port 5174` cho app user, sẽ đụng cổng. Cần cổng khác thì chọn số bất kỳ chưa dùng:
 
 ```bash
-npm run dev -- --port 5174
+npm run dev -- --port 5175
 ```
 
 ### Giao diện hoặc dependency hoạt động không đúng sau khi cập nhật code

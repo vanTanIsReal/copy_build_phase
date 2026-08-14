@@ -1,4 +1,4 @@
-import { formatDateShort } from '../../utils/datetime'
+import { formatDateShort } from '../../src/utils/datetime'
 
 export default function ConversationTable({ conversations, onView, onDelete }) {
   return (

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import PageHeader from '../../components/common/PageHeader'
-import StatCard from '../../components/common/StatCard'
-import { useAuth } from '../../context/AuthContext'
-import { getStats, updateDailyTokenBudget } from '../../api/admin'
+import PageHeader from '../../src/components/common/PageHeader'
+import StatCard from '../../src/components/common/StatCard'
+import { useAuth } from '../../src/context/AuthContext'
+import { getStats, updateDailyTokenBudget } from '../../src/api/admin'
 
 export default function AdminDashboardPage() {
   const { token } = useAuth()

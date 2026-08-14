@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import PageHeader from '../../components/common/PageHeader'
-import { getAIUsage } from '../../api/admin'
-import { useAuth } from '../../context/AuthContext'
+import PageHeader from '../../src/components/common/PageHeader'
+import { getAIUsage } from '../../src/api/admin'
+import { useAuth } from '../../src/context/AuthContext'
 
 const number = value => value?.toLocaleString() ?? '—'
 const cost = value => value == null ? '—' : `$${value.toFixed(4)}`

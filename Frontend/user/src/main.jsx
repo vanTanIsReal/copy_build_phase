@@ -4,10 +4,10 @@ import { GoogleOAuthProvider } from '@react-oauth/google'
 import 'bootstrap/dist/css/bootstrap.min.css'
 import 'bootstrap-icons/font/bootstrap-icons.css'
 import 'bootstrap/dist/js/bootstrap.bundle.min.js'
-import './styles.css'
-import './assistant.css'
-import AppRouter from './router/AppRouter'
-import { AuthProvider } from './context/AuthContext'
+import '../../src/styles.css'
+import '../../src/assistant.css'
+import UserRouter from './UserRouter'
+import { AuthProvider } from '../../src/context/AuthContext'
 
 // Empty clientId just disables the Google button's provider context (GoogleLogin quietly
 // no-ops/errors on click instead of crashing at import time) when GOOGLE_OAUTH is unset - dev
@@ -15,7 +15,7 @@ import { AuthProvider } from './context/AuthContext'
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <GoogleOAuthProvider clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID || ''}>
-      <AuthProvider><AppRouter /></AuthProvider>
+      <AuthProvider><UserRouter /></AuthProvider>
     </GoogleOAuthProvider>
   </React.StrictMode>
 )

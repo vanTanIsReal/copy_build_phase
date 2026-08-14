@@ -10,14 +10,10 @@ const nav = [
 
 const getInitials = (name) => (name || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase()
 
-const adminNav = [
-  ['admin', 'bi-speedometer2', 'Dashboard'], ['admin/users', 'bi-people', 'Users'], ['admin/conversations', 'bi-chat-square-text', 'Conversations'],
-  ['admin/user-data', 'bi-database', 'User data'],
-  ['admin/ai-management', 'bi-robot', 'AI Management'], ['admin/ai-usage', 'bi-bar-chart-line', 'AI Usage'], ['admin/audit-log', 'bi-shield-check', 'Audit Log'],
-]
-
+// Admin console lives at a separate origin now (Frontend/admin, its own login) - no more "Admin"
+// nav section/links here, see Frontend/admin/src/AdminShell.jsx for the admin-only nav instead.
 export default function Sidebar({ open, onClose }) {
-  const { user, isAdmin } = useAuth()
+  const { user } = useAuth()
   return (
     <>
       <div className={`sidebar-backdrop ${open ? 'show' : ''}`} onClick={onClose} />
@@ -32,14 +28,6 @@ export default function Sidebar({ open, onClose }) {
               <i className={`bi ${icon}`} /><span>{label}</span>{label === 'AI Assistant' && <span className="new-pill">New</span>}
             </NavLink>
           ))}
-          {isAdmin && <>
-            <div className="nav-caption">Admin</div>
-            {adminNav.map(([path, icon, label]) => (
-              <NavLink key={path} to={`/${path}`} end onClick={onClose} className={({ isActive }) => `side-link ${isActive ? 'active' : ''}`}>
-                <i className={`bi ${icon}`} /><span>{label}</span>
-              </NavLink>
-            ))}
-          </>}
         </nav>
         <div className="sidebar-bottom">
           <div className="ai-usage"><div className="d-flex align-items-center gap-2 mb-2"><i className="bi bi-stars" /><strong>AI credits</strong><span>72%</span></div><div className="progress"><div className="progress-bar" style={{width:'72%'}} /></div><small>Resets in 12 days</small></div>

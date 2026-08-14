@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { useAuth } from '../../context/AuthContext'
-import { getConversationMessages } from '../../api/admin'
-import Avatar from '../common/Avatar'
-import { getInitials, getColor, formatTime } from '../../utils/avatar'
+import { useAuth } from '../../src/context/AuthContext'
+import { getConversationMessages } from '../../src/api/admin'
+import Avatar from '../../src/components/common/Avatar'
+import { getInitials, getColor, formatTime } from '../../src/utils/avatar'
 
 export default function ConversationMessagesModal({ conversation, onClose }) {
   const { token } = useAuth()

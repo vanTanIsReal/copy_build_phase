@@ -1,4 +1,4 @@
-import { formatDateTime } from '../../utils/datetime'
+import { formatDateTime } from '../../src/utils/datetime'
 
 const statusClass = { scheduled: 'primary', fired: 'success', cancelled: 'secondary' }
 

@@ -5,6 +5,14 @@ export const register = ({ email, password, display_name }) =>
 
 export const login = ({ email, password }) => apiFetch('/auth/login', { method: 'POST', body: { email, password } })
 
+// Used only by the separate Frontend/admin app - same shape as login/register above, hitting the
+// admin-only counterpart endpoints (src/api/auth_routes.py::admin_login/register_admin).
+export const adminLogin = ({ email, password }) =>
+  apiFetch('/auth/admin/login', { method: 'POST', body: { email, password } })
+
+export const registerAdmin = ({ email, password, display_name, bootstrap_key }) =>
+  apiFetch('/auth/admin/register', { method: 'POST', body: { email, password, display_name, bootstrap_key } })
+
 // One endpoint handles both first-time signup and returning login for a Google account - see
 // src/api/auth_routes.py::google_auth.
 export const googleAuth = (id_token) => apiFetch('/auth/google', { method: 'POST', body: { id_token } })

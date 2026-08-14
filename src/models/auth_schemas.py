@@ -18,6 +18,13 @@ class GoogleAuthRequest(BaseModel):
     id_token: str
 
 
+class AdminRegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=6)
+    display_name: str = Field(..., min_length=1, max_length=80)
+    bootstrap_key: str
+
+
 class UserPublic(BaseModel):
     id: str
     email: str

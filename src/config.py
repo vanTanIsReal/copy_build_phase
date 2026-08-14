@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
     initial_admin_email: str = ""
+    # Gate for POST /auth/admin/register (the separate Admin frontend's one-time "create the first
+    # admin" flow) - empty means the endpoint is disabled (503), so this only needs setting once,
+    # at first deploy. Not a replacement for initial_admin_email, which still works the same way;
+    # this exists for deployments where nobody wants to pre-decide the admin's email address.
+    admin_bootstrap_key: str = ""
     # "Sign in with Google" - Web application OAuth Client ID (audience for ID-token verification
     # only, never an authorization-code exchange, so no client secret needed). Distinct from the
     # Calendar OAuth client below - two separate Google Cloud OAuth Clients on purpose, so a user

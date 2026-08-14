@@ -12,8 +12,8 @@ Dự án AI20K Build Phase: một AI agent nhúng trong ứng dụng chat, giúp
 - **Nhắn tin 1-1 và theo nhóm, real-time**: tạo cuộc trò chuyện 1-1 hoặc nhóm (chọn nhiều người), gửi/nhận tin nhắn tức thời qua WebSocket, xem lại lịch sử tin nhắn, đếm tin nhắn chưa đọc.
 - **AI Agent (chat với AI)**: endpoint `/api/v1/chat` (yêu cầu đăng nhập) dùng LangGraph, có tool gọi Google Calendar và tạo nhắc nhở với bước xác nhận (human-in-the-loop) trước khi thực hiện. Hỗ trợ 3 provider LLM (Google Gemini, Groq, hoặc OpenAI — đổi qua `LLM_PROVIDER` trong `.env`) để dễ chuyển khi một bên hết quota.
 - **AI Assistant cá nhân** (`/assistant`): khung chat riêng nối thẳng vào agent thật ở trên (không phải dữ liệu mẫu) — hỏi tự do, khi agent muốn tạo lịch/nhắc việc sẽ hiện nút Xác nhận/Huỷ ngay trong chat.
-- **Phân quyền Admin**: tài khoản có 2 role (`user`/`admin`). Trang `/admin` (Dashboard, Users, Conversations) chỉ hiển thị và truy cập được với tài khoản `admin` — xem thống kê hệ thống, đổi role/khoá-mở khoá tài khoản, xem/xoá hội thoại để kiểm duyệt, và theo dõi lượng token AI đã dùng trong ngày.
-- **Cảnh báo + tự chặn khi vượt hạn mức token/chi phí**: ngay khi tổng token dùng trong ngày vượt 80%/100% `DAILY_TOKEN_BUDGET`, mọi admin đang online nhận toast cảnh báo qua WebSocket ở bất kỳ trang nào đang mở (không chỉ khi chủ động mở `/admin`); một khi đã vượt hẳn ngân sách, cuộc gọi LLM mới (`/chat` và agent chủ động) bị chặn hẳn thay vì chỉ cảnh báo — riêng việc hoàn tất một hành động đã được người dùng xác nhận (`/chat/resume`) không bị chặn để không treo lơ lửng.
+- **Phân quyền Admin**: tài khoản có 2 role (`user`/`admin`). App admin (`Frontend/admin/`, cổng 5174, đăng nhập/đăng ký riêng — xem "Cách chạy web" bên dưới) chỉ vào được với tài khoản `admin` — Dashboard/Users/Conversations/User data/AI Management/AI Usage/Audit Log: xem thống kê hệ thống, đổi role/khoá-mở khoá tài khoản, xem/xoá hội thoại để kiểm duyệt, và theo dõi lượng token AI đã dùng trong ngày.
+- **Cảnh báo + tự chặn khi vượt hạn mức token/chi phí**: ngay khi tổng token dùng trong ngày vượt 80%/100% `DAILY_TOKEN_BUDGET`, mọi admin đang online nhận toast cảnh báo qua WebSocket ở bất kỳ trang nào đang mở (app người dùng lẫn app admin, không chỉ khi chủ động mở app admin); một khi đã vượt hẳn ngân sách, cuộc gọi LLM mới (`/chat` và agent chủ động) bị chặn hẳn thay vì chỉ cảnh báo — riêng việc hoàn tất một hành động đã được người dùng xác nhận (`/chat/resume`) không bị chặn để không treo lơ lửng.
 - **Tóm tắt hội thoại theo yêu cầu**: trong trang Chat, bấm icon AI trên header → **Summarize** — AI đọc tin nhắn thật (theo scope 20/50 tin gần nhất đang chọn) và trả về bản tóm tắt.
 - **Trích xuất Task từ hội thoại**: cùng panel AI → **Extract tasks** — AI tìm việc cần làm/lịch hẹn trong hội thoại, lưu vào trang `/tasks` mục "AI suggestions"; người dùng bấm **Accept**/**Dismiss** để xác nhận. Panel AI còn có **Find schedule**, **Deadlines**, **Suggest reminder** (hiện nút Xác nhận/Huỷ ngay trong panel vì tạo reminder cần human-in-the-loop), cùng ô **Ask Orbit** để hỏi tự do về hội thoại đang xem.
 - **Task Inbox ưu tiên** (`/tasks/inbox`): view tách riêng khỏi danh sách task thường, nhóm việc cần chú ý ngay thành 4 mức — cần quyết định (gợi ý AI chưa Accept/Dismiss), quá hạn, sắp đến hạn trong 48h, và priority cao — thay vì phải tự lọc trong danh sách đầy đủ.
@@ -47,19 +47,21 @@ Dự án AI20K Build Phase: một AI agent nhúng trong ứng dụng chat, giúp
 │   ├── websocket/          # Kênh real-time cho chat
 │   └── main.py             # Điểm khởi tạo FastAPI app
 ├── tests/                 # pytest cho backend
-└── Frontend/               # Frontend — React + Vite
-    └── src/
-        ├── api/            # Gọi REST API + WebSocket client
-        ├── context/         # AuthContext (JWT, user hiện tại)
-        ├── hooks/            # useConversations, useMessages
-        ├── components/        # Component theo tính năng (chat, layout, ...)
-        ├── pages/              # Các trang ứng dụng
-        └── router/              # React Router + ProtectedRoute
+└── Frontend/               # Frontend — React + Vite, 2 app riêng dùng chung 1 thư mục src/
+    ├── src/                 # Source DÙNG CHUNG giữa 2 app bên dưới (không tự build được)
+    │   ├── api/              # Gọi REST API + WebSocket client
+    │   ├── context/           # AuthContext (JWT, user hiện tại)
+    │   ├── hooks/              # useConversations, useMessages
+    │   ├── components/          # Component theo tính năng (chat, layout, admin table, ...)
+    │   ├── pages/                # Các trang ứng dụng (trừ 7 trang admin, xem Frontend/admin/)
+    │   └── router/                # ProtectedRoute (route cá nhân — admin có router riêng)
+    ├── user/                  # App #1 — người dùng thường, cổng 5173 (UserRouter + AppLayout)
+    └── admin/                 # App #2 — platform admin, cổng 5174, đăng nhập/đăng ký riêng
 ```
 
 ## Cách chạy web (local development)
 
-Cần chạy **song song 2 server** — backend (cổng 8000) và frontend (cổng 5173) — mỗi lần dùng app đều cần mở cả hai (backend không tự chạy nền, tắt terminal là tắt server).
+Cần chạy **song song backend (cổng 8000) và frontend người dùng (cổng 5173)** — mỗi lần dùng app đều cần mở cả hai (backend không tự chạy nền, tắt terminal là tắt server). App admin (cổng 5174, thư mục `Frontend/admin/`) là **app Vite riêng biệt** — chỉ cần chạy thêm khi thật sự cần vào trang quản trị, xem bước 3b.
 
 ### 1. Chuẩn bị
 
@@ -91,12 +93,15 @@ cp .env.example .env
 #   - Groq: LLM_PROVIDER=groq, GROQ_API_KEY (lấy tại https://console.groq.com/keys), MODEL_NAME=openai/gpt-oss-20b.
 #   - OpenAI: LLM_PROVIDER=openai, OPENAI_API_KEY (lấy tại https://platform.openai.com/api-keys), MODEL_NAME=gpt-4o-mini.
 # Sửa DATABASE_URL trỏ vào database Postgres đã tạo ở bước 1 (postgresql://user:pass@host:5432/dbname) — bắt buộc, không có giá trị mặc định.
-# Điền INITIAL_ADMIN_EMAIL nếu muốn tài khoản đăng ký với email đó tự động có quyền admin.
+# Điền INITIAL_ADMIN_EMAIL nếu muốn tài khoản đăng ký với email đó tự động có quyền admin. Cách
+#   khác để tạo admin đầu tiên: điền ADMIN_BOOTSTRAP_KEY (chuỗi bí mật tự chọn), rồi vào app admin
+#   (bước 3b) → /register, nhập đúng key này — chỉ dùng được 1 lần (khi chưa có admin nào).
 # Muốn bật nút "Đăng nhập bằng Google": tạo 1 OAuth Client ID loại "Web application" tại
 #   https://console.cloud.google.com/apis/credentials, Authorized JavaScript origins:
 #   http://localhost:5173. Điền Client ID vào GOOGLE_OAUTH_CLIENT_ID ở đây, và giá trị y hệt vào
-#   VITE_GOOGLE_CLIENT_ID trong Frontend/.env (bước 3) — không điền thì nút Google chỉ ẩn/không hoạt
-#   động, các tính năng khác không ảnh hưởng.
+#   VITE_GOOGLE_CLIENT_ID trong Frontend/user/.env (bước 3) — không điền thì nút Google chỉ ẩn/không
+#   hoạt động, các tính năng khác không ảnh hưởng. App admin (Frontend/admin/) không có nút Google,
+#   không cần biến này.
 # Muốn bật nút "Connect Google Calendar" (mỗi user tự nối Calendar riêng của họ, xem docs/PER_USER_CALENDAR.md):
 #   1. Bật "Google Calendar API" tại https://console.cloud.google.com — APIs & Services → Library.
 #   2. OAuth consent screen: thêm scope https://www.googleapis.com/auth/calendar, thêm email từng
@@ -107,7 +112,7 @@ cp .env.example .env
 #   4. Authorized redirect URIs: thêm ĐÚNG http://localhost:8000/api/v1/calendar/oauth/callback
 #      (đây là redirect thật, không phải popup — phải khớp từng ký tự với GOOGLE_CALENDAR_REDIRECT_URI).
 # Điền GOOGLE_CALENDAR_CLIENT_ID + GOOGLE_CALENDAR_CLIENT_SECRET ở đây — không cần điền gì ở
-#   Frontend/.env (khác với nút đăng nhập ở trên, nút Connect Calendar không cần biến VITE_* nào,
+#   Frontend/user/.env (khác với nút đăng nhập ở trên, nút Connect Calendar không cần biến VITE_* nào,
 #   toàn bộ OAuth chạy ở backend). Cũng cần CREDENTIAL_ENCRYPTION_KEY (mã hoá refresh token trước
 #   khi lưu DB) — sinh 1 lần bằng:
 #     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
@@ -134,17 +139,29 @@ Nếu có `make` (macOS/Linux, hoặc cài Make trên Windows): dùng `make run`
 
 Kiểm tra backend đã chạy: mở `http://localhost:8000/health` phải trả về `{"status":"ok",...}`. Swagger UI (danh sách toàn bộ API) ở `http://localhost:8000/docs`.
 
-### 3. Chạy Frontend
+### 3. Chạy Frontend (app người dùng)
 
 Mở một terminal khác:
 
 ```bash
-cd Frontend
+cd Frontend/user
 npm install
 npm run dev
 ```
 
-Mở `http://localhost:5173` trong trình duyệt. Frontend mặc định gọi backend tại `http://localhost:8000/api/v1` — nếu backend chạy ở địa chỉ khác, tạo file `Frontend/.env` từ `Frontend/.env.example` và sửa `VITE_API_BASE_URL`/`VITE_WS_BASE_URL`. Muốn bật nút "Đăng nhập bằng Google" thì cũng cần tạo `Frontend/.env` và điền `VITE_GOOGLE_CLIENT_ID` (cùng giá trị `GOOGLE_OAUTH_CLIENT_ID` đã điền ở bước 2). Nút "Connect Google Calendar" thì **không cần** biến `VITE_*` nào — toàn bộ OAuth chạy ở backend (đã cấu hình ở bước 2), frontend chỉ mở 1 cửa sổ popup trỏ tới URL do backend trả về.
+Mở `http://localhost:5173` trong trình duyệt. Frontend mặc định gọi backend tại `http://localhost:8000/api/v1` — nếu backend chạy ở địa chỉ khác, tạo file `Frontend/user/.env` từ `Frontend/user/.env.example` và sửa `VITE_API_BASE_URL`/`VITE_WS_BASE_URL`. Muốn bật nút "Đăng nhập bằng Google" thì cũng cần tạo `Frontend/user/.env` và điền `VITE_GOOGLE_CLIENT_ID` (cùng giá trị `GOOGLE_OAUTH_CLIENT_ID` đã điền ở bước 2). Nút "Connect Google Calendar" thì **không cần** biến `VITE_*` nào — toàn bộ OAuth chạy ở backend (đã cấu hình ở bước 2), frontend chỉ mở 1 cửa sổ popup trỏ tới URL do backend trả về.
+
+### 3b. Chạy Frontend (app admin, tuỳ chọn)
+
+Trang quản trị (Dashboard/Users/Conversations/User data/AI Management/AI Usage/Audit Log) là **một app Vite riêng biệt**, không nằm trong app ở bước 3 — chỉ cần chạy khi thật sự cần vào trang admin:
+
+```bash
+cd Frontend/admin
+npm install
+npm run dev
+```
+
+Mở `http://localhost:5174`. App này có màn đăng nhập/đăng ký riêng (`/login`, `/register`) — đăng nhập bằng một tài khoản đã có role `admin` (xem cách tạo ở bước 2: `INITIAL_ADMIN_EMAIL` hoặc `ADMIN_BOOTSTRAP_KEY`), tài khoản không phải admin sẽ bị từ chối kể cả đúng mật khẩu. Cũng gọi backend tại `http://localhost:8000/api/v1` mặc định — đổi qua `Frontend/admin/.env` (từ `.env.example`) nếu cần. Không có nút "Đăng nhập bằng Google" ở app này.
 
 ### 4. Dùng thử
 
@@ -152,10 +169,10 @@ Mở `http://localhost:5173` trong trình duyệt. Frontend mặc định gọi 
 2. Mở thêm một trình duyệt/tab ẩn danh khác, tạo tài khoản thứ hai.
 3. Từ tài khoản thứ nhất, vào trang **Chats**, bấm nút bút (soạn tin nhắn) để chọn người và bắt đầu chat 1-1 hoặc chọn nhiều người để tạo nhóm.
 4. Gửi tin nhắn — tài khoản còn lại sẽ nhận tin nhắn theo thời gian thực nếu đang mở cùng cuộc trò chuyện, hoặc thấy số tin nhắn chưa đọc.
-5. Muốn thử trang **Admin**: đăng ký một tài khoản với email trùng `INITIAL_ADMIN_EMAIL` đã đặt trong `.env` (hoặc đổi role một tài khoản có sẵn thành `admin` trực tiếp trong DB) — tài khoản đó sẽ thấy mục "Admin" trong Sidebar, vào được `/admin`.
+5. Muốn thử trang **Admin**: đăng ký một tài khoản với email trùng `INITIAL_ADMIN_EMAIL` đã đặt trong `.env` (hoặc đổi role một tài khoản có sẵn thành `admin` trực tiếp trong DB, hoặc dùng `ADMIN_BOOTSTRAP_KEY` — xem bước 2) — chạy thêm app admin (bước 3b, `http://localhost:5174`) rồi đăng nhập bằng tài khoản đó ở `/login` của app admin. Admin **không** còn nằm trong Sidebar của app người dùng (5173) — hai app hoàn toàn tách biệt.
 6. Muốn thử **AI Summarize / Extract tasks / Find schedule / Deadlines / Ask Orbit**: cần điền `GOOGLE_API_KEY` (hoặc Groq, xem bước 2) thật trong `.env`. Trong 1 cuộc trò chuyện có vài tin nhắn, bấm icon AI trên header (⭐) rồi thử từng quick action, hoặc gõ câu hỏi tự do vào ô "Ask Orbit".
 7. Muốn thử **AI Assistant cá nhân** (`/assistant`): vào trang này và chat trực tiếp — nếu bạn yêu cầu tạo lịch/nhắc việc, agent sẽ hỏi lại xác nhận ngay trong khung chat trước khi tạo thật.
-8. Muốn xem **theo dõi token AI**: vào `/admin` (cần tài khoản admin, xem bước 5) — 2 stat card "AI tokens used today"/"AI requests today" và banner cảnh báo khi dùng ≥80% ngân sách `DAILY_TOKEN_BUDGET`. Hạ tạm `DAILY_TOKEN_BUDGET` (ví dụ `=50`) trong `.env` rồi restart backend nếu muốn thấy toast cảnh báo realtime (`usage_budget_alert` qua WebSocket) xuất hiện ngay khi đang ở bất kỳ trang nào, không cần mở `/admin` — và xác nhận `/chat` bị chặn hẳn (không chỉ cảnh báo) một khi đã vượt hẳn ngân sách.
+8. Muốn xem **theo dõi token AI**: vào app admin (`http://localhost:5174`, xem bước 5) — trang Dashboard có 2 stat card "AI tokens used today"/"AI requests today" và banner cảnh báo khi dùng ≥80% ngân sách `DAILY_TOKEN_BUDGET` (chi tiết hơn ở trang AI Usage). Hạ tạm `DAILY_TOKEN_BUDGET` (ví dụ `=50`) trong `.env` rồi restart backend nếu muốn thấy toast cảnh báo realtime (`usage_budget_alert` qua WebSocket) xuất hiện ngay khi đang ở bất kỳ trang nào của **cả 2 app** (người dùng lẫn admin, miễn tài khoản đó có role admin và đang mở app tương ứng), không cần đang mở đúng trang Dashboard — và xác nhận `/chat` bị chặn hẳn (không chỉ cảnh báo) một khi đã vượt hẳn ngân sách.
 9. Muốn thử **Agent chủ động**: gửi 1 tin nhắn kiểu "nhớ họp lúc 3h chiều mai nhé" trong trang Chat — vài giây sau sẽ có toast "Orbit spotted a commitment" ở góc phải, và gợi ý xuất hiện trong `/tasks` mục "AI suggestions".
 10. Muốn thử **Memory**: vào `/memory`, bấm "Add memory" để lưu một điều bạn muốn Orbit nhớ, sửa/xoá qua menu 3 chấm trên mỗi thẻ.
 11. Muốn thử **Task Inbox ưu tiên**: vào `/tasks/inbox` (hoặc mục "Inbox" trong Sidebar) — task quá hạn/sắp đến hạn/priority cao/cần quyết định được nhóm riêng khỏi danh sách task đầy đủ ở `/tasks`.

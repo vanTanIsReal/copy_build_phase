@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import PageHeader from '../../components/common/PageHeader'
-import { getAIManagement, getSystemHealth, updateAIManagement } from '../../api/admin'
-import { useAuth } from '../../context/AuthContext'
+import PageHeader from '../../src/components/common/PageHeader'
+import { getAIManagement, getSystemHealth, updateAIManagement } from '../../src/api/admin'
+import { useAuth } from '../../src/context/AuthContext'
 
 const statusLabel = { operational: 'Operational', degraded: 'Needs attention', down: 'Unavailable' }
 

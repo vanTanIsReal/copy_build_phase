@@ -1,4 +1,4 @@
-import { formatDateShort } from '../../utils/datetime'
+import { formatDateShort } from '../../src/utils/datetime'
 
 const priorityClass = { High: 'danger', Medium: 'warning', Low: 'info' }
 

@@ -1,6 +1,6 @@
-import Avatar from '../common/Avatar'
-import { getInitials, getColor } from '../../utils/avatar'
-import { formatDateShort } from '../../utils/datetime'
+import Avatar from '../../src/components/common/Avatar'
+import { getInitials, getColor } from '../../src/utils/avatar'
+import { formatDateShort } from '../../src/utils/datetime'
 
 export default function UserTable({ users, currentUserId, onToggleRole, onToggleStatus }) {
   return (

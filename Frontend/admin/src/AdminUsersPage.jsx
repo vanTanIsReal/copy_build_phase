@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import PageHeader from '../../components/common/PageHeader'
-import UserTable from '../../components/admin/UserTable'
-import { useAuth } from '../../context/AuthContext'
-import { listUsers, updateUserRole, updateUserStatus } from '../../api/admin'
+import PageHeader from '../../src/components/common/PageHeader'
+import UserTable from './UserTable'
+import { useAuth } from '../../src/context/AuthContext'
+import { listUsers, updateUserRole, updateUserStatus } from '../../src/api/admin'
 
 export default function AdminUsersPage() {
   const { token, user } = useAuth()

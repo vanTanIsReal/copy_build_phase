@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import PageHeader from '../../components/common/PageHeader'
-import { listAuditLog } from '../../api/admin'
-import { useAuth } from '../../context/AuthContext'
+import PageHeader from '../../src/components/common/PageHeader'
+import { listAuditLog } from '../../src/api/admin'
+import { useAuth } from '../../src/context/AuthContext'
 
 const humanize = value => value?.replace(/[._]/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase()) || '—'
 

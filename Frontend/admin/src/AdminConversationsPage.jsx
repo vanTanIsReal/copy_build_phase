@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import PageHeader from '../../components/common/PageHeader'
-import ConversationTable from '../../components/admin/ConversationTable'
-import ConversationMessagesModal from '../../components/admin/ConversationMessagesModal'
-import { useAuth } from '../../context/AuthContext'
-import { listConversations, deleteConversation } from '../../api/admin'
+import PageHeader from '../../src/components/common/PageHeader'
+import ConversationTable from './ConversationTable'
+import ConversationMessagesModal from './ConversationMessagesModal'
+import { useAuth } from '../../src/context/AuthContext'
+import { listConversations, deleteConversation } from '../../src/api/admin'
 
 export default function AdminConversationsPage() {
   const { token } = useAuth()
