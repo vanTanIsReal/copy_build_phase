@@ -19,9 +19,13 @@ from src.api.routes import router
 from src.api.task_routes import router as task_router
 from src.config import get_settings
 from src.db.session import init_db
+from src.logging_config import install_sensitive_log_filter
 from src.services import ai_config_service, calendar_service
 from src.services.scheduler import scheduler
 from src.websocket.routes import router as ws_router
+
+
+install_sensitive_log_filter()
 
 
 @asynccontextmanager
