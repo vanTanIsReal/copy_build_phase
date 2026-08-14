@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import { getUsageStatus } from '../../api/agent'
 
 const nav = [
   ['assistant', 'bi-stars', 'AI Assistant'], ['chat', 'bi-chat-dots', 'Chats'], ['tasks', 'bi-check2-square', 'Tasks'],
@@ -17,7 +19,10 @@ const adminNav = [
 ]
 
 export default function Sidebar({ open, onClose }) {
-  const { user, isAdmin } = useAuth()
+  const { user, token, isAdmin } = useAuth()
+  const [usage, setUsage] = useState(null)
+  useEffect(() => { if (token) getUsageStatus(token).then(setUsage).catch(() => setUsage(null)) }, [token])
+  const usedPct = Math.min(100, Math.max(0, usage?.used_pct || 0))
   return (
     <>
       <div className={`sidebar-backdrop ${open ? 'show' : ''}`} onClick={onClose} />
@@ -42,7 +47,7 @@ export default function Sidebar({ open, onClose }) {
           </>}
         </nav>
         <div className="sidebar-bottom">
-          <div className="ai-usage"><div className="d-flex align-items-center gap-2 mb-2"><i className="bi bi-stars" /><strong>AI credits</strong><span>72%</span></div><div className="progress"><div className="progress-bar" style={{width:'72%'}} /></div><small>Resets in 12 days</small></div>
+          <div className="ai-usage"><div className="d-flex align-items-center gap-2 mb-2"><i className="bi bi-stars" /><strong>Daily AI budget</strong><span>{usage ? `${usage.used_pct}%` : '—'}</span></div><div className="progress"><div className="progress-bar" style={{width:`${usedPct}%`}} /></div><small>{usage ? `${usage.tokens_used_today.toLocaleString()} / ${usage.daily_token_budget ? usage.daily_token_budget.toLocaleString() : '∞'} tokens · resets daily` : 'Usage unavailable'}</small></div>
           <NavLink to="/profile" className="user-mini"><span className="avatar-photo">{getInitials(user?.display_name)}</span><span><strong>{user?.display_name || 'Loading...'}</strong><small>{user?.email}</small></span><i className="bi bi-three-dots ms-auto" /></NavLink>
         </div>
       </aside>

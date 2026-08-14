@@ -1,3 +1,5 @@
+import html as html_lib
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 
@@ -65,7 +67,7 @@ _CALLBACK_HTML = """<!doctype html><meta charset="utf-8"><title>Google Calendar<
 <body style="font-family:system-ui;padding:2rem;text-align:center">
 <p>{message}</p>
 <script>
-  if (window.opener) window.opener.postMessage({{type:"calendar_oauth",ok:{ok}}}, "{origin}");
+  if (window.opener) window.opener.postMessage({{type:"calendar_oauth",ok:{ok},message:{message_json}}}, "{origin}");
   setTimeout(function(){{ window.close(); }}, 800);
 </script></body>"""
 
@@ -79,7 +81,12 @@ async def calendar_oauth_callback(
     settings = get_settings()
 
     def page(ok: bool, message: str, status_code: int = 200) -> HTMLResponse:
-        html = _CALLBACK_HTML.format(message=message, ok="true" if ok else "false", origin=settings.frontend_origin)
+        html = _CALLBACK_HTML.format(
+            message=html_lib.escape(message),
+            message_json=json.dumps(message).replace("<", "\\u003c"),
+            ok="true" if ok else "false",
+            origin=settings.frontend_origin,
+        )
         return HTMLResponse(html, status_code=status_code)
 
     if error or not code or not state:

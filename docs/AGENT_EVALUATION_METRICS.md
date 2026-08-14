@@ -1,111 +1,268 @@
-# Bộ metrics đánh giá hệ thống AI Agent
+# Khung metric đánh giá hệ thống AI Agent
 
-## 1. Mục tiêu
+Tài liệu này định nghĩa cách đánh giá chất lượng cho Orbit AI Agent theo 4 lớp: chất lượng đầu ra, hành vi agent và tool, retrieval/RAG, và vận hành hệ thống. Mục tiêu là tạo một quy trình có thể lặp lại, so sánh được giữa các phiên bản prompt/model và đủ rõ để dùng làm quality gate trước khi phát hành.
 
-Tài liệu này định nghĩa bộ chỉ số chung để đánh giá agent Orbit theo bốn góc nhìn: chất lượng câu trả lời, khả năng chọn và thực thi tool, độ tin cậy vận hành, và chi phí. Các ngưỡng bên dưới là baseline phát hành; chỉ điền kết quả thực tế khi có log hoặc một lần chạy eval có thể tái lập.
+> Trạng thái hiện tại: Orbit chưa triển khai RAG/vector database. Tool `search_messages` tìm kiếm từ khóa bằng PostgreSQL `ILIKE` trong một hội thoại. Vì vậy các metric RAGAS ở mục 5 là kế hoạch áp dụng khi có pipeline retrieval thực sự; không được báo cáo chúng như kết quả hiện tại.
 
-## 2. Phạm vi đánh giá
+## 1. Nguyên tắc đánh giá
 
-Hệ thống cần được đánh giá trên các luồng chính:
+- Tách **deterministic tests** (pytest, schema, quyền truy cập, tool side effect) khỏi **LLM evaluation** (độ đúng, groundedness, chất lượng trả lời).
+- Đánh giá end-to-end và từng thành phần riêng để biết lỗi đến từ planner, retrieval, tool hay câu trả lời cuối.
+- Luôn lưu model, provider, prompt version, dataset version, thời gian chạy, nhiệt độ và cấu hình retrieval.
+- Chạy mỗi case không xác định ít nhất 3 lần; báo cáo trung bình, độ lệch chuẩn và pass rate.
+- Với hành động có side effect, ưu tiên tiêu chí đúng/sai có thể kiểm chứng hơn LLM-as-a-judge.
+- Không dùng cùng một model để vừa tạo ground truth vừa chấm mà không có kiểm duyệt của con người.
 
-- Trả lời và tóm tắt hội thoại.
-- Trích xuất task, gồm tiêu đề và thời hạn tương đối như “ngày mai”.
-- Tìm kiếm tin nhắn trong đúng hội thoại được cấp quyền.
-- Tạo, đọc, sửa, xóa sự kiện Google Calendar.
-- Tạo và liệt kê reminder.
-- Human-in-the-loop trước thao tác ghi dữ liệu.
-- Duy trì state theo `thread_id` qua nhiều lượt và sau khi backend restart.
+## 2. Dataset đánh giá
 
-Dataset offline phải có tiếng Việt và tiếng Anh, câu nhập mơ hồ, yêu cầu không cần tool, yêu cầu bị từ chối quyền, lỗi provider và trường hợp không có task. Mỗi test case gồm input, context, kết quả mong đợi, tool/arguments mong đợi và tiêu chí chấm.
+Nên lưu mỗi case dưới dạng JSONL hoặc dataclass với các trường tối thiểu:
 
-## 3. Metrics chất lượng agent
-
-| Metric | Cách tính | Baseline phát hành |
-|---|---|---:|
-| Task success rate | Số case hoàn thành đúng mục tiêu / tổng số case | >= 85% |
-| Response correctness | Điểm trung bình từ rubric 0–1 về tính đúng và đủ; chấm người hoặc LLM-as-judge đã hiệu chuẩn | >= 0.85 |
-| Groundedness | Số phát biểu kiểm chứng được có căn cứ trong context/tool output / tổng phát biểu kiểm chứng được | >= 95% |
-| Instruction adherence | Số case tuân thủ đầy đủ ràng buộc hệ thống và người dùng / tổng case | >= 95% |
-| Title precision | Tiêu đề task đúng / tổng tiêu đề task agent sinh | >= 90% |
-| Title recall | Tiêu đề task đúng / tổng tiêu đề task trong ground truth | >= 90% |
-| Title F1 | `2 × precision × recall / (precision + recall)` | >= 90% |
-| Date accuracy | Số `due_at` khớp ground truth / số case có ngày giờ | >= 90% |
-| Multi-turn memory accuracy | Số câu hỏi phụ thuộc lịch sử được trả lời đúng / tổng case memory | >= 90% |
-| No-task accuracy | Số case không có task mà agent không tạo task / tổng case không có task | >= 95% |
-
-Với `Response correctness`, rubric đề xuất: 0 = sai hoặc gây hại; 0.5 = đúng một phần nhưng thiếu thông tin quan trọng; 1 = đúng, đủ và trực tiếp. Mẫu bị judge chấm thất bại cần được con người rà soát để tránh tối ưu theo một judge duy nhất.
-
-## 4. Metrics tool và an toàn
-
-| Metric | Cách tính | Baseline phát hành |
-|---|---|---:|
-| Tool selection accuracy | Số case gọi đúng tool hoặc đúng quyết định không gọi tool / tổng case | >= 95% |
-| Tool argument accuracy | Số lần gọi có toàn bộ argument đúng schema và đúng ngữ nghĩa / tổng lần gọi tool | >= 95% |
-| Tool execution success rate | Số lần tool hoàn tất / tổng lần tool được thực thi, tách lỗi agent và lỗi dependency | >= 98% |
-| Confirmation compliance | Thao tác ghi dữ liệu có xác nhận hợp lệ / tổng thao tác cần xác nhận | 100% |
-| Rejection compliance | Số lần người dùng từ chối và không có side effect / tổng lần từ chối | 100% |
-| Authorization isolation | Số case agent không đọc/ghi dữ liệu ngoài quyền / tổng case phân quyền | 100% |
-| Duplicate side-effect rate | Số thao tác ghi bị lặp / tổng thao tác ghi thành công | 0% |
-| Recovery success rate | Số phiên tiếp tục đúng sau restart/retry / tổng case recovery | >= 99% |
-
-Mọi case vi phạm xác nhận hoặc phân quyền là release blocker, kể cả khi điểm tổng vẫn đạt.
-
-## 5. Metrics vận hành và chi phí
-
-| Metric | Điểm đo | Baseline/cảnh báo |
-|---|---|---:|
-| End-to-end latency p50 | Từ lúc API nhận request đến response hoàn chỉnh | <= 3 giây |
-| End-to-end latency p95 | Cùng cách đo, percentile 95 | <= 8 giây |
-| Time to first token p95 | Request đến token đầu tiên nếu streaming được bật | <= 3 giây |
-| API availability | Request thành công / tổng request, loại trừ lỗi 4xx do client | >= 99.5% |
-| Agent error rate | Agent turn lỗi không xử lý / tổng agent turn | < 1% |
-| Tokens per successful task | Tổng token / số task hoàn thành đúng | Theo dõi xu hướng; cảnh báo tăng > 20% so baseline |
-| Cost per successful task | Tổng chi phí LLM / số task hoàn thành đúng | Theo dõi theo provider/model |
-| Daily budget utilization | Token dùng trong ngày / `DAILY_TOKEN_BUDGET` | Cảnh báo 80%, chặn lượt mới ở 100% |
-
-Latency phải báo cáo riêng theo provider/model và loại luồng (không tool, đọc tool, ghi tool). Không gộp timeout dependency vào lỗi suy luận: lỗi LLM, Google Calendar, database và ứng dụng cần có nhãn riêng.
-
-## 6. Thu thập và quy trình chạy
-
-### Offline eval
-
-1. Khóa phiên bản dataset, prompt, model, temperature và commit SHA.
-2. Chạy mỗi case tối thiểu ba lần với luồng có tính ngẫu nhiên; báo cáo mean và độ lệch.
-3. Lưu output đã loại bỏ dữ liệu nhạy cảm, tool trace, latency, token usage và verdict.
-4. So sánh với baseline gần nhất; không phát hành nếu metric bắt buộc giảm quá 5 điểm phần trăm hoặc có release blocker.
-
-Eval trích xuất task hiện có:
-
-```powershell
-python scripts/eval_extract_tasks.py
+```json
+{
+  "id": "calendar-create-001",
+  "category": "calendar_create",
+  "language": "vi",
+  "input": "Đặt lịch họp với An lúc 9 giờ sáng mai",
+  "conversation_history": [],
+  "expected_answer": "Xác nhận trước khi tạo sự kiện",
+  "expected_tools": ["create_calendar_event"],
+  "expected_arguments": {
+    "title": "Họp với An",
+    "start_local": "tomorrow 09:00"
+  },
+  "must_ask_confirmation": true,
+  "reference_contexts": [],
+  "tags": ["relative-date", "side-effect"]
+}
 ```
 
-Script này đo title precision/recall/F1 và date accuracy. Test chức năng chạy bằng:
+Dataset cần bao phủ:
 
-```powershell
-pytest tests/ -v
-```
-
-### Online monitoring
-
-Mỗi agent turn nên có `request_id`, `thread_id` đã hash, provider, model, tool name, status, latency và token counts. Không log nội dung hội thoại, access token, calendar credential hoặc dữ liệu cá nhân ở dạng thô. Bảng `UsageLog` hiện cung cấp token theo provider/model; dashboard admin dùng nó để theo dõi ngân sách ngày.
-
-Khuyến nghị lấy mẫu các phiên đã ẩn danh để human review hàng tuần, đồng thời theo dõi tỷ lệ retry, timeout, 429 và lỗi theo dependency. Khi bổ sung telemetry, ưu tiên histogram cho latency và counter cho request/tool/error; không dùng average latency làm chỉ số duy nhất.
-
-## 7. Mẫu báo cáo kết quả
-
-| Trường | Giá trị |
+| Nhóm | Ví dụ |
 |---|---|
-| Commit SHA |  |
-| Dataset version |  |
-| Ngày chạy |  |
-| Provider / model |  |
-| Số test case / số lần lặp |  |
-| Task success rate |  |
-| Tool selection / argument accuracy |  |
-| Confirmation / authorization violations |  |
-| Latency p50 / p95 |  |
-| Tổng token / cost |  |
-| Kết luận | Pass / Fail |
+| Trả lời trực tiếp | chào hỏi, câu hỏi không cần tool |
+| Task extraction | một/nhiều task, không có task, ngày tương đối, tiếng Việt/Anh |
+| Tool routing | task, reminder, calendar, summarize, search messages |
+| Tool arguments | title, thời gian, timezone, priority, ID đối tượng |
+| Human-in-the-loop | create/update/delete phải yêu cầu xác nhận |
+| Hội thoại nhiều lượt | đại từ như “cái đó”, sửa yêu cầu, tham chiếu tin cũ |
+| Memory | nhớ đúng thread/user, không rò rỉ dữ liệu giữa user |
+| Failure handling | timeout, LLM lỗi, token Google hết hạn, tool trả lỗi |
+| Safety/security | prompt injection, truy cập tài nguyên của user khác |
+| Retrieval (tương lai) | có tài liệu đúng, không có tài liệu, tài liệu gây nhiễu |
 
-Kết quả chi tiết có thể lưu dưới `eval/results/`; không commit secret hoặc raw production conversation.
+Nên chia cố định thành `dev` để chỉnh prompt, `test` để báo cáo và một tập `challenge` chỉ chạy trước release. Không tối ưu prompt trực tiếp trên tập `test`.
+
+## 3. Metric chất lượng Agent
+
+### 3.1 Task extraction
+
+Repo đã có `scripts/eval_extract_tasks.py`, đo micro-average:
+
+- **Precision** = TP / (TP + FP): tỷ lệ task agent trích ra là đúng.
+- **Recall** = TP / (TP + FN): tỷ lệ task thật được agent tìm thấy.
+- **F1** = 2 × Precision × Recall / (Precision + Recall).
+- **Date accuracy** = số task có ngày/giờ được resolve đúng / tổng task có ngày/giờ cần kiểm tra.
+- Nên bổ sung **exact match** cho priority, assignee và timezone nếu schema hỗ trợ.
+
+Chạy:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\eval_extract_tasks.py
+```
+
+Ngưỡng ban đầu: F1 ≥ 0,80; date accuracy ≥ 0,90; không giảm quá 3 điểm phần trăm so với baseline đã duyệt.
+
+### 3.2 Tool selection và arguments
+
+| Metric | Công thức/ý nghĩa |
+|---|---|
+| Tool selection accuracy | Số case chọn đúng tập tool / tổng case cần hoặc không cần tool |
+| Unnecessary tool-call rate | Case gọi tool khi không cần / tổng case không cần tool |
+| Missing tool-call rate | Case không gọi tool cần thiết / tổng case cần tool |
+| Argument exact match | Tất cả argument chuẩn hóa khớp ground truth |
+| Argument field accuracy | Số field đúng / tổng field được chấm |
+| Tool execution success rate | Tool hoàn thành đúng / tổng lần thực thi |
+| Average tool calls per task | Phát hiện loop hoặc routing kém hiệu quả |
+| Loop/step-limit rate | Run chạm giới hạn bước / tổng run |
+
+Với thời gian tương đối, chuẩn hóa về ISO 8601 theo `Asia/Ho_Chi_Minh` trước khi so sánh. Với chuỗi tự do như title, dùng exact match sau normalize kết hợp semantic judge có rubric; không chỉ dựa vào độ tương đồng embedding.
+
+### 3.3 Chất lượng câu trả lời cuối
+
+- **Task success rate**: người dùng đạt mục tiêu cuối cùng hay không.
+- **Correctness**: nội dung có đúng ground truth và kết quả tool không.
+- **Completeness**: có trả lời đủ các phần được hỏi không.
+- **Instruction following**: đúng ngôn ngữ, format, ràng buộc và yêu cầu xác nhận.
+- **Groundedness**: các khẳng định có được hỗ trợ bởi tool output/context không.
+- **Hallucination rate**: tỷ lệ câu trả lời chứa ít nhất một khẳng định không có căn cứ.
+- **Abstention accuracy**: khi thiếu dữ liệu, agent có nói rõ hoặc hỏi lại đúng lúc không.
+- **Human rating**: thang 1–5 cho đúng, hữu ích, rõ ràng và tự nhiên.
+
+LLM-as-a-judge nên dùng rubric 0–4 có mô tả rõ từng mức, chấm ẩn danh, đảo thứ tự khi so sánh A/B và kiểm tra tương quan với một mẫu do con người chấm.
+
+### 3.4 Hội thoại, memory và tính riêng tư
+
+- **Context retention accuracy**: trả lời đúng thông tin đã xuất hiện ở lượt trước.
+- **Reference resolution accuracy**: hiểu đúng “nó”, “lịch đó”, “việc vừa nói”.
+- **Cross-thread isolation**: không dùng dữ liệu từ thread khác.
+- **Cross-user leakage rate**: số case lộ dữ liệu user khác; mục tiêu bắt buộc là 0.
+- **Persistence success rate**: checkpoint vẫn đúng sau restart backend.
+- **Search hit rate**: `search_messages` tìm thấy tin đúng khi từ khóa có mặt.
+- **Search precision@k**: số kết quả keyword search liên quan trong top-k.
+
+## 4. Metric workflow và human-in-the-loop
+
+Các thao tác tạo/sửa/xóa Calendar hoặc Reminder phải được chấm riêng:
+
+| Metric | Target đề xuất |
+|---|---:|
+| Confirmation compliance | 100% |
+| Side effect before confirmation | 0% |
+| Correct side effect after accept | ≥ 99% |
+| Side effect after reject | 0% |
+| Duplicate side-effect rate | 0% |
+| Idempotency success khi retry | 100% với luồng hỗ trợ retry |
+
+Một case chỉ pass end-to-end khi: chọn đúng tool, argument đúng, yêu cầu xác nhận đúng, side effect trong database/API đúng và câu trả lời cuối phản ánh đúng kết quả thực thi.
+
+## 5. Đánh giá retrieval và RAGAS (khi triển khai RAG)
+
+### 5.1 Retrieval metric truyền thống
+
+Các metric này cần ground-truth document/chunk ID:
+
+- **Hit Rate@k**: ít nhất một context đúng xuất hiện trong top-k.
+- **Recall@k**: tỷ lệ context liên quan được tìm thấy trong top-k.
+- **Precision@k**: tỷ lệ context trong top-k thực sự liên quan.
+- **MRR**: trung bình nghịch đảo thứ hạng của kết quả đúng đầu tiên.
+- **nDCG@k**: đo chất lượng xếp hạng khi relevance có nhiều mức.
+- **Context redundancy**: tỷ lệ chunk trùng lặp hoặc gần trùng trong context.
+- **Retrieval latency** và **index freshness**.
+
+### 5.2 RAGAS
+
+Một record đánh giá RAG thường cần `user_input`, `response`, `retrieved_contexts` và tùy metric có thêm `reference` hoặc `reference_contexts`.
+
+| Metric RAGAS | Câu hỏi metric trả lời |
+|---|---|
+| Faithfulness | Các claim trong câu trả lời có suy ra được từ context đã lấy không? |
+| Answer relevancy | Câu trả lời có tập trung đúng câu hỏi không? |
+| Context precision | Context hữu ích có được xếp trước context nhiễu không? |
+| Context recall | Retrieval có lấy đủ thông tin cần để tạo reference answer không? |
+| Answer correctness | Câu trả lời giống và đúng với reference đến mức nào? |
+
+Không dùng riêng một điểm RAGAS tổng hợp. Cần xem retrieval metrics và generation metrics tách biệt:
+
+- Context recall thấp → vấn đề retrieval/chunking/query rewrite.
+- Context tốt nhưng faithfulness thấp → vấn đề prompt/generation.
+- Faithfulness cao nhưng answer correctness thấp → context hoặc reference không đủ/không đúng.
+
+Ngưỡng khởi đầu sau khi có baseline: faithfulness ≥ 0,90; answer relevancy ≥ 0,80; context precision ≥ 0,75; context recall ≥ 0,80. Ngưỡng phải được hiệu chỉnh bằng dataset thật và đánh giá con người, không coi điểm judge là chân lý tuyệt đối.
+
+### 5.3 Kiểm thử RAG bắt buộc
+
+- Câu hỏi có đáp án rõ trong tài liệu.
+- Câu hỏi cần tổng hợp từ nhiều chunk/tài liệu.
+- Câu hỏi không có đáp án: agent phải từ chối suy đoán.
+- Tài liệu mâu thuẫn hoặc khác phiên bản: ưu tiên nguồn mới/đáng tin.
+- Prompt injection nằm trong tài liệu: không được coi chỉ dẫn trong tài liệu là system instruction.
+- Kiểm tra phân quyền retrieval để không lấy tài liệu của tenant/user khác.
+
+## 6. Metric hiệu năng, chi phí và độ tin cậy
+
+Đo theo p50, p95 và p99, không chỉ dùng trung bình:
+
+| Nhóm | Metric |
+|---|---|
+| Latency | time-to-first-token, end-to-end latency, tool latency, retrieval latency |
+| Reliability | success rate, timeout rate, retry rate, exception rate |
+| Token | input/output/total tokens mỗi request và mỗi task thành công |
+| Cost | chi phí mỗi request, mỗi user, mỗi task thành công |
+| Capacity | request/giây, concurrent sessions, DB pool saturation |
+| Availability | uptime của API, LLM provider và external tools |
+
+Target ban đầu gợi ý: API không gọi LLM p95 < 500 ms; agent end-to-end p95 < 8 giây cho luồng không có external API chậm; error rate < 1%; ghi nhận 100% usage LLM. Điều chỉnh target sau khi có số liệu baseline thực tế.
+
+## 7. Safety và security evaluation
+
+- Prompt injection success rate.
+- Unauthorized tool-call rate.
+- Cross-user/tenant data leakage rate.
+- Secret/credential exposure rate.
+- PII leakage rate.
+- Destructive action without confirmation rate.
+- Invalid/expired token acceptance rate.
+- Rate-limit bypass rate.
+
+Các lỗi rò rỉ dữ liệu, vượt quyền hoặc side effect chưa xác nhận là **release blocker**, không lấy trung bình với các metric chất lượng khác.
+
+## 8. Quality gate đề xuất
+
+| Gate | Điều kiện pass ban đầu |
+|---|---:|
+| Pytest | 100% test pass |
+| Ruff | Không có lỗi |
+| Task extraction F1 | ≥ 0,80 |
+| Date accuracy | ≥ 0,90 |
+| Tool selection accuracy | ≥ 0,90 |
+| Confirmation compliance | 100% |
+| Cross-user leakage | 0 case |
+| End-to-end task success | ≥ 0,85 |
+| Hallucination rate trên factual set | ≤ 0,05 |
+| Agent latency p95 | < 8 giây, trừ case external API được gắn nhãn |
+
+Ngoài ngưỡng tuyệt đối, chặn release nếu metric chính giảm quá 3 điểm phần trăm hoặc latency/cost tăng trên 20% so với baseline mà không có lý do được duyệt.
+
+## 9. Quy trình chạy và báo cáo
+
+1. Chạy deterministic tests và lint.
+2. Chạy component eval: extraction, routing, arguments, retrieval.
+3. Chạy end-to-end dataset với model thật; lưu raw trace và tool calls.
+4. Chạy judge tự động, sau đó người đánh giá kiểm tra toàn bộ case lỗi và ít nhất 10% case pass.
+5. So sánh với baseline theo cùng dataset/config.
+6. Ghi kết quả vào `eval/results/` và quyết định pass/fail theo quality gate.
+
+Lệnh hiện có:
+
+```powershell
+.\.venv\Scripts\ruff.exe check src tests
+.\.venv\Scripts\python.exe -m pytest tests -v
+.\.venv\Scripts\python.exe scripts\eval_extract_tasks.py
+```
+
+Mẫu báo cáo mỗi lần chạy:
+
+```markdown
+# Agent Evaluation — YYYY-MM-DD
+
+- Git commit:
+- Dataset version:
+- Provider/model:
+- Prompt version:
+- Runs per case:
+- Evaluator model/version:
+
+| Metric | Baseline | Current | Delta | Target | Status |
+|---|---:|---:|---:|---:|---|
+| Task extraction F1 | | | | 0.80 | |
+| Date accuracy | | | | 0.90 | |
+| Tool selection accuracy | | | | 0.90 | |
+| End-to-end task success | | | | 0.85 | |
+| Latency p95 | | | | 8 s | |
+| Cost/successful task | | | | | |
+
+## Failure analysis
+
+| Case ID | Failure layer | Expected | Actual | Root cause | Action |
+|---|---|---|---|---|---|
+```
+
+## 10. Thứ tự triển khai thực tế
+
+1. Mở rộng dataset hiện có và giữ metric extraction làm baseline.
+2. Thêm trace chuẩn hóa cho planner, tool name, arguments, latency và token usage.
+3. Viết evaluator deterministic cho tool routing, arguments, confirmation và side effects.
+4. Thêm end-to-end task success cùng rubric human/LLM judge.
+5. Chỉ thêm RAGAS sau khi dự án có ingestion, chunking, embedding và retrieval thực sự.
+

@@ -25,8 +25,8 @@ export default function ConversationHeader({ conversation, onBack, onAI, aiGrant
         </button>
       </div>
       <div className="header-actions">
-        <button className="icon-btn"><i className="bi bi-telephone" /></button>
-        <button className="icon-btn"><i className="bi bi-camera-video" /></button>
+        <button className="icon-btn" disabled title="Voice calls are not available yet" aria-label="Voice calls unavailable"><i className="bi bi-telephone" /></button>
+        <button className="icon-btn" disabled title="Video calls are not available yet" aria-label="Video calls unavailable"><i className="bi bi-camera-video" /></button>
         <button className="icon-btn ai-mobile-btn" onClick={onAI}><i className="bi bi-stars" /></button>
         <div className="dropdown">
           <button className="icon-btn" data-bs-toggle="dropdown" aria-expanded="false"><i className="bi bi-three-dots-vertical" /></button>

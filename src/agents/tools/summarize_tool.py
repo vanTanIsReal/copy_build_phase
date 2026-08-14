@@ -8,7 +8,7 @@ from langgraph.prebuilt import InjectedState
 from src.agents.state import AgentState
 from src.config import get_settings
 from src.services import usage_service
-from src.services.llm import get_llm
+from src.services.llm import invoke_with_fallback
 
 _STYLE_INSTRUCTIONS = {
     "brief": "2-3 short sentences, plain prose",
@@ -31,7 +31,6 @@ async def generate_summary(context: str, style: Literal["brief", "detailed", "bu
     style_label = style.replace("_", " ")
     settings = get_settings()
     now = datetime.now(ZoneInfo(settings.calendar_timezone))
-    llm = get_llm()
     prompt = (
         f"Summarize the following conversation in a {style_label} style "
         f"({_STYLE_INSTRUCTIONS[style]}). Give exactly ONE summary in that style. Do not "
@@ -43,9 +42,10 @@ async def generate_summary(context: str, style: Literal["brief", "detailed", "bu
         f"({settings.calendar_timezone}).\n\n"
         f"{text}"
     )
-    result = await llm.ainvoke(prompt)
+    call = await invoke_with_fallback(prompt)
+    result = call.message
     await usage_service.log_usage(
-        provider=settings.llm_provider, model=settings.model_name, usage_metadata=result.usage_metadata
+        provider=call.provider, model=call.model, usage_metadata=result.usage_metadata
     )
     return result.content
 

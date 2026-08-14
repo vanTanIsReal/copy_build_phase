@@ -160,3 +160,17 @@ async def resume_chat(request: ResumeRequest, current_user: User = Depends(get_c
 async def agent_status():
     """Kiểm tra trạng thái agent."""
     return {"status": "ready", "agent": "LangGraph Agent v1.0"}
+
+
+@router.get("/usage/status")
+@limiter.exempt
+async def usage_status(current_user: User = Depends(get_current_user)) -> dict:
+    """Small authenticated summary used by the sidebar; detailed usage remains admin-only."""
+    usage = await usage_service.get_usage_today()
+    budget = await usage_service.get_daily_token_budget()
+    used_pct = round(usage["total_tokens"] / budget * 100, 1) if budget else 0.0
+    return {
+        "tokens_used_today": usage["total_tokens"],
+        "daily_token_budget": budget,
+        "used_pct": used_pct,
+    }

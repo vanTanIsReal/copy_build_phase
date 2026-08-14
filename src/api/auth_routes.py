@@ -49,15 +49,16 @@ def _initial_role_for(email: str) -> str:
 async def register(
     request: Request, body: RegisterRequest, db: AsyncSession = Depends(get_db)
 ) -> AuthResponse:
-    existing = (await db.execute(select(User).where(User.email == body.email))).scalar_one_or_none()
+    email = body.email.strip().lower()
+    existing = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
     user = User(
-        email=body.email,
+        email=email,
         password_hash=hash_password(body.password),
         display_name=body.display_name,
-        role=_initial_role_for(body.email),
+        role=_initial_role_for(email),
     )
     db.add(user)
     await db.commit()
@@ -70,7 +71,8 @@ async def register(
 @router.post("/login", response_model=AuthResponse)
 @limiter.limit(get_settings().rate_limit_auth)
 async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
-    user = (await db.execute(select(User).where(User.email == body.email))).scalar_one_or_none()
+    email = body.email.strip().lower()
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
     if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
@@ -91,9 +93,14 @@ async def google_auth(
     except google_oauth.GoogleTokenError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Google token") from None
 
-    google_sub = claims["sub"]
-    email = claims.get("email", "").lower()
-    email_verified = claims.get("email_verified", False)
+    google_sub = str(claims.get("sub", "")).strip()
+    email = str(claims.get("email", "")).strip().lower()
+    email_verified = claims.get("email_verified") is True
+    if not google_sub or not email or not email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Google did not provide a verified email address",
+        )
 
     identity = (
         await db.execute(select(GoogleIdentity).where(GoogleIdentity.google_sub == google_sub))
@@ -101,6 +108,11 @@ async def google_auth(
 
     if identity is not None:
         user = await db.get(User, identity.user_id)
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Google identity is linked to a missing account; contact an administrator",
+            )
     else:
         user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
         if user is not None and not email_verified:

@@ -8,7 +8,7 @@ from langgraph.prebuilt import InjectedState
 from src.agents.state import AgentState
 from src.config import get_settings
 from src.services import usage_service
-from src.services.llm import get_llm
+from src.services.llm import invoke_with_fallback
 
 
 async def generate_tasks_json(context: str) -> str:
@@ -22,7 +22,6 @@ async def generate_tasks_json(context: str) -> str:
 
     settings = get_settings()
     now = datetime.now(ZoneInfo(settings.calendar_timezone))
-    llm = get_llm()
     prompt = (
         "Extract action items, tasks, and appointments mentioned in the following conversation. "
         "Output ONLY a JSON array, no prose, no markdown code fence. Each item must be an object "
@@ -34,9 +33,10 @@ async def generate_tasks_json(context: str) -> str:
         "If nothing is found, output [].\n\n"
         f"{text}"
     )
-    result = await llm.ainvoke(prompt)
+    call = await invoke_with_fallback(prompt)
+    result = call.message
     await usage_service.log_usage(
-        provider=settings.llm_provider, model=settings.model_name, usage_metadata=result.usage_metadata
+        provider=call.provider, model=call.model, usage_metadata=result.usage_metadata
     )
     return result.content
 

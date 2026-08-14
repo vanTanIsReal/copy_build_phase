@@ -11,7 +11,7 @@ from src.config import get_settings
 from src.db import session as db_session
 from src.db.models import Message, Task, User
 from src.services import chat_service, usage_service
-from src.services.llm import get_llm
+from src.services.llm import invoke_with_fallback
 from src.websocket.manager import manager
 
 logger = logging.getLogger(__name__)
@@ -322,11 +322,11 @@ async def maybe_suggest_task(*, conversation_id: str, sender_id: str, content: s
             return
 
         settings = get_settings()
-        llm = get_llm()
 
-        relevance = await llm.ainvoke(_build_relevance_prompt(content))
+        relevance_call = await invoke_with_fallback(_build_relevance_prompt(content))
+        relevance = relevance_call.message
         await usage_service.log_usage(
-            provider=settings.llm_provider, model=settings.model_name, usage_metadata=relevance.usage_metadata
+            provider=relevance_call.provider, model=relevance_call.model, usage_metadata=relevance.usage_metadata
         )
         if not _parse_relevant(relevance.content):
             return
@@ -341,9 +341,10 @@ async def maybe_suggest_task(*, conversation_id: str, sender_id: str, content: s
         # to land on the wrong YEAR half the time. Same fix as planner_node.py/task_tool.py.
         now = datetime.now(ZoneInfo(settings.calendar_timezone))
         prompt = _build_window_prompt(window, now=now, tz_name=settings.calendar_timezone)
-        result = await llm.ainvoke(prompt)
+        result_call = await invoke_with_fallback(prompt)
+        result = result_call.message
         await usage_service.log_usage(
-            provider=settings.llm_provider, model=settings.model_name, usage_metadata=result.usage_metadata
+            provider=result_call.provider, model=result_call.model, usage_metadata=result.usage_metadata
         )
         data = json.loads(_strip_fence(result.content))
         commitments = data.get("commitments")

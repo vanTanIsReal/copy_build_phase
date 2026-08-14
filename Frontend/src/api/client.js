@@ -12,11 +12,16 @@ export class ApiError extends Error {
 export async function apiFetch(path, { method = 'GET', body, token } = {}) {
   const headers = { 'Content-Type': 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
+  let res
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
+  } catch {
+    throw new ApiError(0, 'Backend is unavailable. Start the backend and verify its database connection.')
+  }
   if (!res.ok) {
     const payload = await res.json().catch(() => null)
     throw new ApiError(res.status, payload?.detail || res.statusText)

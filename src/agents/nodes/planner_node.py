@@ -7,7 +7,7 @@ from src.agents.state import AgentState
 from src.agents.tools import ALL_TOOLS
 from src.config import get_settings
 from src.services import usage_service
-from src.services.llm import get_llm
+from src.services.llm import invoke_with_fallback
 
 SYSTEM_PROMPT_TEMPLATE = (
     "You are a personal assistant embedded in a chat app. You can summarize conversations, "
@@ -86,15 +86,14 @@ def _build_system_prompt(context: str = "") -> str:
 
 async def planner_node(state: AgentState) -> dict:
     """Bind tools to the LLM and decide the next action (respond or call a tool)."""
-    settings = get_settings()
     try:
-        llm = get_llm().bind_tools(ALL_TOOLS)
         messages = state.get("messages", [])
         system_prompt = _build_system_prompt(state.get("context", ""))
-        ai_message: AIMessage = await llm.ainvoke([SystemMessage(content=system_prompt), *messages])
+        call = await invoke_with_fallback([SystemMessage(content=system_prompt), *messages], tools=ALL_TOOLS)
+        ai_message: AIMessage = call.message
         await usage_service.log_usage(
-            provider=settings.llm_provider,
-            model=settings.model_name,
+            provider=call.provider,
+            model=call.model,
             usage_metadata=ai_message.usage_metadata,
         )
         return {"messages": [ai_message]}
