@@ -21,7 +21,14 @@ def _async_url(url: str) -> str:
 # connection checked out from a different loop than the one that opened it breaks with
 # "attached to a different loop". NullPool sidesteps this by opening a fresh connection on every
 # checkout instead of reusing one across loops; production keeps normal pooling.
-_engine_kwargs = {"poolclass": NullPool} if settings.app_env == "test" else {}
+_engine_kwargs = (
+    {"poolclass": NullPool}
+    if settings.app_env == "test"
+    # Supabase's free Session pooler allows only 15 clients. Render briefly runs the old and new
+    # instances together during a zero-downtime deploy, so SQLAlchemy's defaults (5 permanent +
+    # 10 overflow per instance) can exhaust the whole project before the new /health succeeds.
+    else {"pool_size": 2, "max_overflow": 1, "pool_timeout": 15, "pool_pre_ping": True}
+)
 # asyncpg's connect() takes an `ssl` kwarg, not the libpq-style `sslmode` that psycopg (used by the
 # LangGraph checkpointer and the APScheduler jobstore) understands - so SSL can't be configured via
 # a query string on DATABASE_URL without breaking one driver or the other. Set it here instead,

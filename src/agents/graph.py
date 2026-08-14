@@ -63,7 +63,11 @@ async def init_checkpointer() -> None:
 
     scheme, _, rest = _settings.database_url.partition("://")
     conninfo = f"{scheme.split('+')[0]}://{rest}"
-    pool = AsyncConnectionPool(conninfo=conninfo, max_size=10, open=False, kwargs={"autocommit": True})
+    # Keep enough headroom for the main SQLAlchemy pool and for Render's old/new instance overlap
+    # during zero-downtime deploys. Supabase free Session pooler caps the whole project at 15.
+    pool = AsyncConnectionPool(
+        conninfo=conninfo, min_size=1, max_size=2, open=False, kwargs={"autocommit": True}
+    )
     await pool.open()
     saver = AsyncPostgresSaver(pool)
     await saver.setup()
