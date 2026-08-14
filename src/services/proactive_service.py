@@ -16,45 +16,6 @@ from src.websocket.manager import manager
 
 logger = logging.getLogger(__name__)
 
-# Cheap pre-filter so we don't burn an LLM call on every message - only messages that at least
-# look like they might mention a time/commitment, look like a short reply agreeing to one, or look
-# like a cancellation/reschedule, go on to the real (LLM) check. Deliberately erring toward more
-# false positives (harmless - the LLM step below just answers with an empty commitments list) over
-# false negatives, which
-# silently drop a real commitment with no visible error anywhere - e.g. "5 giờ chiều nay" (digit
-# BEFORE "giờ", "chiều nay" not "...mai") used to slip through entirely before these patterns were
-# added.
-_SIGNAL_PATTERN = re.compile(
-    r"tomorrow|tonight|next (mon|tue|wed|thu|fri|sat|sun)|deadline|due (date|by)|meeting|appointment|"
-    r"remind|schedule|\d\s?(am|pm)|"
-    r"ngày mai|hôm nay|sáng nay|trưa nay|chiều nay|tối nay|sáng mai|chiều mai|tối mai|tuần sau|"
-    r"thứ (hai|ba|tư|năm|sáu|bảy)|chủ nhật|hạn chót|"
-    r"cuộc họp|họp lúc|hẹn|mời|rủ|nhắc (tôi|mình|nhở)|lịch|lúc \d|giờ \d|\d{1,2}\s?(giờ|h)\d{0,2}\b",
-    re.IGNORECASE,
-)
-
-# Loose PREFIX (not a whole-string anchor) so it still matches replies that both confirm AND repeat
-# a time, e.g. "ok 8h nhé", "ừ chốt lịch nhé" - only used as a second pre-filter trigger (see
-# maybe_suggest_task), never to decide ownership by itself; the windowed LLM pass below does that.
-_CONFIRMATION_CORE = (
-    r"ok(?:ay|ê|ie)?|đc|được(?:\s+rồi)?|đồng\s*ý|nhất\s*trí|ừ+m?|ừa|vâng|dạ|rồi|"
-    r"chốt(?:\s+(?:kèo|nhé|vậy))?|"
-    r"yes|yeah|yep|sure|agreed|deal|sounds\s+good|works\s+for\s+me|got\s+it|understood"
-)
-_CONFIRMATION_PREFIX = re.compile(rf"^(?:{_CONFIRMATION_CORE})\b", re.IGNORECASE)
-
-# A third pre-filter trigger, separate from the two above: cancelling or rescheduling a commitment
-# ("thôi huỷ nhé", "đổi giờ nhé") often doesn't itself look like a new commitment or a plain
-# agreement - without this, such a message would never pass the cheap pre-filter at all, so the
-# LLM's "cancelled": true handling (retraction, F1/E1) would silently never get a chance to run.
-_CANCELLATION_HINT = re.compile(
-    # h[uủ][yỷ] covers both accepted spellings of "huỷ/hủy" - Vietnamese allows the diacritic hook
-    # on either vowel for this word, and both are common in casual typing.
-    r"h[uủ][yỷ]|thôi\s+(khỏi|không)|không\s+(đi|đến|họp|làm)\s+nữa|đổi\s+(giờ|lịch|kế\s*hoạch)|"
-    r"dời\s+(giờ|lịch)|cancel|reschedule",
-    re.IGNORECASE,
-)
-
 # How much conversation context to hand the LLM per check - bounded on 3 independent axes so
 # neither a busy group (drowns a proposal in noise within seconds) nor a quiet 1-1 (a reply hours
 # or days later) breaks the window in opposite directions.
@@ -63,26 +24,45 @@ _WINDOW_MAX_AGE = timedelta(hours=6)
 _WINDOW_MAX_CHARS = 4000
 
 
-def _looks_like_commitment(text: str) -> bool:
-    return bool(_SIGNAL_PATTERN.search(text))
-
-
-def _might_be_confirmation(text: str) -> bool:
-    """Loose signal that `text` might be agreeing to something proposed earlier - only requires the
-    message to START WITH an agreement word, not consist entirely of one. Cheap and deliberately
-    over-eager: the windowed LLM pass and _verify_owner below are what actually decide ownership."""
-    stripped = text.strip()
-    if not stripped or len(stripped) > 60:  # real confirmations are short; also bounds regex work
-        return False
-    return bool(_CONFIRMATION_PREFIX.match(stripped))
-
-
-def _might_cancel_or_reschedule(text: str) -> bool:
-    return bool(_CANCELLATION_HINT.search(text))
-
-
 def _strip_fence(text: str) -> str:
     return text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+
+
+def _build_relevance_prompt(content: str) -> str:
+    """Cheap, single-message pre-check that replaces what used to be a hand-written regex
+    pre-filter (see WORKLOG 2026-08-12) - a fixed keyword/prefix list never covers natural
+    Vietnamese phrasing ("tôi cũng ok nhé" doesn't start with a recognized agreement word, so the
+    old regex silently never even called the LLM for it). This still costs one LLM call per
+    message, same as the regex did in wall-clock terms zero, but each call here is a handful of
+    tokens - far cheaper than the full windowed pass in _build_window_prompt, which is only run
+    when this says yes."""
+    return (
+        "Tin nhắn chat dưới đây có khả năng liên quan đến một cam kết, cuộc hẹn, hoặc deadline cá "
+        "nhân không - kể cả việc ĐỀ XUẤT, XÁC NHẬN, TỪ CHỐI, HUỶ, hoặc ĐỔI GIỜ cho một đề xuất đã "
+        "có trước đó trong cuộc trò chuyện? Chào hỏi, câu hỏi thông thường, than phiền, đùa giỡn, "
+        "hay kể lại chuyện đã xảy ra thì KHÔNG tính.\n"
+        "Nếu còn nghi ngờ, trả lời true - bỏ sót một cam kết thật tốn kém hơn nhiều so với 1 lượt "
+        "kiểm tra thừa.\n\n"
+        'Trả lời CHỈ một JSON, không markdown, không giải thích: {"relevant": true} hoặc '
+        '{"relevant": false}.\n\n'
+        f"Tin nhắn: {content}"
+    )
+
+
+def _parse_relevant(raw: object) -> bool:
+    """True unless the LLM gave an unambiguous, well-formed {"relevant": false} - anything else
+    (unparseable, wrong shape, missing key, non-string content) fails OPEN into the more expensive
+    windowed pass. Same bias the old regex pre-filter documented: a false negative here silently
+    drops a real commitment with no visible error anywhere, a false positive just costs one extra
+    (cheap) LLM call."""
+    if isinstance(raw, str):
+        try:
+            data = json.loads(_strip_fence(raw))
+        except ValueError:
+            return True
+        if isinstance(data, dict) and "relevant" in data:
+            return bool(data["relevant"])
+    return True
 
 
 async def _load_window(
@@ -228,6 +208,19 @@ def _verify_owner(
     return user_id
 
 
+def _personalize_title(title: str, owner_name: str) -> str:
+    """The LLM writes titles in third person from the conversation's point of view ("Tiệc sinh
+    nhật của Tấn"), because the same title text is shared by every owner of a commitment - a
+    proposer and whoever else confirmed it. That reads oddly on the proposer's OWN Tasks page
+    (Tấn seeing "của Tấn" about himself), so for each owner's own Task row specifically, replace
+    THEIR OWN name wherever it appears with "tôi" ("của Tấn" -> "của tôi") - other owners of the
+    same commitment (e.g. a confirmed attendee) get their own separate Task row and keep the
+    unmodified third-person title, since the name being replaced isn't theirs."""
+    if not owner_name:
+        return title
+    return re.sub(rf"\b{re.escape(owner_name)}\b", "tôi", title)
+
+
 def _parse_due_at(raw: object, tz_name: str) -> datetime | None:
     if not isinstance(raw, str) or not raw:
         return None
@@ -303,25 +296,39 @@ async def maybe_suggest_task(*, conversation_id: str, sender_id: str, content: s
     conversation's recent history and create a 'suggested' Task (same review flow as the manual
     Extract tasks action, Accept/Dismiss) for each participant the LLM found solid evidence for.
 
-    Every owner the LLM proposes is re-verified against real data before anything is written -
-    see _verify_owner. Requires each such participant to have granted AI permission for this
+    Two LLM passes, both behind the same permission/budget checks below:
+      1. _build_relevance_prompt - a cheap, single-message relevance check. Understands phrasing a
+         fixed pattern list can't ("tôi cũng ok nhé" reads as agreement to a human and to an LLM,
+         but starts with neither "ok" nor any other word a regex prefix list would recognize).
+      2. Only if (1) says relevant: the windowed commitment extraction below (unchanged).
+    Every owner pass 2 proposes is re-verified against real data before anything is written - see
+    _verify_owner. Requires each such participant to have granted AI permission for this
     conversation (ai_permissions) - both to have their own messages readable at all (_load_window)
-    and to receive a Task built from them. Never raises - a failure here must not affect message
+    and to receive a Task built from them. Permission is checked BEFORE either LLM call, not just
+    before pass 2 - a non-consenting sender's message must never reach an external LLM at all, not
+    even for the cheap relevance check. Never raises - a failure here must not affect message
     delivery.
     """
-    if not (_looks_like_commitment(content) or _might_be_confirmation(content) or _might_cancel_or_reschedule(content)):
-        return
-
     try:
         async with db_session.async_session_maker() as db:
             permission = await chat_service.get_ai_permission(db, conversation_id, sender_id)
         if permission is None or not permission.granted:
             return
 
-        # Ràng buộc đề bài: tối ưu chi phí - đây là lệnh gọi LLM tự động chạy nền trên mọi tin
-        # nhắn có tín hiệu, nên là nơi cần chặn trước tiên khi đã vượt ngân sách; bỏ qua lặng lẽ
-        # giống các điều kiện guard khác ở trên, không phải lỗi.
+        # Ràng buộc đề bài: tối ưu chi phí - đây là lệnh gọi LLM tự động chạy nền trên MỌI tin nhắn
+        # đã cấp quyền (không còn regex pre-filter để lọc bớt trước), nên càng cần chặn sớm khi đã
+        # vượt ngân sách; bỏ qua lặng lẽ giống các điều kiện guard khác ở trên, không phải lỗi.
         if await usage_service.is_over_budget():
+            return
+
+        settings = get_settings()
+        llm = get_llm()
+
+        relevance = await llm.ainvoke(_build_relevance_prompt(content))
+        await usage_service.log_usage(
+            provider=settings.llm_provider, model=settings.model_name, usage_metadata=relevance.usage_metadata
+        )
+        if not _parse_relevant(relevance.content):
             return
 
         async with db_session.async_session_maker() as db:
@@ -329,8 +336,6 @@ async def maybe_suggest_task(*, conversation_id: str, sender_id: str, content: s
         if not window:
             return
 
-        settings = get_settings()
-        llm = get_llm()
         # Without today's date, the LLM has to guess the current date from its training data when
         # resolving relative expressions ("hôm nay", "tối nay", "ngày mai") - observed in practice
         # to land on the wrong YEAR half the time. Same fix as planner_node.py/task_tool.py.
@@ -363,6 +368,9 @@ async def maybe_suggest_task(*, conversation_id: str, sender_id: str, content: s
                     continue
                 title = (commitment.get("title") or "").strip()[:200] or "Cam kết mới"
                 due_at = _parse_due_at(commitment.get("due_at"), settings.calendar_timezone)
+                # roster is {display_name: user_id} and unique by construction (_load_window drops
+                # ambiguous shared names) - safe to invert for "whose name is in this title" lookups.
+                id_to_name = {uid: name for name, uid in roster.items()}
 
                 for claim in owners:
                     owner_id = _verify_owner(
@@ -376,7 +384,7 @@ async def maybe_suggest_task(*, conversation_id: str, sender_id: str, content: s
                     task = Task(
                         owner_id=owner_id,
                         conversation_id=conversation_id,
-                        title=title,
+                        title=_personalize_title(title, id_to_name.get(owner_id, "")),
                         due_at=due_at,
                         priority="Medium",
                         source="proactive",

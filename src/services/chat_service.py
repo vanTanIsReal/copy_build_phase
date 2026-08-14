@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import get_settings
@@ -115,9 +115,57 @@ async def create_message(db: AsyncSession, conversation_id: str, sender_id: str,
     db.add(message)
     conversation = await db.get(Conversation, conversation_id)
     conversation.updated_at = datetime.now(UTC)
+    # New activity un-hides the conversation for everyone who had "deleted" it (hide_conversation
+    # below) - same behavior as most chat apps: deleting a thread only clears it from your own
+    # list, it doesn't block it from reappearing once someone (including yourself, from another
+    # device) sends into it again.
+    await db.execute(
+        update(ConversationParticipant)
+        .where(ConversationParticipant.conversation_id == conversation_id, ConversationParticipant.hidden_at.is_not(None))
+        .values(hidden_at=None)
+    )
     await db.commit()
     await db.refresh(message)
     return message
+
+
+async def hide_conversation(db: AsyncSession, conversation_id: str, user_id: str) -> None:
+    """"Delete conversation" (for me) - removes it from user_id's own conversation list without
+    touching the conversation, its messages, or any other participant's access to it. Idempotent:
+    hiding an already-hidden conversation just re-stamps hidden_at, no error. See create_message
+    above for how it reappears on new activity."""
+    participant = await _get_participant(db, conversation_id, user_id)
+    if participant is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a participant of this conversation")
+    participant.hidden_at = datetime.now(UTC)
+    await db.commit()
+
+
+async def leave_group(db: AsyncSession, conversation_id: str, user_id: str) -> list[str]:
+    """Actually leaves a group conversation (unlike hide_conversation, this is real membership
+    removal, not a per-user hide): user_id's ConversationParticipant row is deleted outright, so
+    they lose read/send access immediately and can't get back in without being re-invited. Direct
+    (1-1) conversations have no concept of "leaving" - use hide_conversation instead there.
+
+    Returns the remaining participant_ids (empty if user_id was the last member, in which case the
+    whole conversation - and its messages, via the cascade on Conversation.messages - is deleted
+    too, since a group with nobody left in it serves no purpose)."""
+    conversation = await db.get(Conversation, conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    if conversation.type != "group":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only group conversations can be left")
+    participant = await _get_participant(db, conversation_id, user_id)
+    if participant is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a participant of this conversation")
+
+    await db.delete(participant)
+    await db.flush()
+    remaining_ids = await get_participant_ids(db, conversation_id)
+    if not remaining_ids:
+        await db.delete(conversation)
+    await db.commit()
+    return remaining_ids
 
 
 async def mark_read(db: AsyncSession, conversation_id: str, user_id: str) -> None:

@@ -13,31 +13,33 @@ from src.services import chat_service, proactive_service
 
 
 @pytest.mark.parametrize(
-    "text,expected",
+    "raw,expected",
     [
-        ("let's meet tomorrow at 3pm", True),
-        ("don't forget the deadline is Friday", True),
-        ("họp lúc 9 giờ sáng mai nhé", True),
-        ("haha nice one", False),
-        ("thanks!", False),
+        (json.dumps({"relevant": True}), True),
+        (json.dumps({"relevant": False}), False),
+        ("```json\n" + json.dumps({"relevant": False}) + "\n```", False),  # fenced, still parses
+        ("not json at all", True),  # unparseable -> fail open
+        (json.dumps({"unexpected": "shape"}), True),  # well-formed JSON but no "relevant" key -> fail open
+        (json.dumps(["relevant", True]), True),  # valid JSON but not a dict -> fail open
+        (123, True),  # non-string content (e.g. a Mock the test forgot to configure) -> fail open
     ],
 )
-def test_looks_like_commitment(text, expected):
-    assert proactive_service._looks_like_commitment(text) is expected
+def test_parse_relevant(raw, expected):
+    assert proactive_service._parse_relevant(raw) is expected
 
 
 @pytest.mark.parametrize(
-    "text,expected",
+    "title,owner_name,expected",
     [
-        ("thôi huỷ nhé", True),
-        ("thôi hủy đi", True),
-        ("đổi giờ nhé", True),
-        ("cancel it", True),
-        ("haha nice one", False),
+        ("Tiệc sinh nhật của Tấn lúc 9 giờ sáng mai", "Tấn", "Tiệc sinh nhật của tôi lúc 9 giờ sáng mai"),
+        ("Tấn mời mọi người đi ăn", "Tấn", "tôi mời mọi người đi ăn"),
+        ("Họp nhóm", "Tấn", "Họp nhóm"),  # name doesn't appear - unchanged
+        ("Tiệc sinh nhật của Tấn", "", "Tiệc sinh nhật của Tấn"),  # no owner name known - unchanged
+        ("Đội trưởng Andy đến họp", "An", "Đội trưởng Andy đến họp"),  # "An" is only a substring of "Andy" - word boundary blocks it
     ],
 )
-def test_might_cancel_or_reschedule(text, expected):
-    assert proactive_service._might_cancel_or_reschedule(text) is expected
+def test_personalize_title(title, owner_name, expected):
+    assert proactive_service._personalize_title(title, owner_name) == expected
 
 
 async def _user_id(client, headers):
@@ -89,6 +91,13 @@ def _llm_response(commitments: list[dict]) -> AsyncMock:
     return AsyncMock(content=json.dumps({"commitments": commitments}), usage_metadata=None)
 
 
+def _relevant_response(relevant: bool = True) -> AsyncMock:
+    """Response for the cheap relevance pass (pass 1) - every maybe_suggest_task call now does
+    this call FIRST, then (if relevant) the windowed extraction call _llm_response builds for.
+    Tests that only care about pass 2 use side_effect=[_relevant_response(), _llm_response(...)]."""
+    return AsyncMock(content=json.dumps({"relevant": relevant}), usage_metadata=None)
+
+
 async def _tasks_for(owner_id):
     async with db_session.async_session_maker() as db:
         return (await db.execute(select(Task).where(Task.owner_id == owner_id))).scalars().all()
@@ -114,17 +123,20 @@ async def test_maybe_suggest_task_confirmation_creates_task_for_confirmer(
         proposal = await chat_service.create_message(db, conversation_id, proposer_id, "Tối nay 8 giờ đi ăn tối nhé")
         await chat_service.create_message(db, conversation_id, confirmer_id, "ok")
 
-    fake_llm.ainvoke.return_value = _llm_response(
-        [
-            {
-                "title": "Đi ăn tối",
-                "due_at": "2026-08-11T20:00:00",
-                "proposal_message_index": 1,
-                "cancelled": False,
-                "owners": [{"name": "Bob", "evidence": "confirmed", "message_index": 2}],
-            }
-        ]
-    )
+    fake_llm.ainvoke.side_effect = [
+        _relevant_response(),
+        _llm_response(
+            [
+                {
+                    "title": "Đi ăn tối",
+                    "due_at": "2026-08-11T20:00:00",
+                    "proposal_message_index": 1,
+                    "cancelled": False,
+                    "owners": [{"name": "Bob", "evidence": "confirmed", "message_index": 2}],
+                }
+            ]
+        ),
+    ]
 
     await proactive_service.maybe_suggest_task(conversation_id=conversation_id, sender_id=confirmer_id, content="ok")
 
@@ -154,18 +166,21 @@ async def test_maybe_suggest_task_rejects_owner_when_message_index_points_to_wro
         await chat_service.create_message(db, conversation_id, proposer_id, "8 giờ tối nay đi ăn nhé")
         await chat_service.create_message(db, conversation_id, carol_id, "ok")
 
-    fake_llm.ainvoke.return_value = _llm_response(
-        [
-            {
-                "title": "Đi ăn tối",
-                "due_at": "2026-08-11T20:00:00",
-                "proposal_message_index": 1,
-                "cancelled": False,
-                # message_index 2 was actually sent by Carol, not Bob.
-                "owners": [{"name": "Bob", "evidence": "confirmed", "message_index": 2}],
-            }
-        ]
-    )
+    fake_llm.ainvoke.side_effect = [
+        _relevant_response(),
+        _llm_response(
+            [
+                {
+                    "title": "Đi ăn tối",
+                    "due_at": "2026-08-11T20:00:00",
+                    "proposal_message_index": 1,
+                    "cancelled": False,
+                    # message_index 2 was actually sent by Carol, not Bob.
+                    "owners": [{"name": "Bob", "evidence": "confirmed", "message_index": 2}],
+                }
+            ]
+        ),
+    ]
 
     await proactive_service.maybe_suggest_task(conversation_id=conversation_id, sender_id=carol_id, content="ok")
 
@@ -192,17 +207,20 @@ async def test_maybe_suggest_task_rejects_owner_when_confirmation_message_sent_b
         await chat_service.create_message(db, conversation_id, proposer_id, "Chi ơi mai 3h em gửi báo cáo nhé")
         await chat_service.create_message(db, conversation_id, bob_id, "ok")
 
-    fake_llm.ainvoke.return_value = _llm_response(
-        [
-            {
-                "title": "Gửi báo cáo",
-                "due_at": "2026-08-12T15:00:00",
-                "proposal_message_index": 1,
-                "cancelled": False,
-                "owners": [{"name": "Chi", "evidence": "confirmed", "message_index": 2}],
-            }
-        ]
-    )
+    fake_llm.ainvoke.side_effect = [
+        _relevant_response(),
+        _llm_response(
+            [
+                {
+                    "title": "Gửi báo cáo",
+                    "due_at": "2026-08-12T15:00:00",
+                    "proposal_message_index": 1,
+                    "cancelled": False,
+                    "owners": [{"name": "Chi", "evidence": "confirmed", "message_index": 2}],
+                }
+            ]
+        ),
+    ]
 
     await proactive_service.maybe_suggest_task(conversation_id=conversation_id, sender_id=chi_id, content="ok")
 
@@ -223,17 +241,20 @@ async def test_maybe_suggest_task_rejects_owner_name_not_in_roster(client, auth_
         await chat_service.create_message(db, conversation_id, proposer_id, "8 giờ tối nay họp nhé")
         await chat_service.create_message(db, conversation_id, confirmer_id, "ok")
 
-    fake_llm.ainvoke.return_value = _llm_response(
-        [
-            {
-                "title": "Họp",
-                "due_at": "2026-08-11T20:00:00",
-                "proposal_message_index": 1,
-                "cancelled": False,
-                "owners": [{"name": "Zzz Không Tồn Tại", "evidence": "self", "message_index": 1}],
-            }
-        ]
-    )
+    fake_llm.ainvoke.side_effect = [
+        _relevant_response(),
+        _llm_response(
+            [
+                {
+                    "title": "Họp",
+                    "due_at": "2026-08-11T20:00:00",
+                    "proposal_message_index": 1,
+                    "cancelled": False,
+                    "owners": [{"name": "Zzz Không Tồn Tại", "evidence": "self", "message_index": 1}],
+                }
+            ]
+        ),
+    ]
 
     await proactive_service.maybe_suggest_task(conversation_id=conversation_id, sender_id=confirmer_id, content="ok")
 
@@ -256,17 +277,20 @@ async def test_maybe_suggest_task_rejects_when_display_name_is_ambiguous(client,
         await chat_service.create_message(db, conversation_id, alice_id, "8 giờ tối nay họp nhé")
         await chat_service.create_message(db, conversation_id, twin_id, "ok")
 
-    fake_llm.ainvoke.return_value = _llm_response(
-        [
-            {
-                "title": "Họp",
-                "due_at": "2026-08-11T20:00:00",
-                "proposal_message_index": 1,
-                "cancelled": False,
-                "owners": [{"name": "Alice", "evidence": "confirmed", "message_index": 2}],
-            }
-        ]
-    )
+    fake_llm.ainvoke.side_effect = [
+        _relevant_response(),
+        _llm_response(
+            [
+                {
+                    "title": "Họp",
+                    "due_at": "2026-08-11T20:00:00",
+                    "proposal_message_index": 1,
+                    "cancelled": False,
+                    "owners": [{"name": "Alice", "evidence": "confirmed", "message_index": 2}],
+                }
+            ]
+        ),
+    ]
 
     await proactive_service.maybe_suggest_task(conversation_id=conversation_id, sender_id=twin_id, content="ok")
 
@@ -290,18 +314,21 @@ async def test_maybe_suggest_task_rejects_confirmed_evidence_not_after_proposal(
         await chat_service.create_message(db, conversation_id, proposer_id, "8 giờ tối nay họp nhé")
         await chat_service.create_message(db, conversation_id, confirmer_id, "ok")
 
-    fake_llm.ainvoke.return_value = _llm_response(
-        [
-            {
-                "title": "Họp",
-                "due_at": "2026-08-11T20:00:00",
-                "proposal_message_index": 1,
-                "cancelled": False,
-                # "confirmed" but pointing at the proposal message itself (index <= proposal_idx).
-                "owners": [{"name": "Alice", "evidence": "confirmed", "message_index": 1}],
-            }
-        ]
-    )
+    fake_llm.ainvoke.side_effect = [
+        _relevant_response(),
+        _llm_response(
+            [
+                {
+                    "title": "Họp",
+                    "due_at": "2026-08-11T20:00:00",
+                    "proposal_message_index": 1,
+                    "cancelled": False,
+                    # "confirmed" but pointing at the proposal message itself (index <= proposal_idx).
+                    "owners": [{"name": "Alice", "evidence": "confirmed", "message_index": 1}],
+                }
+            ]
+        ),
+    ]
 
     await proactive_service.maybe_suggest_task(conversation_id=conversation_id, sender_id=confirmer_id, content="ok")
 
@@ -322,17 +349,20 @@ async def test_maybe_suggest_task_rejects_unknown_evidence_value(client, auth_he
         await chat_service.create_message(db, conversation_id, proposer_id, "8 giờ tối nay họp nhé")
         await chat_service.create_message(db, conversation_id, confirmer_id, "ok")
 
-    fake_llm.ainvoke.return_value = _llm_response(
-        [
-            {
-                "title": "Họp",
-                "due_at": "2026-08-11T20:00:00",
-                "proposal_message_index": 1,
-                "cancelled": False,
-                "owners": [{"name": "Bob", "evidence": "assigned", "message_index": 2}],
-            }
-        ]
-    )
+    fake_llm.ainvoke.side_effect = [
+        _relevant_response(),
+        _llm_response(
+            [
+                {
+                    "title": "Họp",
+                    "due_at": "2026-08-11T20:00:00",
+                    "proposal_message_index": 1,
+                    "cancelled": False,
+                    "owners": [{"name": "Bob", "evidence": "assigned", "message_index": 2}],
+                }
+            ]
+        ),
+    ]
 
     await proactive_service.maybe_suggest_task(conversation_id=conversation_id, sender_id=confirmer_id, content="ok")
 
@@ -368,7 +398,7 @@ async def test_maybe_suggest_task_prompt_excludes_messages_from_non_granted_part
     """★ D1: nội dung tin nhắn của người CHƯA cấp quyền AI không được xuất hiện trong prompt gửi
     ra LLM, kể cả khi tin đó có tín hiệu lịch trình rõ ràng."""
     fake_llm = AsyncMock()
-    fake_llm.ainvoke.return_value = _llm_response([])
+    fake_llm.ainvoke.side_effect = [_relevant_response(), _llm_response([])]
     monkeypatch.setattr(proactive_service, "get_llm", lambda: fake_llm)
 
     carol_headers, carol_id = await _register(client, email="ungranted@example.com", display_name="Carol")
@@ -405,17 +435,20 @@ async def test_maybe_suggest_task_rejects_out_of_range_message_index(client, aut
         await chat_service.create_message(db, conversation_id, proposer_id, "8 giờ tối nay họp nhé")
         await chat_service.create_message(db, conversation_id, confirmer_id, "ok")
 
-    fake_llm.ainvoke.return_value = _llm_response(
-        [
-            {
-                "title": "Họp",
-                "due_at": "2026-08-11T20:00:00",
-                "proposal_message_index": 1,
-                "cancelled": False,
-                "owners": [{"name": "Bob", "evidence": "confirmed", "message_index": 999}],
-            }
-        ]
-    )
+    fake_llm.ainvoke.side_effect = [
+        _relevant_response(),
+        _llm_response(
+            [
+                {
+                    "title": "Họp",
+                    "due_at": "2026-08-11T20:00:00",
+                    "proposal_message_index": 1,
+                    "cancelled": False,
+                    "owners": [{"name": "Bob", "evidence": "confirmed", "message_index": 999}],
+                }
+            ]
+        ),
+    ]
 
     await proactive_service.maybe_suggest_task(conversation_id=conversation_id, sender_id=confirmer_id, content="ok")
 
@@ -447,7 +480,8 @@ async def test_maybe_suggest_task_is_idempotent_on_overlapping_windows(client, a
             }
         ]
     )
-    fake_llm.ainvoke.side_effect = [response, response]
+    # 2 maybe_suggest_task calls x 2 LLM passes (relevance, then extraction) each = 4 responses.
+    fake_llm.ainvoke.side_effect = [_relevant_response(), response, _relevant_response(), response]
 
     await proactive_service.maybe_suggest_task(conversation_id=conversation_id, sender_id=confirmer_id, content="ok")
     await proactive_service.maybe_suggest_task(conversation_id=conversation_id, sender_id=confirmer_id, content="ok")
@@ -470,17 +504,20 @@ async def test_maybe_suggest_task_cancelled_retracts_suggested_task(client, auth
         await chat_service.create_message(db, conversation_id, proposer_id, "8 giờ tối nay họp nhé")
         await chat_service.create_message(db, conversation_id, confirmer_id, "ok")
 
-    fake_llm.ainvoke.return_value = _llm_response(
-        [
-            {
-                "title": "Họp",
-                "due_at": "2026-08-11T20:00:00",
-                "proposal_message_index": 1,
-                "cancelled": False,
-                "owners": [{"name": "Bob", "evidence": "confirmed", "message_index": 2}],
-            }
-        ]
-    )
+    fake_llm.ainvoke.side_effect = [
+        _relevant_response(),
+        _llm_response(
+            [
+                {
+                    "title": "Họp",
+                    "due_at": "2026-08-11T20:00:00",
+                    "proposal_message_index": 1,
+                    "cancelled": False,
+                    "owners": [{"name": "Bob", "evidence": "confirmed", "message_index": 2}],
+                }
+            ]
+        ),
+    ]
     await proactive_service.maybe_suggest_task(conversation_id=conversation_id, sender_id=confirmer_id, content="ok")
     tasks = await _tasks_for(confirmer_id)
     assert tasks[0].status == "suggested"
@@ -494,7 +531,10 @@ async def test_maybe_suggest_task_cancelled_retracts_suggested_task(client, auth
         "broadcast_to_users",
         AsyncMock(side_effect=lambda ids, payload: broadcasts.append((ids, payload))),
     )
-    fake_llm.ainvoke.return_value = _llm_response([{"proposal_message_index": 1, "cancelled": True, "owners": []}])
+    fake_llm.ainvoke.side_effect = [
+        _relevant_response(),
+        _llm_response([{"proposal_message_index": 1, "cancelled": True, "owners": []}]),
+    ]
     await proactive_service.maybe_suggest_task(conversation_id=conversation_id, sender_id=proposer_id, content="thôi huỷ nhé")
 
     tasks = await _tasks_for(confirmer_id)
@@ -519,34 +559,40 @@ async def test_maybe_suggest_task_renegotiation_keeps_only_final_time(
 
     async with db_session.async_session_maker() as db:
         await chat_service.create_message(db, conversation_id, a_id, "8h nhé")
-    fake_llm.ainvoke.return_value = _llm_response(
-        [
-            {
-                "title": "Họp",
-                "due_at": "2026-08-11T20:00:00",
-                "proposal_message_index": 1,
-                "cancelled": False,
-                "owners": [{"name": "Alice", "evidence": "self", "message_index": 1}],
-            }
-        ]
-    )
+    fake_llm.ainvoke.side_effect = [
+        _relevant_response(),
+        _llm_response(
+            [
+                {
+                    "title": "Họp",
+                    "due_at": "2026-08-11T20:00:00",
+                    "proposal_message_index": 1,
+                    "cancelled": False,
+                    "owners": [{"name": "Alice", "evidence": "self", "message_index": 1}],
+                }
+            ]
+        ),
+    ]
     await proactive_service.maybe_suggest_task(conversation_id=conversation_id, sender_id=a_id, content="8h nhé")
 
     async with db_session.async_session_maker() as db:
         await chat_service.create_message(db, conversation_id, b_id, "9h được không")
         await chat_service.create_message(db, conversation_id, a_id, "ok")
-    fake_llm.ainvoke.return_value = _llm_response(
-        [
-            {"proposal_message_index": 1, "cancelled": True, "owners": []},
-            {
-                "title": "Họp",
-                "due_at": "2026-08-11T21:00:00",
-                "proposal_message_index": 2,
-                "cancelled": False,
-                "owners": [{"name": "Alice", "evidence": "confirmed", "message_index": 3}],
-            },
-        ]
-    )
+    fake_llm.ainvoke.side_effect = [
+        _relevant_response(),
+        _llm_response(
+            [
+                {"proposal_message_index": 1, "cancelled": True, "owners": []},
+                {
+                    "title": "Họp",
+                    "due_at": "2026-08-11T21:00:00",
+                    "proposal_message_index": 2,
+                    "cancelled": False,
+                    "owners": [{"name": "Alice", "evidence": "confirmed", "message_index": 3}],
+                },
+            ]
+        ),
+    ]
     await proactive_service.maybe_suggest_task(conversation_id=conversation_id, sender_id=a_id, content="ok")
 
     tasks = await _tasks_for(a_id)
@@ -577,25 +623,72 @@ async def test_maybe_suggest_task_group_multiple_confirmers_in_one_pass(
         await chat_service.create_message(db, conversation_id, b_id, "ok")
         await chat_service.create_message(db, conversation_id, carol_id, "ok")
 
-    fake_llm.ainvoke.return_value = _llm_response(
-        [
-            {
-                "title": "Đi ăn tối",
-                "due_at": "2026-08-11T20:00:00",
-                "proposal_message_index": 1,
-                "cancelled": False,
-                "owners": [
-                    {"name": "Bob", "evidence": "confirmed", "message_index": 2},
-                    {"name": "Carol", "evidence": "confirmed", "message_index": 3},
-                ],
-            }
-        ]
-    )
+    fake_llm.ainvoke.side_effect = [
+        _relevant_response(),
+        _llm_response(
+            [
+                {
+                    "title": "Đi ăn tối",
+                    "due_at": "2026-08-11T20:00:00",
+                    "proposal_message_index": 1,
+                    "cancelled": False,
+                    "owners": [
+                        {"name": "Bob", "evidence": "confirmed", "message_index": 2},
+                        {"name": "Carol", "evidence": "confirmed", "message_index": 3},
+                    ],
+                }
+            ]
+        ),
+    ]
     await proactive_service.maybe_suggest_task(conversation_id=conversation_id, sender_id=carol_id, content="ok")
 
-    assert fake_llm.ainvoke.await_count == 1
+    # 1 relevance pass + 1 windowed extraction pass for this single message - not 1 per owner found.
+    assert fake_llm.ainvoke.await_count == 2
     assert len(await _tasks_for(b_id)) == 1
     assert len(await _tasks_for(carol_id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_maybe_suggest_task_personalizes_title_per_owner(
+    client, auth_headers, other_auth_headers, monkeypatch
+):
+    """A đề xuất tiệc sinh nhật của chính mình, B xác nhận tham gia - task của A (chủ tiệc) phải
+    đọc "của tôi", còn task của B (khách mời, task riêng của B) vẫn giữ "của Alice" như LLM viết."""
+    fake_llm = AsyncMock()
+    monkeypatch.setattr(proactive_service, "get_llm", lambda: fake_llm)
+
+    alice_id = await _user_id(client, auth_headers)
+    bob_id = await _user_id(client, other_auth_headers)
+    conversation_id = await _create_conversation(client, auth_headers, other_auth_headers)
+    await _grant_all(client, conversation_id, auth_headers, other_auth_headers)
+
+    async with db_session.async_session_maker() as db:
+        await chat_service.create_message(db, conversation_id, alice_id, "sáng mai 9h tới tiệc sinh nhật của tôi nhé")
+        await chat_service.create_message(db, conversation_id, bob_id, "ok")
+
+    fake_llm.ainvoke.side_effect = [
+        _relevant_response(),
+        _llm_response(
+            [
+                {
+                    "title": "Tiệc sinh nhật của Alice",
+                    "due_at": "2026-08-11T09:00:00",
+                    "proposal_message_index": 1,
+                    "cancelled": False,
+                    "owners": [
+                        {"name": "Alice", "evidence": "self", "message_index": 1},
+                        {"name": "Bob", "evidence": "confirmed", "message_index": 2},
+                    ],
+                }
+            ]
+        ),
+    ]
+    await proactive_service.maybe_suggest_task(conversation_id=conversation_id, sender_id=bob_id, content="ok")
+
+    alice_tasks = await _tasks_for(alice_id)
+    bob_tasks = await _tasks_for(bob_id)
+    assert alice_tasks[0].title == "Tiệc sinh nhật của tôi"
+    assert bob_tasks[0].title == "Tiệc sinh nhật của Alice"
 
 
 @pytest.mark.asyncio
@@ -699,6 +792,7 @@ async def test_maybe_suggest_task_skips_llm_when_over_budget(client, auth_header
 @pytest.mark.asyncio
 async def test_maybe_suggest_task_never_raises_on_db_error(client, auth_headers, other_auth_headers, monkeypatch):
     fake_llm = AsyncMock()
+    fake_llm.ainvoke.return_value = _relevant_response()  # relevance pass must pass to even reach _load_window
     monkeypatch.setattr(proactive_service, "get_llm", lambda: fake_llm)
 
     async def _boom(*args, **kwargs):
@@ -715,18 +809,29 @@ async def test_maybe_suggest_task_never_raises_on_db_error(client, auth_headers,
         conversation_id=conversation_id, sender_id=sender_id, content="8 giờ tối nay họp nhé"
     )
 
-    fake_llm.ainvoke.assert_not_awaited()
+    fake_llm.ainvoke.assert_awaited_once()  # the relevance pass ran; _load_window blew up before pass 2
     assert await _tasks_for(sender_id) == []
 
 
 @pytest.mark.asyncio
-async def test_maybe_suggest_task_skips_llm_when_no_signal(monkeypatch):
+async def test_maybe_suggest_task_skips_extraction_when_relevance_check_says_no(
+    client, auth_headers, other_auth_headers, monkeypatch
+):
+    """Khi lượt phân loại rẻ (pass 1, LLM hiểu ngữ nghĩa) trả relevant=false, không được chạy tiếp
+    windowed extraction (pass 2) - tiết kiệm chi phí đúng ràng buộc đề bài, thay cho regex
+    pre-filter cũ (xem WORKLOG 2026-08-12: regex bỏ sót "tôi cũng ok nhé")."""
     fake_llm = AsyncMock()
+    fake_llm.ainvoke.return_value = _relevant_response(False)
     monkeypatch.setattr(proactive_service, "get_llm", lambda: fake_llm)
 
-    await proactive_service.maybe_suggest_task(conversation_id="c1", sender_id="u1", content="thanks!")
+    sender_id = await _user_id(client, auth_headers)
+    conversation_id = await _create_conversation(client, auth_headers, other_auth_headers)
+    await _grant_ai_permission(client, conversation_id, auth_headers)
 
-    fake_llm.ainvoke.assert_not_awaited()
+    await proactive_service.maybe_suggest_task(conversation_id=conversation_id, sender_id=sender_id, content="thanks!")
+
+    fake_llm.ainvoke.assert_awaited_once()  # only the relevance pass, never the windowed extraction
+    assert await _tasks_for(sender_id) == []
 
 
 @pytest.mark.asyncio

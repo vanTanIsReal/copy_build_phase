@@ -72,6 +72,12 @@ class ConversationParticipant(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     last_read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    # "Delete conversation" (for me) - hides it from THIS participant's own conversation list only,
+    # never touches the conversation/messages themselves (those still exist for every other
+    # participant). Cleared back to NULL the moment any new message lands in the conversation - see
+    # chat_service.create_message - so a re-activated thread reappears automatically instead of
+    # staying hidden forever. Distinct from actually leaving a group (row gets deleted, not hidden).
+    hidden_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="participants")
     user: Mapped["User"] = relationship()
@@ -142,17 +148,42 @@ class UsageLog(Base):
 
 class SystemConfig(Base):
     """Single-row table (fixed id) for runtime-editable settings that would otherwise only live in
-    .env - currently just daily_token_budget, so an admin can raise/lower it from the Admin
-    dashboard without a server restart. NULL daily_token_budget means "no override yet" - callers
-    fall back to Settings.daily_token_budget (the .env default), so a deployment that never
+    .env - daily_token_budget, and (as of the AI Management admin page) which LLM provider/model/
+    temperature every new AI call uses. NULL on any of these means "no override yet" - callers
+    fall back to the matching Settings.* field (the .env default), so a deployment that never
     touches this stays on exactly the old behavior."""
 
     __tablename__ = "system_config"
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: "default")
     daily_token_budget: Mapped[int | None] = mapped_column(default=None)
+    # AI Management overrides - see ai_config_service.py. Applied to the cached Settings object at
+    # startup (load_saved_ai_configuration) and immediately on every admin update
+    # (apply_ai_configuration), so a running process never needs a restart to pick these up.
+    llm_provider: Mapped[str | None] = mapped_column(default=None)
+    model_name: Mapped[str | None] = mapped_column(default=None)
+    llm_temperature: Mapped[float | None] = mapped_column(default=None)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
     updated_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), default=None)
+
+
+class AuditLog(Base):
+    """Append-only record of notable admin-triggered actions (role/status/budget/model changes,
+    moderation deletes) for the Admin "Audit Log" page - who did what, to what, when. Deliberately
+    does NOT record message/memory content or anything from _SENSITIVE_METADATA_KEYS (see
+    audit_service.record_audit_event) - it's an activity trail, not a content log. No workspace_id:
+    this app has no multi-tenant workspace concept, unlike the branch this feature was ported from."""
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
+    actor_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), default=None, index=True)
+    actor_type: Mapped[str]  # "admin" | "system" - who/what performed the action
+    action: Mapped[str]
+    target_type: Mapped[str]
+    target_id: Mapped[str | None] = mapped_column(default=None)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
 
 
 class Memory(Base):
