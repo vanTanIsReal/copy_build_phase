@@ -12,6 +12,7 @@ from src.models.chat_schemas import (
     AIPermissionUpdateRequest,
     ConversationCreateRequest,
     ConversationListResponse,
+    ConversationMembersAddRequest,
     ConversationSummary,
     MessageListResponse,
     MessageOut,
@@ -91,6 +92,23 @@ async def create_conversation(
             db, current_user.id, request.participant_ids, request.name
         )
     return await chat_service.build_conversation_summary(db, conversation, current_user.id)
+
+
+@router.post("/conversations/{conversation_id}/members", response_model=ConversationSummary)
+async def add_conversation_members(
+    conversation_id: str,
+    request: ConversationMembersAddRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ConversationSummary:
+    conversation = await chat_service.add_group_members(db, conversation_id, current_user.id, request.user_ids)
+    summary = await chat_service.build_conversation_summary(db, conversation, current_user.id)
+    participant_ids = await chat_service.get_participant_ids(db, conversation_id)
+    await manager.broadcast_to_users(
+        participant_ids,
+        {"type": "conversation_members_added", "conversation": summary.model_dump()},
+    )
+    return summary
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=MessageListResponse)

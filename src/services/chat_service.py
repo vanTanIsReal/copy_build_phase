@@ -217,6 +217,31 @@ async def create_group_conversation(
     return conversation
 
 
+async def add_group_members(
+    db: AsyncSession, conversation_id: str, actor_id: str, user_ids: list[str]
+) -> Conversation:
+    conversation = await db.get(Conversation, conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    if conversation.type != "group":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Members can only be added to groups")
+    await assert_participant(db, conversation_id, actor_id)
+
+    requested_ids = set(user_ids)
+    users = (
+        await db.execute(select(User).where(User.id.in_(requested_ids)))
+    ).scalars().all()
+    if len(users) != len(requested_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One or more users were not found")
+
+    existing_ids = set(await get_participant_ids(db, conversation_id))
+    for user_id in requested_ids - existing_ids:
+        db.add(ConversationParticipant(conversation_id=conversation_id, user_id=user_id))
+    await db.commit()
+    await db.refresh(conversation)
+    return conversation
+
+
 async def build_conversation_summary(
     db: AsyncSession, conversation: Conversation, current_user_id: str
 ) -> ConversationSummary:

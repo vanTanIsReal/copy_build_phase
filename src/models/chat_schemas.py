@@ -11,6 +11,10 @@ class ConversationCreateRequest(BaseModel):
     name: str | None = None
 
 
+class ConversationMembersAddRequest(BaseModel):
+    user_ids: list[str] = Field(..., min_length=1)
+
+
 class MessageOut(BaseModel):
     id: str
     conversation_id: str

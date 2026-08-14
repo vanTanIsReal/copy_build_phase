@@ -5,6 +5,7 @@ import ConversationHeader from '../components/chat/ConversationHeader'
 import MessageArea from '../components/chat/MessageArea'
 import AIPanel from '../components/chat/AIPanel'
 import NewConversationModal from '../components/chat/NewConversationModal'
+import AddMembersModal from '../components/chat/AddMembersModal'
 import { useAuth } from '../context/AuthContext'
 import { useConversations } from '../hooks/useConversations'
 import { useMessages } from '../hooks/useMessages'
@@ -16,6 +17,7 @@ export default function ChatPage() {
   const [mobileChat, setMobileChat] = useState(false)
   const [aiOpen, setAiOpen] = useState(false)
   const [newConvoOpen, setNewConvoOpen] = useState(false)
+  const [addMembersOpen, setAddMembersOpen] = useState(false)
   const [selectedId, setSelectedId] = useState(null)
   const [aiGranted, setAiGranted] = useState(false)
   const { conversations, setConversations } = useConversations(token)
@@ -57,6 +59,15 @@ export default function ChatPage() {
         ? { ...c, participants: c.participants.filter(p => p.id !== data.user_id) }
         : c))
     }
+    if (data.type === 'conversation_members_added') {
+      setConversations(prev => {
+        const idx = prev.findIndex(c => c.id === data.conversation.id)
+        if (idx === -1) return [data.conversation, ...prev]
+        return prev.map(c => c.id === data.conversation.id
+          ? { ...c, participants: data.conversation.participants }
+          : c)
+      })
+    }
   }), [subscribe, setMessages, setConversations])
 
   const selectedConversation = conversations.find(c => c.id === selectedId) || null
@@ -75,6 +86,8 @@ export default function ChatPage() {
     setSelectedId(conv.id)
     setMobileChat(true)
   }
+
+  const onMembersAdded = conv => setConversations(prev => prev.map(c => c.id === conv.id ? conv : c))
 
   // Shared by delete (hide-for-me) and leave (real membership removal) - both end the same way on
   // this side: the conversation drops out of the list and, if it was open, the chat pane closes.
@@ -103,7 +116,7 @@ export default function ChatPage() {
       <section className="conversation-pane">
         {selectedConversation ? (
           <>
-            <ConversationHeader conversation={selectedConversation} onBack={() => setMobileChat(false)} onAI={() => setAiOpen(true)} aiGranted={aiGranted} onToggleAi={onToggleAi} onDelete={onDeleteConversation} onLeave={onLeaveConversation} />
+            <ConversationHeader conversation={selectedConversation} onBack={() => setMobileChat(false)} onAI={() => setAiOpen(true)} aiGranted={aiGranted} onToggleAi={onToggleAi} onDelete={onDeleteConversation} onLeave={onLeaveConversation} onAddMembers={() => setAddMembersOpen(true)} />
             <MessageArea conversation={selectedConversation} messages={messages} currentUserId={user?.id} onSend={onSend} />
           </>
         ) : (
@@ -112,6 +125,7 @@ export default function ChatPage() {
       </section>
       <AIPanel open={aiOpen} onClose={() => setAiOpen(false)} messages={messages} conversationId={selectedId} granted={aiGranted} onToggleGrant={onToggleAi} />
       <NewConversationModal open={newConvoOpen} onClose={() => setNewConvoOpen(false)} onCreated={onCreated} />
+      <AddMembersModal conversation={addMembersOpen ? selectedConversation : null} onClose={() => setAddMembersOpen(false)} onAdded={onMembersAdded} />
     </div>
   )
 }

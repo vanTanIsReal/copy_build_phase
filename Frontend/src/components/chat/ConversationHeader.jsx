@@ -1,7 +1,7 @@
 import Avatar from '../common/Avatar'
 import { getInitials, getColor } from '../../utils/avatar'
 
-export default function ConversationHeader({ conversation, onBack, onAI, aiGranted, onToggleAi, onDelete, onLeave }) {
+export default function ConversationHeader({ conversation, onBack, onAI, aiGranted, onToggleAi, onDelete, onLeave, onAddMembers }) {
   const handleToggleAi = () => { onToggleAi(!aiGranted).catch(() => {}) }
   const handleDelete = () => {
     if (window.confirm('Delete this conversation? It will be removed from your list, but other participants keep it.')) onDelete()
@@ -32,7 +32,10 @@ export default function ConversationHeader({ conversation, onBack, onAI, aiGrant
           <button className="icon-btn" data-bs-toggle="dropdown" aria-expanded="false"><i className="bi bi-three-dots-vertical" /></button>
           <ul className="dropdown-menu dropdown-menu-end">
             {conversation.type === 'group' && (
-              <li><button className="dropdown-item text-danger" onClick={handleLeave}><i className="bi bi-box-arrow-right me-2" />Leave group</button></li>
+              <>
+                <li><button className="dropdown-item" onClick={onAddMembers}><i className="bi bi-person-plus me-2" />Add members</button></li>
+                <li><button className="dropdown-item text-danger" onClick={handleLeave}><i className="bi bi-box-arrow-right me-2" />Leave group</button></li>
+              </>
             )}
             <li><button className="dropdown-item text-danger" onClick={handleDelete}><i className="bi bi-trash me-2" />Delete conversation</button></li>
           </ul>

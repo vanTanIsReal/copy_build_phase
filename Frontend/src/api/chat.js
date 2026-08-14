@@ -29,6 +29,9 @@ export const deleteConversation = (token, conversationId) =>
 export const leaveConversation = (token, conversationId) =>
   apiFetch(`/conversations/${conversationId}/leave`, { method: 'POST', token })
 
+export const addConversationMembers = (token, conversationId, userIds) =>
+  apiFetch(`/conversations/${conversationId}/members`, { method: 'POST', token, body: { user_ids: userIds } })
+
 export const getAiPermission = (token, conversationId) =>
   apiFetch(`/conversations/${conversationId}/ai-permission`, { token })
 

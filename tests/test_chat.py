@@ -50,6 +50,59 @@ async def test_group_conversation_with_name(client, auth_headers, other_auth_hea
 
 
 @pytest.mark.asyncio
+async def test_group_member_can_add_and_readd_another_user(client, auth_headers, other_auth_headers):
+    other_id = await _other_user_id(client, other_auth_headers)
+    conv = (await client.post(
+        "/api/v1/conversations",
+        json={"type": "group", "participant_ids": [other_id], "name": "Team"},
+        headers=auth_headers,
+    )).json()
+    third = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "newmember@example.com", "password": "password123", "display_name": "New Member"},
+    )
+    third_headers = {"Authorization": f"Bearer {third.json()['access_token']}"}
+    third_id = (await client.get("/api/v1/auth/me", headers=third_headers)).json()["id"]
+
+    added = await client.post(
+        f"/api/v1/conversations/{conv['id']}/members", json={"user_ids": [third_id]}, headers=other_auth_headers
+    )
+    assert added.status_code == 200
+    assert {p["id"] for p in added.json()["participants"]} == {p["id"] for p in conv["participants"]} | {third_id}
+    assert (await client.get(f"/api/v1/conversations/{conv['id']}/messages", headers=third_headers)).status_code == 200
+
+    await client.post(f"/api/v1/conversations/{conv['id']}/leave", headers=third_headers)
+    readded = await client.post(
+        f"/api/v1/conversations/{conv['id']}/members", json={"user_ids": [third_id]}, headers=auth_headers
+    )
+    assert readded.status_code == 200
+    assert len([p for p in readded.json()["participants"] if p["id"] == third_id]) == 1
+
+
+@pytest.mark.asyncio
+async def test_add_members_rejects_direct_and_nonparticipant(client, auth_headers, other_auth_headers):
+    other_id = await _other_user_id(client, other_auth_headers)
+    direct = (await client.post(
+        "/api/v1/conversations", json={"type": "direct", "participant_ids": [other_id]}, headers=auth_headers
+    )).json()
+    assert (await client.post(
+        f"/api/v1/conversations/{direct['id']}/members", json={"user_ids": [other_id]}, headers=auth_headers
+    )).status_code == 400
+
+    group = (await client.post(
+        "/api/v1/conversations", json={"type": "group", "participant_ids": [other_id], "name": "Team"}, headers=auth_headers
+    )).json()
+    third = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "outsider@example.com", "password": "password123", "display_name": "Outsider"},
+    )
+    third_headers = {"Authorization": f"Bearer {third.json()['access_token']}"}
+    assert (await client.post(
+        f"/api/v1/conversations/{group['id']}/members", json={"user_ids": [other_id]}, headers=third_headers
+    )).status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_send_and_list_messages(client, auth_headers, other_auth_headers):
     other_id = await _other_user_id(client, other_auth_headers)
     conv = (
