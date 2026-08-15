@@ -285,3 +285,70 @@ async def test_delete_calendar_event_declined(monkeypatch, fake_llm_factory):
     final = result2["messages"][-1]
     assert "not deleted" in final.content
     fake_service.events.return_value.delete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_calendar_events_with_scope_resolves_deterministic_range(monkeypatch, fake_llm_factory):
+    """The bug this fixes: the LLM used to freehand-compute time_min_iso/time_max_iso for "tuần
+    này" and reliably got it wrong (anchoring at "now" instead of the start of the week, missing
+    earlier-this-week events already past). scope removes that guesswork - calendar_service.
+    resolve_scope() does the date math instead of the LLM."""
+    fake_service = MagicMock()
+    fake_service.events.return_value.list.return_value.execute.return_value = {
+        "items": [{"id": "evt-1", "summary": "Standup", "start": {"dateTime": "2026-08-11T09:00:00"}}]
+    }
+    _mock_service(monkeypatch, fake_service)
+    monkeypatch.setattr(
+        calendar_service, "resolve_scope",
+        lambda scope: ("2026-08-10T00:00:00+07:00", "2026-08-17T00:00:00+07:00"),
+    )
+
+    llm = _script_tool_call(fake_llm_factory, "list_calendar_events", {"scope": "this_week"})
+    monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
+
+    result = await agent_graph.agent.ainvoke(
+        {"messages": [HumanMessage(content="tuần này tôi có gì")], "user_id": _USER_ID}, _config()
+    )
+
+    kwargs = fake_service.events.return_value.list.call_args.kwargs
+    assert kwargs["timeMin"] == "2026-08-10T00:00:00+07:00"
+    assert kwargs["timeMax"] == "2026-08-17T00:00:00+07:00"
+    assert "Standup" in result["messages"][-1].content
+
+
+@pytest.mark.asyncio
+async def test_list_calendar_events_with_explicit_range_still_works(monkeypatch, fake_llm_factory):
+    fake_service = MagicMock()
+    fake_service.events.return_value.list.return_value.execute.return_value = {"items": []}
+    _mock_service(monkeypatch, fake_service)
+
+    llm = _script_tool_call(
+        fake_llm_factory, "list_calendar_events",
+        {"time_min_iso": "2026-08-01T00:00:00", "time_max_iso": "2026-08-02T00:00:00"},
+    )
+    monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
+
+    result = await agent_graph.agent.ainvoke(
+        {"messages": [HumanMessage(content="events tomorrow")], "user_id": _USER_ID}, _config()
+    )
+
+    kwargs = fake_service.events.return_value.list.call_args.kwargs
+    assert kwargs["timeMin"] == "2026-08-01T00:00:00"
+    assert kwargs["timeMax"] == "2026-08-02T00:00:00"
+    assert "No events found" in result["messages"][-1].content
+
+
+@pytest.mark.asyncio
+async def test_list_calendar_events_without_scope_or_range_asks_for_one(monkeypatch, fake_llm_factory):
+    fake_service = MagicMock()
+    _mock_service(monkeypatch, fake_service)
+
+    llm = _script_tool_call(fake_llm_factory, "list_calendar_events", {})
+    monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
+
+    result = await agent_graph.agent.ainvoke(
+        {"messages": [HumanMessage(content="list my events")], "user_id": _USER_ID}, _config()
+    )
+
+    fake_service.events.return_value.list.assert_not_called()
+    assert "khoảng thời gian" in result["messages"][-1].content

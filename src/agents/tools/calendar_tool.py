@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
@@ -77,18 +77,32 @@ async def create_calendar_event(
 
 @tool
 async def list_calendar_events(
-    time_min_iso: str,
-    time_max_iso: str,
+    scope: Literal["today", "this_week", "next_7_days", "next_30_days"] | None = None,
+    time_min_iso: str | None = None,
+    time_max_iso: str | None = None,
     max_results: int = 10,
     state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
 ) -> str:
     """List existing calendar events in a time range. Read-only, no confirmation needed.
 
     Args:
-        time_min_iso: Start of the range as an ISO 8601 datetime string.
-        time_max_iso: End of the range as an ISO 8601 datetime string.
+        scope: Preferred way to express a common relative range - "today"/"hôm nay",
+            "this_week"/"tuần này" (the whole current week, including days already past),
+            "next_7_days"/"7 ngày tới", or "next_30_days"/"30 ngày tới". Resolved deterministically
+            in code, not computed by you - use this instead of time_min_iso/time_max_iso whenever
+            the request matches one of these, so "tuần này" always covers the whole week and not
+            just from the current moment onward.
+        time_min_iso: Start of the range as an ISO 8601 datetime string. Only used when `scope` is
+            not set - for a specific date/time range that isn't one of the scopes above.
+        time_max_iso: End of the range as an ISO 8601 datetime string. Only used when `scope` is
+            not set.
         max_results: Maximum number of events to return.
     """
+    if scope:
+        time_min_iso, time_max_iso = calendar_service.resolve_scope(scope)
+    elif not time_min_iso or not time_max_iso:
+        return "Cần cho biết khoảng thời gian (scope hoặc cả time_min_iso lẫn time_max_iso) để liệt kê sự kiện."
+
     user_id = (state or {}).get("user_id")
     try:
         items = await calendar_service.list_events(user_id, time_min_iso, time_max_iso, max_results)

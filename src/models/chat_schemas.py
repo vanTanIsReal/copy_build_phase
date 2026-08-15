@@ -27,6 +27,7 @@ class ConversationSummary(BaseModel):
     participants: list[UserPublic]
     last_message: MessageOut | None
     unread_count: int
+    ai_permission_granted: bool
     updated_at: str
 
 
@@ -37,6 +38,8 @@ class ConversationListResponse(BaseModel):
 class MessageListResponse(BaseModel):
     messages: list[MessageOut]
     has_more: bool
+    # Only computed on the initial fetch (no `before` cursor) - see chat_routes.get_messages.
+    first_unread_message_id: str | None = None
 
 
 class SendMessageRequest(BaseModel):

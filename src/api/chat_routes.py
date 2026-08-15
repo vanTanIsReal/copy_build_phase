@@ -116,7 +116,15 @@ async def get_messages(
     has_more = len(rows) > limit
     rows = rows[:limit]
     messages = [chat_service.serialize_message(m, u) for m, u in reversed(rows)]
-    return MessageListResponse(messages=messages, has_more=has_more)
+
+    # Only worth computing on the initial page (no `before`) - that's the "just opened this
+    # conversation" moment the frontend's jump-to-unread button anchors on; paginating further
+    # back into history doesn't need it recomputed every time.
+    first_unread_message_id = None
+    if not before:
+        first_unread_message_id = await chat_service.get_first_unread_message_id(db, conversation_id, current_user.id)
+
+    return MessageListResponse(messages=messages, has_more=has_more, first_unread_message_id=first_unread_message_id)
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=MessageOut)

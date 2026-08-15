@@ -1,5 +1,6 @@
 import logging
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from googleapiclient.discovery import Resource, build
 from googleapiclient.errors import HttpError
@@ -22,6 +23,38 @@ _PRIMARY = "primary"
 _WORK_DAY_START_HOUR = 8
 _WORK_DAY_END_HOUR = 20
 _SEARCH_DAYS_AHEAD = 3
+
+# Common relative ranges the agent's list_calendar_events tool resolves deterministically here
+# instead of leaving the LLM to freehand-compute time_min_iso/time_max_iso for phrases like "hôm
+# nay"/"tuần này" - the LLM reliably got "this week" wrong (picking "now" as the start instead of
+# the start of the week, silently excluding earlier-this-week events already past). Same reasoning/
+# pattern as chat_service.py's deterministic MessageScope resolution ("today"/"this_week"/...).
+SCOPE_CHOICES = ("today", "this_week", "next_7_days", "next_30_days")
+
+
+def _local_now() -> datetime:
+    return datetime.now(ZoneInfo(get_settings().calendar_timezone))
+
+
+def resolve_scope(scope: str) -> tuple[str, str]:
+    """Deterministic (time_min_iso, time_max_iso) for one of SCOPE_CHOICES. "today"/"this_week"
+    cover the whole local day/week (Monday 00:00 through the following Monday 00:00) - including
+    the part already past - since "tuần này" means the whole current week, not just what's left of
+    it. "next_7_days"/"next_30_days" are forward-looking from right now, matching their name."""
+    now = _local_now()
+    if scope == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = start + timedelta(days=1)
+    elif scope == "this_week":
+        start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        end = start + timedelta(days=7)
+    elif scope == "next_7_days":
+        start, end = now, now + timedelta(days=7)
+    elif scope == "next_30_days":
+        start, end = now, now + timedelta(days=30)
+    else:
+        raise ValueError(f"Unknown calendar scope: {scope!r} (expected one of {SCOPE_CHOICES})")
+    return start.isoformat(), end.isoformat()
 
 
 async def _service(user_id: str) -> Resource:

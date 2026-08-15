@@ -175,6 +175,74 @@ async def test_unread_excludes_own_messages_and_messages_before_last_read(client
 
 
 @pytest.mark.asyncio
+async def test_get_first_unread_message_id_returns_earliest_unread(client, auth_headers, other_auth_headers):
+    alice_id = await _get_user_id("alice@example.com")
+    bob_id = await _get_user_id("bob@example.com")
+    now = datetime.now(UTC)
+    alice_last_read = now - timedelta(hours=1)
+    msgs = [
+        (bob_id, "before alice read", now - timedelta(hours=2)),
+        (bob_id, "first unread", now - timedelta(minutes=10)),
+        (bob_id, "second unread", now - timedelta(minutes=5)),
+    ]
+    conv_id = await _seed_conversation(alice_id, bob_id, msgs, last_read_ats={alice_id: alice_last_read})
+
+    async with db_session.async_session_maker() as db:
+        rows = (await db.execute(select(Message).where(Message.conversation_id == conv_id))).scalars().all()
+        first_unread = next(m for m in rows if m.content == "first unread")
+        result = await chat_service.get_first_unread_message_id(db, conv_id, alice_id)
+
+    assert result == first_unread.id
+
+
+@pytest.mark.asyncio
+async def test_get_first_unread_message_id_excludes_own_messages(client, auth_headers, other_auth_headers):
+    """Sending your own message doesn't count as something you need to catch up on."""
+    alice_id = await _get_user_id("alice@example.com")
+    bob_id = await _get_user_id("bob@example.com")
+    now = datetime.now(UTC)
+    msgs = [(alice_id, "own message", now - timedelta(minutes=5))]
+    conv_id = await _seed_conversation(alice_id, bob_id, msgs, last_read_ats={alice_id: now - timedelta(hours=1)})
+
+    async with db_session.async_session_maker() as db:
+        result = await chat_service.get_first_unread_message_id(db, conv_id, alice_id)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_first_unread_message_id_none_when_everything_read(client, auth_headers, other_auth_headers):
+    alice_id = await _get_user_id("alice@example.com")
+    bob_id = await _get_user_id("bob@example.com")
+    now = datetime.now(UTC)
+    msgs = [(bob_id, "already read", now - timedelta(minutes=10))]
+    conv_id = await _seed_conversation(alice_id, bob_id, msgs, last_read_ats={alice_id: now})
+
+    async with db_session.async_session_maker() as db:
+        result = await chat_service.get_first_unread_message_id(db, conv_id, alice_id)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_first_unread_message_id_none_for_non_participant(client, auth_headers, other_auth_headers):
+    alice_id = await _get_user_id("alice@example.com")
+    bob_id = await _get_user_id("bob@example.com")
+    carol = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "carol-unread@example.com", "password": "password123", "display_name": "Carol"},
+    )
+    carol_headers = {"Authorization": f"Bearer {carol.json()['access_token']}"}
+    carol_id = (await client.get("/api/v1/auth/me", headers=carol_headers)).json()["id"]
+    conv_id = await _seed_conversation(alice_id, bob_id, [(bob_id, "hi", datetime.now(UTC))])
+
+    async with db_session.async_session_maker() as db:
+        result = await chat_service.get_first_unread_message_id(db, conv_id, carol_id)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
 async def test_today_is_not_capped_at_fifty(client, auth_headers, other_auth_headers):
     """The bug this feature fixes: the old frontend-only filtering never loaded more than the last
     50 messages (Frontend/src/hooks/useMessages.js), so any scope beyond that silently missed

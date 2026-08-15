@@ -1,4 +1,6 @@
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -12,6 +14,50 @@ def _mock_service(monkeypatch, fake_service):
         return fake_service
 
     monkeypatch.setattr(calendar_service, "_service", _fake)
+
+
+def _mock_now(monkeypatch, dt: datetime) -> None:
+    monkeypatch.setattr(calendar_service, "_local_now", lambda: dt)
+
+
+# ---------------------------------------------------------------- resolve_scope
+
+
+def test_resolve_scope_today_covers_the_whole_local_day(monkeypatch):
+    _mock_now(monkeypatch, datetime(2026, 8, 15, 13, 0, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")))
+    start, end = calendar_service.resolve_scope("today")
+    assert start == "2026-08-15T00:00:00+07:00"
+    assert end == "2026-08-16T00:00:00+07:00"
+
+
+def test_resolve_scope_this_week_includes_days_already_past(monkeypatch):
+    """The exact bug this fixes: asked on a Saturday, "tuần này" must still cover Monday-Friday
+    already gone, not just "from now onward" - see calendar_tool.py's list_calendar_events."""
+    _mock_now(monkeypatch, datetime(2026, 8, 15, 13, 0, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")))  # a Saturday
+    start, end = calendar_service.resolve_scope("this_week")
+    assert start == "2026-08-10T00:00:00+07:00"  # Monday
+    assert end == "2026-08-17T00:00:00+07:00"  # following Monday
+
+
+def test_resolve_scope_next_7_days_is_forward_looking_from_now(monkeypatch):
+    now = datetime(2026, 8, 15, 13, 0, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+    _mock_now(monkeypatch, now)
+    start, end = calendar_service.resolve_scope("next_7_days")
+    assert start == now.isoformat()
+    assert end == (now + timedelta(days=7)).isoformat()
+
+
+def test_resolve_scope_next_30_days_is_forward_looking_from_now(monkeypatch):
+    now = datetime(2026, 8, 15, 13, 0, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+    _mock_now(monkeypatch, now)
+    start, end = calendar_service.resolve_scope("next_30_days")
+    assert start == now.isoformat()
+    assert end == (now + timedelta(days=30)).isoformat()
+
+
+def test_resolve_scope_rejects_unknown_scope():
+    with pytest.raises(ValueError):
+        calendar_service.resolve_scope("next_month")
 
 
 def _with_items(items: list[dict]) -> MagicMock:

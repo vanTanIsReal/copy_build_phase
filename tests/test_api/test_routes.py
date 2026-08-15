@@ -465,3 +465,33 @@ async def test_chat_quick_action_rejects_when_ai_permission_not_granted(client, 
 async def test_agent_status(client):
     response = await client.get("/api/v1/status")
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_usage_status_requires_auth(client):
+    response = await client.get("/api/v1/usage/status")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_usage_status_accessible_to_regular_user_without_cost_or_model_fields(client, auth_headers):
+    """Sidebar.jsx's widget, not the admin-only /admin/stats - a regular (non-admin) user must be
+    able to call this, and the response must never leak estimated_cost_usd or per-model data."""
+    response = await client.get("/api/v1/usage/status", headers=auth_headers)
+    assert response.status_code == 200
+    assert set(response.json().keys()) == {"tokens_used_today", "daily_token_budget", "used_pct"}
+
+
+@pytest.mark.asyncio
+async def test_usage_status_zero_budget_reports_zero_pct(client, auth_headers, monkeypatch):
+    from src.services import usage_service
+
+    async def _zero_budget():
+        return 0
+
+    monkeypatch.setattr(usage_service, "get_daily_token_budget", _zero_budget)
+
+    response = await client.get("/api/v1/usage/status", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json()["used_pct"] == 0.0
+    assert response.json()["daily_token_budget"] == 0

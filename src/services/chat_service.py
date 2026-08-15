@@ -176,6 +176,30 @@ async def mark_read(db: AsyncSession, conversation_id: str, user_id: str) -> Non
     await db.commit()
 
 
+async def get_first_unread_message_id(db: AsyncSession, conversation_id: str, user_id: str) -> str | None:
+    """The earliest message this user hasn't read yet in this conversation - same "unread" predicate
+    as build_conversation_summary's unread_count and get_scoped_messages("unread") (created_at after
+    this user's last_read_at, excluding their own messages), just narrowed to the single oldest row
+    instead of a count/list. Used by GET /conversations/{id}/messages to anchor the frontend's
+    "jump to first unread" button - call this BEFORE mark_read() runs, since last_read_at is the
+    only read-state this app tracks (no last_read_message_id) and mark_read() overwrites it."""
+    participant = await _get_participant(db, conversation_id, user_id)
+    if participant is None:
+        return None
+    return (
+        await db.execute(
+            select(Message.id)
+            .where(
+                Message.conversation_id == conversation_id,
+                Message.created_at > participant.last_read_at,
+                Message.sender_id != user_id,
+            )
+            .order_by(Message.created_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
 async def get_or_create_direct_conversation(db: AsyncSession, user_a_id: str, user_b_id: str) -> Conversation:
     candidate_ids = (
         (
@@ -261,6 +285,11 @@ async def build_conversation_summary(
             )
         ).scalar_one()
 
+    ai_permission_granted = False
+    if my_participant is not None:
+        permission = await get_ai_permission(db, conversation.id, current_user_id)
+        ai_permission_granted = permission.granted if permission is not None else False
+
     return ConversationSummary(
         id=conversation.id,
         type=conversation.type,
@@ -268,6 +297,7 @@ async def build_conversation_summary(
         participants=participants,
         last_message=last_message,
         unread_count=unread_count,
+        ai_permission_granted=ai_permission_granted,
         updated_at=_iso(conversation.updated_at),
     )
 

@@ -93,6 +93,65 @@ async def test_unread_count_and_mark_read(client, auth_headers, other_auth_heade
 
 
 @pytest.mark.asyncio
+async def test_first_unread_message_id_in_message_list(client, auth_headers, other_auth_headers):
+    other_id = await _other_user_id(client, other_auth_headers)
+    conv = (
+        await client.post(
+            "/api/v1/conversations", json={"type": "direct", "participant_ids": [other_id]}, headers=auth_headers
+        )
+    ).json()
+
+    # Alice sends two messages; Bob hasn't read anything yet - the first one is his first unread.
+    first = await client.post(
+        f"/api/v1/conversations/{conv['id']}/messages", json={"content": "hi bob"}, headers=auth_headers
+    )
+    await client.post(
+        f"/api/v1/conversations/{conv['id']}/messages", json={"content": "still there?"}, headers=auth_headers
+    )
+
+    history = await client.get(f"/api/v1/conversations/{conv['id']}/messages", headers=other_auth_headers)
+    assert history.json()["first_unread_message_id"] == first.json()["id"]
+
+    # Paginating into older history (`before` set) doesn't recompute it - not the "just opened" moment.
+    paged = await client.get(
+        f"/api/v1/conversations/{conv['id']}/messages",
+        params={"before": first.json()["id"]},
+        headers=other_auth_headers,
+    )
+    assert paged.json()["first_unread_message_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_first_unread_message_id_none_after_marking_read(client, auth_headers, other_auth_headers):
+    other_id = await _other_user_id(client, other_auth_headers)
+    conv = (
+        await client.post(
+            "/api/v1/conversations", json={"type": "direct", "participant_ids": [other_id]}, headers=auth_headers
+        )
+    ).json()
+    await client.post(f"/api/v1/conversations/{conv['id']}/messages", json={"content": "hi bob"}, headers=auth_headers)
+
+    await client.post(f"/api/v1/conversations/{conv['id']}/read", headers=other_auth_headers)
+
+    history = await client.get(f"/api/v1/conversations/{conv['id']}/messages", headers=other_auth_headers)
+    assert history.json()["first_unread_message_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_first_unread_message_id_none_for_own_messages(client, auth_headers, other_auth_headers):
+    other_id = await _other_user_id(client, other_auth_headers)
+    conv = (
+        await client.post(
+            "/api/v1/conversations", json={"type": "direct", "participant_ids": [other_id]}, headers=auth_headers
+        )
+    ).json()
+    await client.post(f"/api/v1/conversations/{conv['id']}/messages", json={"content": "hi bob"}, headers=auth_headers)
+
+    history = await client.get(f"/api/v1/conversations/{conv['id']}/messages", headers=auth_headers)
+    assert history.json()["first_unread_message_id"] is None
+
+
+@pytest.mark.asyncio
 async def test_non_participant_forbidden(client, auth_headers, other_auth_headers):
     other_id = await _other_user_id(client, other_auth_headers)
     conv = (
