@@ -60,6 +60,16 @@ def _build_chat_response(result: dict, thread_id: str) -> ChatResponse:
         if isinstance(m, (AIMessage, ToolMessage)) and m.content:
             final_text = m.content
             break
+    if not final_text:
+        # The planner's last AIMessage can legitimately have empty content (e.g. it emitted a tool
+        # call with no accompanying text, or had nothing to say given the tools/context it had).
+        # Without this, the frontend renders a bubble with no text and no error - status is
+        # "completed" so the "status === 'error'" fallback text never kicks in either. Better to
+        # surface it plainly than let it look like the AI silently did nothing.
+        final_text = (
+            "Orbit không tạo được câu trả lời cho yêu cầu này — hãy thử diễn đạt lại hoặc hỏi cụ "
+            "thể hơn."
+        )
     return ChatResponse(response=final_text, thread_id=thread_id, status="completed")
 
 
