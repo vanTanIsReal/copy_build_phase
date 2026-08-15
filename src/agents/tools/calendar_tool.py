@@ -33,6 +33,12 @@ async def create_calendar_event(
         description: Optional event details.
         attendees: Optional list of attendee email addresses.
     """
+    user_id = (state or {}).get("user_id")
+    try:
+        conflicts = await calendar_service.find_conflicts(user_id, start_iso, end_iso)
+    except CalendarNotConnected:
+        return _NOT_CONNECTED_MSG
+
     draft = {
         "summary": summary,
         "start": start_iso,
@@ -40,11 +46,17 @@ async def create_calendar_event(
         "description": description,
         "attendees": attendees or [],
     }
+    if conflicts:
+        # Propose & Verify: surface what it clashes with plus up to 2 free alternatives in the
+        # same confirmation step, instead of silently double-booking or blocking outright - the
+        # user still decides (pick an alternative, keep the original time anyway, or cancel).
+        draft["conflicts"] = [calendar_service.to_out_dict(e) for e in conflicts]
+        draft["alternatives"] = await calendar_service.suggest_alternative_slots(user_id, start_iso, end_iso)
+
     decision = interrupt({"type": "calendar_event", "draft": draft})
     if not decision or not decision.get("approved"):
         return "Calendar event was not created (user declined)."
 
-    user_id = (state or {}).get("user_id")
     draft.update(decision.get("edits") or {})
     try:
         created = await calendar_service.create_event(

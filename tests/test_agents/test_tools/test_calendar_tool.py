@@ -52,6 +52,7 @@ async def test_create_calendar_event_interrupts_then_creates(monkeypatch, fake_l
         "id": "evt-abc",
         "htmlLink": "https://calendar.google.com/event?eid=abc",
     }
+    fake_service.events.return_value.list.return_value.execute.return_value = {"items": []}
     _mock_service(monkeypatch, fake_service)
 
     llm = _script_tool_call(
@@ -81,6 +82,7 @@ async def test_create_calendar_event_interrupts_then_creates(monkeypatch, fake_l
 @pytest.mark.asyncio
 async def test_create_calendar_event_declined(monkeypatch, fake_llm_factory):
     fake_service = MagicMock()
+    fake_service.events.return_value.list.return_value.execute.return_value = {"items": []}
     _mock_service(monkeypatch, fake_service)
 
     llm = _script_tool_call(
@@ -104,7 +106,96 @@ async def test_create_calendar_event_declined(monkeypatch, fake_llm_factory):
 @pytest.mark.asyncio
 async def test_create_calendar_event_not_connected(monkeypatch, fake_llm_factory):
     """No GoogleCalendarCredential row for this user - real (unmocked) credential-resolution path
-    should surface as a friendly tool message, not a crash."""
+    should surface as a friendly tool message, not a crash. The conflict check now runs before the
+    confirmation interrupt, so a not-connected account fails fast in the very first turn - there's
+    no draft worth confirming if we already know saving it would fail, and no interrupt is left
+    pending to resume."""
+    llm = _script_tool_call(
+        fake_llm_factory,
+        "create_calendar_event",
+        {"summary": "Launch review", "start_iso": "2026-08-01T11:00:00", "end_iso": "2026-08-01T12:00:00"},
+    )
+    monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
+
+    config = _config()
+    result = await agent_graph.agent.ainvoke(
+        {"messages": [HumanMessage(content="schedule the review")], "user_id": "user-with-no-calendar"}, config
+    )
+
+    assert result.get("__interrupt__") is None
+    final = result["messages"][-1]
+    assert "hasn't connected Google Calendar" in final.content
+
+
+@pytest.mark.asyncio
+async def test_create_calendar_event_conflict_offers_alternatives(monkeypatch, fake_llm_factory):
+    """Propose & Verify: an overlapping event turns up in the draft's `conflicts`, and up to 2
+    free alternative slots are computed and attached - all before the user is ever asked to
+    confirm. Picking an alternative via `edits` creates the event at that time, not the original."""
+    fake_service = MagicMock()
+    fake_service.events.return_value.insert.return_value.execute.return_value = {
+        "id": "evt-abc",
+        "htmlLink": "https://calendar.google.com/event?eid=abc",
+    }
+    fake_service.events.return_value.list.return_value.execute.return_value = {
+        "items": [
+            {
+                "id": "evt-standup",
+                "summary": "Standup",
+                "start": {"dateTime": "2026-08-01T11:00:00"},
+                "end": {"dateTime": "2026-08-01T11:30:00"},
+            }
+        ]
+    }
+    _mock_service(monkeypatch, fake_service)
+
+    llm = _script_tool_call(
+        fake_llm_factory,
+        "create_calendar_event",
+        {"summary": "Launch review", "start_iso": "2026-08-01T11:00:00", "end_iso": "2026-08-01T12:00:00"},
+    )
+    monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
+
+    config = _config()
+    result = await agent_graph.agent.ainvoke(
+        {"messages": [HumanMessage(content="schedule the review")], "user_id": _USER_ID}, config
+    )
+
+    draft = result["__interrupt__"][0].value["draft"]
+    assert [c["title"] for c in draft["conflicts"]] == ["Standup"]
+    assert draft["alternatives"][0] == {"start": "2026-08-01T11:30:00", "end": "2026-08-01T12:30:00"}
+    assert len(draft["alternatives"]) == 2
+
+    alt = draft["alternatives"][0]
+    result2 = await agent_graph.agent.ainvoke(
+        Command(resume={"approved": True, "edits": {"start": alt["start"], "end": alt["end"]}}), config
+    )
+    assert "Event created" in result2["messages"][-1].content
+    body = fake_service.events.return_value.insert.call_args.kwargs["body"]
+    assert body["start"]["dateTime"] == alt["start"]
+
+
+@pytest.mark.asyncio
+async def test_create_calendar_event_conflict_confirmed_anyway(monkeypatch, fake_llm_factory):
+    """Alternatives are offers, not a block - confirming without picking one still books the
+    originally requested (conflicting) time, same as today's double-booking-allowed behavior."""
+    fake_service = MagicMock()
+    fake_service.events.return_value.insert.return_value.execute.return_value = {
+        "id": "evt-abc",
+        "htmlLink": "https://calendar.google.com/event?eid=abc",
+    }
+    fake_service.events.return_value.list.return_value.execute.return_value = {
+        "items": [
+            {
+                "id": "evt-standup",
+                "summary": "Standup",
+                "start": {"dateTime": "2026-08-01T11:00:00"},
+                "end": {"dateTime": "2026-08-01T11:30:00"},
+            }
+        ]
+    }
+    _mock_service(monkeypatch, fake_service)
+
     llm = _script_tool_call(
         fake_llm_factory,
         "create_calendar_event",
@@ -114,12 +205,13 @@ async def test_create_calendar_event_not_connected(monkeypatch, fake_llm_factory
 
     config = _config()
     await agent_graph.agent.ainvoke(
-        {"messages": [HumanMessage(content="schedule the review")], "user_id": "user-with-no-calendar"}, config
+        {"messages": [HumanMessage(content="schedule the review")], "user_id": _USER_ID}, config
     )
 
     result2 = await agent_graph.agent.ainvoke(Command(resume={"approved": True}), config)
-    final = result2["messages"][-1]
-    assert "hasn't connected Google Calendar" in final.content
+    assert "Event created" in result2["messages"][-1].content
+    body = fake_service.events.return_value.insert.call_args.kwargs["body"]
+    assert body["start"]["dateTime"] == "2026-08-01T11:00:00"
 
 
 @pytest.mark.asyncio

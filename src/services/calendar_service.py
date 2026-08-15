@@ -16,6 +16,13 @@ logger = logging.getLogger(__name__)
 # calendar_id needs storing anywhere.
 _PRIMARY = "primary"
 
+# Fixed heuristic for suggest_alternative_slots (v1, not user-configurable): only offer
+# alternatives inside a plain working-hours window, searched a few days ahead. Revisit as a
+# per-user setting if this turns out to matter in practice.
+_WORK_DAY_START_HOUR = 8
+_WORK_DAY_END_HOUR = 20
+_SEARCH_DAYS_AHEAD = 3
+
 
 async def _service(user_id: str) -> Resource:
     creds = await google_credentials.get_credentials(user_id)
@@ -41,6 +48,79 @@ async def list_events(user_id: str, time_min_iso: str, time_max_iso: str, max_re
 
     resp = await run_in_threadpool(_call)
     return resp.get("items", [])
+
+
+async def find_conflicts(user_id: str, start_iso: str, end_iso: str) -> list[dict]:
+    """Existing events overlapping [start_iso, end_iso). Google Calendar's timeMin/timeMax
+    semantics (an event qualifies when its end is after timeMin AND its start is before timeMax)
+    already express exactly the overlap test we need - no extra interval math required here."""
+    return await list_events(user_id, start_iso, end_iso)
+
+
+def _merge_busy_intervals(events: list[dict]) -> list[tuple[datetime, datetime]]:
+    """Sorted, merged busy intervals from timed events (all-day events, which only have a "date"
+    field and no precise time, are skipped here - known v1 limitation, not a bug: they still show
+    up as a conflict via find_conflicts, they just aren't accounted for when picking free gaps)."""
+    intervals = sorted(
+        (
+            (datetime.fromisoformat(e["start"]["dateTime"]).replace(tzinfo=None),
+             datetime.fromisoformat(e["end"]["dateTime"]).replace(tzinfo=None))
+            for e in events
+            if "dateTime" in e.get("start", {}) and "dateTime" in e.get("end", {})
+        ),
+        key=lambda iv: iv[0],
+    )
+    merged: list[tuple[datetime, datetime]] = []
+    for start, end in intervals:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+async def suggest_alternative_slots(
+    user_id: str, start_iso: str, end_iso: str, count: int = 2
+) -> list[dict]:
+    """Best-effort free-slot search: up to `count` gaps of the same duration as
+    [start_iso, end_iso), at/after the requested start time, inside working hours
+    (_WORK_DAY_START_HOUR-_WORK_DAY_END_HOUR local) over the next _SEARCH_DAYS_AHEAD days.
+    Pure interval scan, no LLM call - this is the tool "self-checking" its own proposal, not the
+    agent reasoning about it. Returns fewer than `count` (possibly none) if the window is full;
+    never raises for that."""
+    start = datetime.fromisoformat(start_iso).replace(tzinfo=None)
+    end = datetime.fromisoformat(end_iso).replace(tzinfo=None)
+    duration = end - start
+
+    window_start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    window_end = window_start + timedelta(days=_SEARCH_DAYS_AHEAD)
+    busy_items = await list_events(
+        user_id, window_start.isoformat(), window_end.isoformat(), max_results=100
+    )
+    busy = _merge_busy_intervals(busy_items)
+
+    candidates: list[dict] = []
+    day = window_start
+    while len(candidates) < count and day < window_end:
+        day_open = day.replace(hour=_WORK_DAY_START_HOUR, minute=0)
+        day_close = day.replace(hour=_WORK_DAY_END_HOUR, minute=0)
+        cursor = max(day_open, start) if day.date() == start.date() else day_open
+
+        for busy_start, busy_end in busy:
+            if not (busy_start.date() <= day.date() <= busy_end.date()):
+                continue
+            if cursor + duration <= busy_start:
+                candidates.append({"start": cursor.isoformat(), "end": (cursor + duration).isoformat()})
+                if len(candidates) >= count:
+                    break
+            cursor = max(cursor, busy_end)
+
+        if len(candidates) < count and cursor + duration <= day_close:
+            candidates.append({"start": cursor.isoformat(), "end": (cursor + duration).isoformat()})
+
+        day += timedelta(days=1)
+
+    return candidates[:count]
 
 
 async def create_event(

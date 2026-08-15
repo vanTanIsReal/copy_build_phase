@@ -37,7 +37,13 @@ function parseJsonArray(text) {
 function describeInterrupt(interrupt) {
   const d = interrupt.draft
   if (interrupt.type === 'reminder') return `Tạo nhắc nhở "${d.title}" lúc ${d.due_at}?`
-  if (interrupt.type === 'calendar_event') return `Tạo sự kiện "${d.summary}" từ ${d.start} đến ${d.end}?`
+  if (interrupt.type === 'calendar_event') {
+    if (d.conflicts?.length) {
+      const clash = d.conflicts.map(c => c.title).join(', ')
+      return `Trùng với "${clash}" (${d.start} - ${d.end}). Tạo "${d.summary}" vào giờ đó, hay chọn giờ thay thế bên dưới?`
+    }
+    return `Tạo sự kiện "${d.summary}" từ ${d.start} đến ${d.end}?`
+  }
   if (interrupt.type === 'calendar_event_update') return `Cập nhật sự kiện ${d.event_id}?`
   if (interrupt.type === 'calendar_event_delete') return `Xoá sự kiện ${d.event_id}?`
   return 'Xác nhận hành động này?'
@@ -85,11 +91,11 @@ export default function AIPanel({ open, onClose, messages = [], conversationId =
     return false
   }
 
-  const respondToInterrupt = async (approved) => {
+  const respondToInterrupt = async (approved, edits) => {
     if (!pending || runningAction) return
     setRunningAction('__resume__'); setError('')
     try {
-      const res = await resumeAgent(token, { thread_id: pending.thread_id, approved })
+      const res = await resumeAgent(token, { thread_id: pending.thread_id, approved, edits })
       setPending(null)
       if (!handleAgentResult(res)) { setResultTitle(approved ? 'Done' : 'Cancelled'); setResult(res.response) }
     } catch (err) { setError(err.detail || 'Could not reach the AI agent.') }
@@ -213,7 +219,7 @@ export default function AIPanel({ open, onClose, messages = [], conversationId =
       })}</div>
       {error && <div className="auth-error">{error}</div>}
       {isCustomRangeIncomplete && <small className="d-block text-muted mt-2">Nhập ít nhất một mốc "From"/"To" cho Custom time range trước khi dùng.</small>}
-      {result && <div className="border rounded-3 p-3 mt-2 small"><strong className="d-block mb-1">{resultTitle}</strong>{result}{pending && <div className="d-flex gap-2 mt-2"><button className="btn btn-sm btn-primary" disabled={runningAction==='__resume__'} onClick={()=>respondToInterrupt(true)}>Xác nhận</button><button className="btn btn-sm btn-light" disabled={runningAction==='__resume__'} onClick={()=>respondToInterrupt(false)}>Huỷ</button></div>}</div>}
+      {result && <div className="border rounded-3 p-3 mt-2 small"><strong className="d-block mb-1">{resultTitle}</strong>{result}{pending && <div className="d-flex gap-2 mt-2 flex-wrap">{pending.interrupt?.draft?.alternatives?.map((alt,i)=><button key={i} className="btn btn-sm btn-outline-primary" disabled={runningAction==='__resume__'} onClick={()=>respondToInterrupt(true,{start:alt.start,end:alt.end})}>Dùng {alt.start} - {alt.end}</button>)}<button className="btn btn-sm btn-primary" disabled={runningAction==='__resume__'} onClick={()=>respondToInterrupt(true)}>Xác nhận</button><button className="btn btn-sm btn-light" disabled={runningAction==='__resume__'} onClick={()=>respondToInterrupt(false)}>Huỷ</button></div>}</div>}
       <div className="ask-card"><div className="ask-title"><span><i className="bi bi-stars"/></span><div><strong>Ask Orbit</strong><small>About this conversation</small></div></div><textarea value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();askOrbit()}}} disabled={!granted} placeholder="Ask anything about this conversation..."/><div className="ask-footer"><span>AI may make mistakes</span><button disabled={!granted || asking || !question.trim() || isCustomRangeIncomplete} onClick={()=>askOrbit()}><i className={`bi ${asking?'bi-hourglass-split':'bi-arrow-up'}`}/></button></div></div>
       <div className="suggested-prompts"><span>Try asking</span><button disabled={!granted || asking || isCustomRangeIncomplete} onClick={()=>askOrbit('What decisions were made today?')}>“What decisions were made today?”</button><button disabled={!granted || asking || isCustomRangeIncomplete} onClick={()=>askOrbit('Who assigned me tasks?')}>“Who assigned me tasks?”</button></div>
     </aside></>
