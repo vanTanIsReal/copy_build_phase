@@ -8,6 +8,7 @@ import '../../src/styles.css'
 import '../../src/assistant.css'
 import UserRouter from './UserRouter'
 import { AuthProvider } from '../../src/context/AuthContext'
+import { ToastProvider } from '../../src/context/ToastContext'
 
 // Empty clientId just disables the Google button's provider context (GoogleLogin quietly
 // no-ops/errors on click instead of crashing at import time) when GOOGLE_OAUTH is unset - dev
@@ -15,7 +16,10 @@ import { AuthProvider } from '../../src/context/AuthContext'
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <GoogleOAuthProvider clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID || ''}>
-      <AuthProvider><UserRouter /></AuthProvider>
+      {/* ToastProvider wraps AuthProvider so AuthContext's own session-check can push a toast too */}
+      <ToastProvider>
+        <AuthProvider><UserRouter /></AuthProvider>
+      </ToastProvider>
     </GoogleOAuthProvider>
   </React.StrictMode>
 )

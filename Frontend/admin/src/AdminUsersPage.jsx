@@ -2,13 +2,18 @@ import { useEffect, useState } from 'react'
 import PageHeader from '../../src/components/common/PageHeader'
 import UserTable from './UserTable'
 import { useAuth } from '../../src/context/AuthContext'
+import { useToast } from '../../src/context/ToastContext'
 import { listUsers, updateUserRole, updateUserStatus } from '../../src/api/admin'
 
 export default function AdminUsersPage() {
   const { token, user } = useAuth()
+  const { pushToast } = useToast()
   const [users, setUsers] = useState([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
+  // Which user row currently has a Promote/Demote/Lock/Unlock request in flight - disables that
+  // row's buttons so an admin can't fire the same security-sensitive action twice while waiting.
+  const [pendingId, setPendingId] = useState(null)
 
   const refresh = () => {
     setLoading(true)
@@ -18,13 +23,27 @@ export default function AdminUsersPage() {
   useEffect(() => { refresh() }, [token, search])
 
   const toggleRole = async (u) => {
-    const updated = await updateUserRole(token, u.id, u.role === 'admin' ? 'user' : 'admin')
-    setUsers(list => list.map(x => x.id === updated.id ? updated : x))
+    setPendingId(u.id)
+    try {
+      const updated = await updateUserRole(token, u.id, u.role === 'admin' ? 'user' : 'admin')
+      setUsers(list => list.map(x => x.id === updated.id ? updated : x))
+    } catch (err) {
+      pushToast(err.detail || 'Could not change this user\'s role.')
+    } finally {
+      setPendingId(null)
+    }
   }
 
   const toggleStatus = async (u) => {
-    const updated = await updateUserStatus(token, u.id, !u.is_active)
-    setUsers(list => list.map(x => x.id === updated.id ? updated : x))
+    setPendingId(u.id)
+    try {
+      const updated = await updateUserStatus(token, u.id, !u.is_active)
+      setUsers(list => list.map(x => x.id === updated.id ? updated : x))
+    } catch (err) {
+      pushToast(err.detail || 'Could not change this user\'s status.')
+    } finally {
+      setPendingId(null)
+    }
   }
 
   return (
@@ -38,7 +57,7 @@ export default function AdminUsersPage() {
           </div>
         </div>
         {loading ? <p className="text-muted small p-3 mb-0">Loading...</p> : (
-          <UserTable users={users} currentUserId={user?.id} onToggleRole={toggleRole} onToggleStatus={toggleStatus} />
+          <UserTable users={users} currentUserId={user?.id} pendingId={pendingId} onToggleRole={toggleRole} onToggleStatus={toggleStatus} />
         )}
       </section>
     </div>

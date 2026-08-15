@@ -196,6 +196,30 @@ async def test_get_usage_report_groups_by_day_and_model(client):
 
 
 @pytest.mark.asyncio
+async def test_get_usage_summary_computes_pct_and_omits_cost_fields(client, monkeypatch):
+    monkeypatch.setattr(usage_service, "get_settings", lambda: _settings(1000))
+
+    async def _usage():
+        return {"total_tokens": 250, "request_count": 1, "since": None}
+
+    monkeypatch.setattr(usage_service, "get_usage_today", _usage)
+    summary = await usage_service.get_usage_summary()
+    assert summary == {"tokens_used_today": 250, "daily_token_budget": 1000, "used_pct": 25.0}
+
+
+@pytest.mark.asyncio
+async def test_get_usage_summary_zero_budget_is_zero_pct(client, monkeypatch):
+    monkeypatch.setattr(usage_service, "get_settings", lambda: _settings(0))
+
+    async def _usage():
+        return {"total_tokens": 999, "request_count": 1, "since": None}
+
+    monkeypatch.setattr(usage_service, "get_usage_today", _usage)
+    summary = await usage_service.get_usage_summary()
+    assert summary["used_pct"] == 0.0
+
+
+@pytest.mark.asyncio
 async def test_get_usage_report_ignores_usage_outside_the_window(client):
     from datetime import UTC, datetime, timedelta
 

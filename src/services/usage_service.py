@@ -170,6 +170,21 @@ async def get_usage_today() -> dict:
     }
 
 
+async def get_usage_summary() -> dict:
+    """Non-admin-safe subset of today's usage - just enough for a "% of today's shared AI budget
+    used" indicator (Sidebar.jsx's widget, via GET /api/v1/usage/status). Deliberately excludes
+    estimated_cost_usd and per-provider/model data that get_usage_today()/get_usage_report() expose
+    - those stay admin-only (GET /admin/stats, /admin/ai-usage)."""
+    budget = await get_daily_token_budget()
+    usage = await get_usage_today()
+    used_pct = round(usage["total_tokens"] / budget * 100, 1) if budget else 0.0
+    return {
+        "tokens_used_today": usage["total_tokens"],
+        "daily_token_budget": budget,
+        "used_pct": used_pct,
+    }
+
+
 async def get_usage_report(days: int = 7) -> dict:
     """Powers the "AI Usage" admin page: per-day totals for a trend chart, plus a per-model
     breakdown, over the trailing `days` days (including today)."""

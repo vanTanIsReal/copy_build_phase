@@ -7,12 +7,17 @@ import { getStats, updateDailyTokenBudget } from '../../src/api/admin'
 export default function AdminDashboardPage() {
   const { token } = useAuth()
   const [stats, setStats] = useState(null)
+  const [statsError, setStatsError] = useState('')
   const [budgetInput, setBudgetInput] = useState('')
   const [savingBudget, setSavingBudget] = useState(false)
   const [budgetError, setBudgetError] = useState('')
   const [budgetSaved, setBudgetSaved] = useState(false)
 
-  const refresh = () => getStats(token).then(s => { setStats(s); setBudgetInput(String(s.daily_token_budget)) }).catch(() => setStats(null))
+  const refresh = () => {
+    setStatsError('')
+    getStats(token).then(s => { setStats(s); setBudgetInput(String(s.daily_token_budget)) })
+      .catch(err => { setStats(null); setStatsError(err.detail || 'Could not load dashboard stats.') })
+  }
 
   useEffect(() => { refresh() }, [token])
 
@@ -33,6 +38,7 @@ export default function AdminDashboardPage() {
   return (
     <div className="page-container">
       <PageHeader eyebrow="Admin" title="Dashboard" description="Overview of accounts and messaging activity across Orbit." />
+      {statsError && <div className="auth-error mb-3 d-flex align-items-center justify-content-between gap-2"><span><i className="bi bi-exclamation-triangle me-2"/>{statsError}</span><button className="btn btn-sm btn-light" onClick={refresh}>Retry</button></div>}
       {nearBudget && <div className="auth-error mb-3"><i className="bi bi-exclamation-triangle me-2"/>AI token usage today is at {stats.budget_used_pct}% of the daily budget ({stats.tokens_used_today.toLocaleString()} / {stats.daily_token_budget.toLocaleString()} tokens).</div>}
       <div className="stats-grid">
         <StatCard label="Total users" value={stats?.total_users ?? '—'} icon="bi-people" />

@@ -3,7 +3,9 @@ import PageHeader from '../../src/components/common/PageHeader'
 import AdminTaskTable from './AdminTaskTable'
 import AdminReminderTable from './AdminReminderTable'
 import AdminMemoryTable from './AdminMemoryTable'
+import ConfirmDialog from '../../src/components/common/ConfirmDialog'
 import { useAuth } from '../../src/context/AuthContext'
+import { useToast } from '../../src/context/ToastContext'
 import {
   listUsers,
   listTasks, deleteTask,
@@ -23,13 +25,15 @@ const confirmLabel = { tasks: 'task', reminders: 'reminder', memories: 'memory' 
 
 export default function AdminUserDataPage() {
   const { token } = useAuth()
+  const { pushToast } = useToast()
   const [tab, setTab] = useState('tasks')
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [users, setUsers] = useState([])
   const [ownerFilter, setOwnerFilter] = useState('')
+  const [pendingDelete, setPendingDelete] = useState(null)
 
-  useEffect(() => { listUsers(token).then(setUsers) }, [token])
+  useEffect(() => { listUsers(token).then(setUsers).catch(() => setUsers([])) }, [token])
 
   const refresh = () => {
     setLoading(true)
@@ -38,10 +42,15 @@ export default function AdminUserDataPage() {
 
   useEffect(() => { refresh() }, [token, tab, ownerFilter])
 
-  const onDelete = async (item) => {
-    if (!window.confirm(`Delete this ${confirmLabel[tab]}? This cannot be undone.`)) return
-    await deleteFor[tab](token, item.id)
-    setItems(list => list.filter(x => x.id !== item.id))
+  const confirmDelete = async () => {
+    const item = pendingDelete
+    setPendingDelete(null)
+    try {
+      await deleteFor[tab](token, item.id)
+      setItems(list => list.filter(x => x.id !== item.id))
+    } catch (err) {
+      pushToast(err.detail || 'Could not delete this item.')
+    }
   }
 
   return (
@@ -63,12 +72,20 @@ export default function AdminUserDataPage() {
         </div>
         {loading ? <p className="text-muted small p-3 mb-0">Loading...</p> : (
           <>
-            {tab === 'tasks' && <AdminTaskTable tasks={items} onDelete={onDelete} />}
-            {tab === 'reminders' && <AdminReminderTable reminders={items} onDelete={onDelete} />}
-            {tab === 'memories' && <AdminMemoryTable memories={items} onDelete={onDelete} />}
+            {tab === 'tasks' && <AdminTaskTable tasks={items} onDelete={setPendingDelete} />}
+            {tab === 'reminders' && <AdminReminderTable reminders={items} onDelete={setPendingDelete} />}
+            {tab === 'memories' && <AdminMemoryTable memories={items} onDelete={setPendingDelete} />}
           </>
         )}
       </section>
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title="Delete item"
+        message={`Delete this ${confirmLabel[tab]}? This cannot be undone.`}
+        confirmLabel="Delete"
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   )
 }

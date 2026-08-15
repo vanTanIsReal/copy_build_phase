@@ -1,10 +1,12 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import * as authApi from '../api/auth'
+import { useToast } from './ToastContext'
 
 const TOKEN_KEY = 'orbit_token'
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
+  const { pushToast } = useToast()
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY))
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -13,9 +15,17 @@ export function AuthProvider({ children }) {
     if (!token) { setUser(null); setLoading(false); return }
     authApi.getMe(token)
       .then(setUser)
-      .catch(() => { localStorage.removeItem(TOKEN_KEY); setToken(null); setUser(null) })
+      .catch(() => {
+        // Only reached when a token WAS present and got rejected (expired/revoked/invalid) - a
+        // fresh visit with no token at all takes the early `if (!token)` branch above instead, so
+        // this never fires for someone who simply hasn't logged in yet.
+        localStorage.removeItem(TOKEN_KEY)
+        setToken(null)
+        setUser(null)
+        pushToast('Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.')
+      })
       .finally(() => setLoading(false))
-  }, [token])
+  }, [token, pushToast])
 
   const login = async (email, password) => {
     const data = await authApi.login({ email, password })

@@ -6,10 +6,13 @@ import 'bootstrap/dist/js/bootstrap.bundle.min.js'
 import '../../src/styles.css'
 import './admin.css'
 import { AuthProvider } from '../../src/context/AuthContext'
+import { ToastProvider } from '../../src/context/ToastContext'
 import AdminRouter from './AdminRouter'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <AuthProvider><AdminRouter /></AuthProvider>
+    <ToastProvider>
+      <AuthProvider><AdminRouter /></AuthProvider>
+    </ToastProvider>
   </React.StrictMode>
 )
