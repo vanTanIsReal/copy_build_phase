@@ -137,16 +137,31 @@ def _build_window_prompt(window: list[tuple[Message, User]], *, now: datetime, t
         'shape: {"commitments": [{"title": string (tiếng Việt, short), "due_at": ISO 8601 datetime '
         'string or null, "proposal_message_index": int (the [N] of the message that first proposed '
         'this commitment), "cancelled": boolean, "owners": [{"name": string, "evidence": "self" | '
-        '"confirmed", "message_index": int}]}]}. If nothing qualifies, output {"commitments": []}.\n\n'
+        '"confirmed" | "invited", "message_index": int}]}]}. If nothing qualifies, output '
+        '{"commitments": []}.\n\n'
         "Rules:\n"
-        "- A person is an owner ONLY IF a message they themselves sent shows it: either they "
-        'stated their own plan (evidence "self") or they explicitly agreed to someone else\'s '
-        'proposal (evidence "confirmed"). Point at that exact message with message_index.\n'
-        "- NEVER list someone as owner because they were addressed, invited, or assigned. Being "
-        'told "Chi ơi mai 3h gửi báo cáo nhé" does NOT make Chi an owner unless Chi replied '
-        "agreeing herself.\n"
+        "- A person becomes an owner in one of three ways. (1) They stated their own plan "
+        'themselves - evidence "self", message_index points at their own message. (2) They '
+        "explicitly agreed to someone else's proposal themselves - evidence \"confirmed\", "
+        "message_index points at their own reply. (3) Someone else's message directly names them "
+        "as invited to a SHARED appointment both people would attend together (a meal, meeting, "
+        'call, trip, or similar joint activity) - evidence "invited", message_index points at the '
+        "inviter's message (the proposal itself), even though the invited person has not replied "
+        "yet.\n"
+        "- Distinguish inviting someone to a shared appointment from merely ASSIGNING them a task: "
+        '"Chi ơi mai 3h em gửi báo cáo nhé" assigns Chi work she would do on her own for the '
+        'sender - that is delegation, not an invitation, so Chi is NOT an owner (no "invited" '
+        'evidence applies) unless she replies agreeing herself. "Tối nay mời bạn ăn tối 8 giờ '
+        'nhé", addressed to one specific named person about something they would do TOGETHER '
+        'with the sender, IS an invitation - that person is an owner via "invited" the moment '
+        "they are named, before they reply.\n"
+        '- "invited" only applies to a specific, clearly named individual, never to a whole group '
+        'addressed generically ("mọi người", "cả nhóm") and never inferred just because someone '
+        "is a participant of the conversation - the invite must actually name them.\n"
         "- Someone who assigns work to another person is NOT an owner of it themself.\n"
-        "- Silence is not agreement. Nobody who did not send a message is ever an owner.\n"
+        '- Silence is not agreement for "confirmed" - nobody who did not reply is ever a '
+        '"confirmed" owner. This does not apply to "invited", which is evidenced by the invite '
+        "itself, not by the invitee's silence.\n"
         '- Merely reporting unavailability ("tối nay tôi bận"), asking a question ("mai họp mấy '
         'giờ thế?"), recounting the past ("hôm nay tôi mất ví"), or joking is NOT a commitment.\n'
         "- If a later message cancels a commitment, emit it again with \"cancelled\": true (owners "
@@ -163,7 +178,16 @@ def _build_window_prompt(window: list[tuple[Message, User]], *, now: datetime, t
         "[1] An (09:00): Chi ơi mai 3h em gửi báo cáo nhé\n"
         '-> {"commitments":[{"title":"Gửi báo cáo","due_at":"...",'
         '"proposal_message_index":1,"cancelled":false,"owners":[]}]}\n'
-        "(An assigned it to Chi but is not the owner themself; Chi hasn't replied, so no owners at all)\n\n"
+        "(An assigned it to Chi but is not the owner themself; Chi hasn't replied, so no owners at all - "
+        "this is delegation, not an invitation)\n\n"
+        "[1] Quỳnh (19:00): tối nay mời Tuấn ăn tối lúc 8 giờ nhé\n"
+        '-> {"commitments":[{"title":"Ăn tối cùng Quỳnh","due_at":"...T20:00:00",'
+        '"proposal_message_index":1,"cancelled":false,"owners":['
+        '{"name":"Quỳnh","evidence":"self","message_index":1},'
+        '{"name":"Tuấn","evidence":"invited","message_index":1}]}]}\n'
+        "(Quỳnh proposed it herself - self; Tuấn was directly named and invited to a shared meal, so "
+        'he is an owner too via "invited", even though he has not replied yet - unlike the report '
+        "example above, this is something they would do together, not work delegated to one side)\n\n"
         "[1] An (09:00): 8h họp nhé\n[2] An (09:05): thôi huỷ nhé\n"
         '-> {"commitments":[{"proposal_message_index":1,"cancelled":true,"owners":[]}]}\n\n'
         f"Chat excerpt:\n{_format_window(window, tz_name)}"
@@ -196,10 +220,16 @@ def _verify_owner(
     if not _is_plain_int(idx) or not (1 <= idx <= len(window)):
         return None
     message, _sender = window[idx - 1]
-    if message.sender_id != user_id:  # the cited message wasn't actually sent by this person -
-        return None  # blocks "B said ok on Chi's behalf" from ever counting as Chi's evidence
     evidence = claim.get("evidence")
-    if evidence not in ("self", "confirmed"):
+    if evidence not in ("self", "confirmed", "invited"):
+        return None
+    if evidence in ("self", "confirmed") and message.sender_id != user_id:
+        # "self"/"confirmed" must be evidenced by the owner's OWN message - blocks "B said ok on
+        # Chi's behalf" from ever counting as Chi's evidence.
+        return None
+    if evidence == "invited" and message.sender_id == user_id:
+        # "invited" must be evidenced by someone ELSE'S message naming this person - you cannot
+        # invite yourself, and this also blocks a claim that mislabels a self-authored message.
         return None
     if evidence == "confirmed" and idx <= proposal_idx:  # a confirmation must come AFTER the proposal
         return None
@@ -219,6 +249,15 @@ def _personalize_title(title: str, owner_name: str) -> str:
     if not owner_name:
         return title
     return re.sub(rf"\b{re.escape(owner_name)}\b", "tôi", title)
+
+
+def _invited_title(title: str, inviter_name: str) -> str:
+    """Title for someone who was directly invited to a shared appointment but hasn't replied
+    themselves (evidence "invited") - phrased as a pending invite rather than a confirmed plan
+    (unlike _personalize_title's "tôi" substitution, which implies the owner already committed),
+    so it reads correctly in their own Task inbox before they've said anything about it."""
+    suffix = f"(lời mời từ {inviter_name}, chưa xác nhận)" if inviter_name else "(lời mời, chưa xác nhận)"
+    return f"{title} {suffix}"
 
 
 def _parse_due_at(raw: object, tz_name: str) -> datetime | None:
@@ -381,10 +420,18 @@ async def maybe_suggest_task(*, conversation_id: str, sender_id: str, content: s
                     if await _task_exists(db, owner_id=owner_id, source_message_id=source_message_id):
                         continue  # dedup anchored to the proposal - idempotent on overlapping windows
 
+                    if claim.get("evidence") == "invited":
+                        # Phrased as a pending invite, not a confirmed plan - this owner hasn't
+                        # said anything themselves yet, unlike self/confirmed below.
+                        inviter = window[claim["message_index"] - 1][1]
+                        owner_title = _invited_title(title, inviter.display_name)
+                    else:
+                        owner_title = _personalize_title(title, id_to_name.get(owner_id, ""))
+
                     task = Task(
                         owner_id=owner_id,
                         conversation_id=conversation_id,
-                        title=_personalize_title(title, id_to_name.get(owner_id, "")),
+                        title=owner_title,
                         due_at=due_at,
                         priority="Medium",
                         source="proactive",
