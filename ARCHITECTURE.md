@@ -110,8 +110,9 @@ graph TB
 - **Nodes:** `planner_node` (`src/agents/nodes/planner_node.py`) — bind `ALL_TOOLS`, inject ngày
   giờ hiện tại theo `calendar_timezone` vào system prompt (tránh agent đoán sai "tomorrow"/"next
   Monday"), ghi token usage qua `usage_service.log_usage`, bắt exception vào `state["error"]`.
-- **Tools** (`src/agents/tools/`, registry `ALL_TOOLS` trong `tools/__init__.py`, 9 tool):
-  - `summarize_conversation`, `extract_tasks` — đọc `state["context"]`, không cần xác nhận.
+- **Tools** (`src/agents/tools/`, registry `ALL_TOOLS` trong `tools/__init__.py`, 11 tool):
+  - `summarize_conversation`, `extract_tasks` — đọc `state["context"]`, không cần xác nhận. Chỉ có
+    ý nghĩa trong 1 hội thoại cụ thể (khác `list_tasks` bên dưới).
   - `search_messages` — tìm tin nhắn cũ trong đúng hội thoại đang chat theo từ khoá (Postgres
     `ILIKE`, không phải semantic search — dự án chủ động không dùng vector store), đọc-only, không
     cần xác nhận; `conversation_id` lấy từ `state`, không phải tham số LLM tự truyền.
@@ -120,6 +121,17 @@ graph TB
     tác dụng phụ đều bắt buộc `interrupt()` chờ xác nhận người dùng trước khi gọi API thật.
   - `create_reminder` / `list_reminders` — tương tự, `create_reminder` bắt buộc `interrupt()` trước
     khi lên lịch qua APScheduler (`SQLAlchemyJobStore`, bền vững qua restart).
+  - `list_tasks` / `list_memories` — đọc-only, không cần xác nhận; đọc thẳng bảng `tasks`/`memories`
+    của chính user đang chat (qua `task_service.list_tasks_for_owner`/`memory_service.
+    list_memories_for_owner`, dùng chung với route `GET /tasks`/`GET /memories`) — **không** đọc
+    theo hội thoại nào cả, khác hẳn `extract_tasks`. Đây là 2 tool duy nhất cho phép trang
+    `/assistant` (chat không gắn `conversation_id`) trả lời được câu hỏi kiểu "deadline nào sắp
+    tới"/"bạn nhớ gì về tôi" — trước khi có 2 tool này, panel "Bối cảnh của bạn" ở `/assistant` tuy
+    hiện đúng dữ liệu Task/Memory thật qua REST (`GET /tasks`, `/memories`, gọi trực tiếp từ
+    `AssistantContextPanel.jsx`, không qua agent) nhưng bản thân agent lại không có cách nào tự đọc
+    lại 2 nguồn đó khi được hỏi trực tiếp trong chat — planner ra 1 `AIMessage` rỗng, và
+    `_build_chat_response` (`src/api/routes.py`) coi đó là `status="completed"` hợp lệ nên không có
+    cả text lẫn lỗi hiển thị; giờ có 2 tool thật lẫn 1 câu fallback khi vẫn rỗng vì lý do khác.
 - **Checkpointer (memory hội thoại):** `AsyncPostgresSaver` (bền vững qua restart) — xây trong
   `init_checkpointer()` lúc FastAPI lifespan khởi động, vì cần chạy trong event loop đang hoạt động
   (`src/agents/graph.py`). `agent` là `None` cho tới khi hàm này chạy xong.

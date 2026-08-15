@@ -314,9 +314,10 @@ Tất cả dưới prefix `/api/v1`, đều yêu cầu JWT trừ `/auth/register
 **Payload `interrupt()` (human-in-the-loop):** `type` = `calendar_event` | `calendar_event_update` |
 `calendar_event_delete` | `reminder`, kèm `draft` chứa nội dung sẽ được ghi.
 
-**Tool của agent (9 tool trong `ALL_TOOLS`):** `summarize_conversation` · `extract_tasks` ·
-`search_messages` · `create_calendar_event` · `list_calendar_events` · `update_calendar_event` ·
-`delete_calendar_event` · `create_reminder` · `list_reminders`. Bốn tool có `interrupt()`:
+**Tool của agent (11 tool trong `ALL_TOOLS`):** `summarize_conversation` · `extract_tasks` ·
+`list_tasks` · `search_messages` · `create_calendar_event` · `list_calendar_events` ·
+`update_calendar_event` · `delete_calendar_event` · `create_reminder` · `list_reminders` ·
+`list_memories`. Bốn tool có `interrupt()`:
 `create/update/delete_calendar_event` và `create_reminder`.
 
 ## 7. Luồng Agent (LangGraph)

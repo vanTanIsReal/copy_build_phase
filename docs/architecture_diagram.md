@@ -21,7 +21,7 @@ graph TB
         AgentAPI["/api/v1/chat, /chat/resume, /assistant/threads"]
         DataAPI["/api/v1/tasks, /calendar, /reminders, /memories, /usage"]
         WS["/api/v1/ws"]
-        Agent["LangGraph Agent — planner + 9 tool"]
+        Agent["LangGraph Agent — planner + 11 tool"]
         LLM["LLM Service — get_llm()"]
         Scheduler["APScheduler — reminders + calendar poll"]
         Proactive[proactive_service]
