@@ -200,6 +200,86 @@ async def test_maybe_suggest_task_invited_creates_task_for_invitee_without_reply
 
 
 @pytest.mark.asyncio
+async def test_maybe_suggest_task_invited_unnamed_in_1on1_conversation(client, monkeypatch):
+    """★ Đúng bug người dùng gặp thật: "sáng mai 8 giờ đi ăn sáng nhé" trong 1-1, KHÔNG hề nêu tên
+    Tuấn - vẫn phải tạo task cho Tuấn vì trong hội thoại 1-1 chỉ có đúng 2 người, không thể là đề
+    xuất cho ai khác. is_direct=True truyền vào _build_window_prompt phải phản ánh đúng việc này -
+    test verify qua prompt thật gửi cho LLM (không mock is_direct), không chỉ qua response giả."""
+    fake_llm = AsyncMock()
+    monkeypatch.setattr(proactive_service, "get_llm", lambda: fake_llm)
+
+    quynh_headers, quynh_id = await _register(client, email="quynh3@example.com", display_name="Quỳnh")
+    tuan_headers, tuan_id = await _register(client, email="tuan3@example.com", display_name="Tuấn")
+    conversation_id = await _create_conversation(client, quynh_headers, tuan_headers)
+    await _grant_all(client, conversation_id, quynh_headers, tuan_headers)
+
+    async with db_session.async_session_maker() as db:
+        invite = await chat_service.create_message(db, conversation_id, quynh_id, "sáng mai 8 giờ đi ăn sáng nhé")
+
+    fake_llm.ainvoke.side_effect = [
+        _relevant_response(),
+        _llm_response(
+            [
+                {
+                    "title": "Ăn sáng cùng Quỳnh",
+                    "due_at": "2026-08-16T08:00:00",
+                    "proposal_message_index": 1,
+                    "cancelled": False,
+                    "owners": [
+                        {"name": "Quỳnh", "evidence": "self", "message_index": 1},
+                        {"name": "Tuấn", "evidence": "invited", "message_index": 1},
+                    ],
+                }
+            ]
+        ),
+    ]
+
+    await proactive_service.maybe_suggest_task(
+        conversation_id=conversation_id, sender_id=quynh_id, content="sáng mai 8 giờ đi ăn sáng nhé"
+    )
+
+    # The prompt actually told the LLM this is a 1-on-1 with exactly these two people - the thing
+    # that makes an unnamed "invited" claim resolvable at all.
+    window_prompt = fake_llm.ainvoke.await_args_list[1].args[0]
+    assert "private 1-on-1 conversation between exactly these two people" in window_prompt
+    assert "Quỳnh" in window_prompt and "Tuấn" in window_prompt
+
+    tuan_tasks = await _tasks_for(tuan_id)
+    assert len(tuan_tasks) == 1
+    assert tuan_tasks[0].source_message_id == invite.id
+    assert tuan_tasks[0].title == "Ăn sáng cùng Quỳnh (lời mời từ Quỳnh, chưa xác nhận)"
+
+
+@pytest.mark.asyncio
+async def test_maybe_suggest_task_group_conversation_is_not_treated_as_1on1(client, monkeypatch):
+    """★ Regression: is_direct chỉ True khi hội thoại có ĐÚNG 2 người - nhóm ≥3 người dù chỉ 2
+    người đã cấp quyền cũng không được coi là 1-1, tránh gợi ý sai người trong nhóm đông."""
+    fake_llm = AsyncMock()
+    monkeypatch.setattr(proactive_service, "get_llm", lambda: fake_llm)
+
+    quynh_headers, quynh_id = await _register(client, email="quynh4@example.com", display_name="Quỳnh")
+    tuan_headers, _tuan_id = await _register(client, email="tuan4@example.com", display_name="Tuấn")
+    # Deliberately not "Chi" - that name already appears in the prompt's own static few-shot
+    # example, which would make a naive substring check below a false positive either way.
+    dung_headers, _dung_id = await _register(client, email="dung4@example.com", display_name="Dung")
+    conversation_id = await _create_group(client, quynh_headers, tuan_headers, dung_headers, name="Nhóm 3 người")
+    await _grant_all(client, conversation_id, quynh_headers, tuan_headers)  # Dung never grants
+
+    async with db_session.async_session_maker() as db:
+        await chat_service.create_message(db, conversation_id, quynh_id, "sáng mai 8 giờ đi ăn sáng nhé")
+
+    fake_llm.ainvoke.side_effect = [_relevant_response(), _llm_response([])]
+
+    await proactive_service.maybe_suggest_task(
+        conversation_id=conversation_id, sender_id=quynh_id, content="sáng mai 8 giờ đi ăn sáng nhé"
+    )
+
+    window_prompt = fake_llm.ainvoke.await_args_list[1].args[0]
+    assert "private 1-on-1 conversation" not in window_prompt
+    assert "Dung" not in window_prompt  # never granted - name must not leak even without her content
+
+
+@pytest.mark.asyncio
 async def test_maybe_suggest_task_invited_requires_invitee_own_permission(client, monkeypatch):
     """Quỳnh mời Tuấn, Quỳnh đã bật quyền AI (nên detection chạy được) nhưng Tuấn CHƯA tự bật quyền
     AI cho hội thoại này - Tuấn không được tạo task, dù được mời đích danh. Quyền riêng tư vẫn ưu
@@ -843,7 +923,7 @@ async def test_load_window_excludes_messages_older_than_max_age(client, auth_hea
         await db.commit()
         await chat_service.create_message(db, conversation_id, other_id, "tin mới")
 
-        window, _roster, _granted = await proactive_service._load_window(db, conversation_id=conversation_id)
+        window, _roster, _granted, _is_direct = await proactive_service._load_window(db, conversation_id=conversation_id)
 
     assert [m.content for m, _ in window] == ["tin mới"]
 
@@ -859,7 +939,7 @@ async def test_load_window_caps_message_count(client, auth_headers, other_auth_h
         for i in range(proactive_service._WINDOW_MAX_MESSAGES + 5):
             await chat_service.create_message(db, conversation_id, sender_id, f"tin {i}")
 
-        window, _roster, _granted = await proactive_service._load_window(db, conversation_id=conversation_id)
+        window, _roster, _granted, _is_direct = await proactive_service._load_window(db, conversation_id=conversation_id)
 
     assert len(window) == proactive_service._WINDOW_MAX_MESSAGES
     assert window[-1][0].content == f"tin {proactive_service._WINDOW_MAX_MESSAGES + 4}"
