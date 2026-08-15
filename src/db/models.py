@@ -199,6 +199,29 @@ class Memory(Base):
     owner: Mapped["User"] = relationship()
 
 
+class AssistantThread(Base):
+    """One row per Personal AI Assistant chat session (/assistant page) - lets a user browse past
+    sessions ("Gần đây" sidebar). Distinct from Conversation (1-1/group human chat) and from the
+    LangGraph checkpointer's own Postgres tables: those hold the full message state per thread_id
+    but have no owner_id column and no title/preview concept, so they can't answer "which threads
+    belong to this user" on their own - this table is the missing owner_id -> thread_id index, kept
+    in sync from src/api/routes.py (chat()/resume_chat()) whenever a turn completes. Only chat()
+    calls with conversation_id=None create a row here - AIPanel's embedded quick actions/Ask Orbit
+    (always conversation_id-scoped) are a different, unrelated flow and must not show up in this
+    list."""
+
+    __tablename__ = "assistant_threads"
+
+    thread_id: Mapped[str] = mapped_column(primary_key=True)  # same thread_id used by the checkpointer
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str]  # fixed at creation from the first message - like a conversation name, never edited after
+    preview: Mapped[str] = mapped_column(default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    owner: Mapped["User"] = relationship()
+
+
 class GoogleCalendarCredential(Base):
     """Per-user Google Calendar OAuth credential (authorization-code flow, access_type=offline).
     A row existing = this user has connected their own Google Calendar; no row = Calendar features

@@ -8,6 +8,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from src.agents.graph import close_checkpointer, init_checkpointer
 from src.api.admin_routes import router as admin_router
+from src.api.assistant_routes import router as assistant_router
 from src.api.auth_routes import router as auth_router
 from src.api.calendar_routes import public_router as calendar_public_router
 from src.api.calendar_routes import router as calendar_router
@@ -79,6 +80,7 @@ app.include_router(calendar_router, prefix="/api/v1", tags=["calendar"])
 app.include_router(calendar_public_router, prefix="/api/v1", tags=["calendar"])
 app.include_router(reminder_router, prefix="/api/v1", tags=["reminders"])
 app.include_router(memory_router, prefix="/api/v1", tags=["memory"])
+app.include_router(assistant_router, prefix="/api/v1", tags=["assistant"])
 
 
 @app.get("/health")
