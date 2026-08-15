@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useAuth } from '../../context/AuthContext'
 import { chatWithAgent, resumeAgent } from '../../api/agent'
 import { getAssistantThreadMessages } from '../../api/assistant'
+import Markdown from '../common/Markdown'
 
 const prompts = [
   { icon:'bi-sun', label:'Lên kế hoạch hôm nay', prompt:'Tổng hợp lịch, task và deadline của tôi hôm nay' },
@@ -97,7 +98,7 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
     <div className="personal-messages">
       {messages.length===0 && <div className="personal-welcome"><motion.div initial={{scale:.85,opacity:0}} animate={{scale:1,opacity:1}} className="welcome-ai-mark"><i className="bi bi-stars"/></motion.div><span className="welcome-kicker">Chào {user?.display_name || 'bạn'}</span><h1>Hôm nay mình có thể<br/><em>giúp gì cho bạn?</em></h1><p>Hỏi mình về lịch, công việc, deadline hoặc thông tin từ các cuộc trò chuyện đã được cấp quyền.</p><div className="prompt-grid">{prompts.map(p=><motion.button whileHover={{y:-3}} whileTap={{scale:.98}} key={p.label} onClick={()=>send(p.prompt)}><span><i className={`bi ${p.icon}`}/></span><strong>{p.label}</strong><small>{p.prompt}</small><i className="bi bi-arrow-up-right"/></motion.button>)}</div></div>}
       <AnimatePresence>{messages.map(m=><motion.div key={m.id} initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} className={`personal-message ${m.own?'own':''}`}>
-        {!m.own&&<div className="message-ai-icon"><i className="bi bi-stars"/></div>}<div><div className="personal-message-bubble">{m.text}{m.interrupt && pending?.thread_id===threadId && <div className="d-flex gap-2 mt-2 flex-wrap">{m.interrupt.draft?.alternatives?.map((alt,i)=><button key={i} className="btn btn-sm btn-outline-primary" disabled={sending} onClick={()=>respond(true,{start:alt.start,end:alt.end})}>Dùng {alt.start} - {alt.end}</button>)}<button className="btn btn-sm btn-primary" disabled={sending} onClick={()=>respond(true)}>Xác nhận</button><button className="btn btn-sm btn-light" disabled={sending} onClick={()=>respond(false)}>Huỷ</button></div>}</div><time>Bây giờ</time></div>
+        {!m.own&&<div className="message-ai-icon"><i className="bi bi-stars"/></div>}<div><div className="personal-message-bubble">{m.own ? m.text : <Markdown>{m.text}</Markdown>}{m.interrupt && pending?.thread_id===threadId && <div className="d-flex gap-2 mt-2 flex-wrap">{m.interrupt.draft?.alternatives?.map((alt,i)=><button key={i} className="btn btn-sm btn-outline-primary" disabled={sending} onClick={()=>respond(true,{start:alt.start,end:alt.end})}>Dùng {alt.start} - {alt.end}</button>)}<button className="btn btn-sm btn-primary" disabled={sending} onClick={()=>respond(true)}>Xác nhận</button><button className="btn btn-sm btn-light" disabled={sending} onClick={()=>respond(false)}>Huỷ</button></div>}</div><time>Bây giờ</time></div>
       </motion.div>)}</AnimatePresence>
       {sending && <div className="personal-message"><div className="message-ai-icon"><i className="bi bi-stars"/></div><div className="personal-message-bubble">Đang xử lý...</div></div>}
     </div>
