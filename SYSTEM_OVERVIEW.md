@@ -1,7 +1,13 @@
 # P-132 — Tổng quan hệ thống và tài liệu chức năng
 
-> Tài liệu phản ánh mã nguồn trên nhánh `tuan` tại commit `b4ae636` (02/08/2026).
-> Trạng thái được xác định từ code đang chạy, không chỉ từ giao diện hoặc kế hoạch trong roadmap.
+> ⚠️ **Đã lỗi thời — giữ làm ảnh chụp lịch sử, không phản ánh trạng thái hiện tại.** Tài liệu này là
+> kết quả một lần rà soát mã nguồn tại commit `b4ae636` (02/08/2026, rất sớm trong dự án — trước cả
+> khi bỏ SQLite, trước Postgres/`AsyncPostgresSaver`, trước khi Task/Calendar/Reminder/Memory/Profile
+> nối API thật). Từ đó tới nay gần như mọi mục "🎨 UI mẫu"/"🟡 Một phần" liệt kê dưới đây đã hoàn
+> thành thật — xem [CLAUDE.md](CLAUDE.md) mục "Trạng thái hiện tại" để biết chính xác cái gì đã chạy
+> thật, và [ARCHITECTURE.md](ARCHITECTURE.md) để có kiến trúc + sơ đồ Mermaid đúng với code hiện tại.
+> Nội dung bên dưới **không được cập nhật lại** — giữ nguyên làm bằng chứng lịch sử cho việc rà soát
+> đã từng thực hiện thế nào, không phải tài liệu tham khảo cho việc phát triển tiếp.
 
 ## 1. Giới thiệu
 

@@ -1,5 +1,14 @@
 # Per-user Google Calendar — Phương án đầy đủ & cách làm
 
+> ✅ **Đã triển khai xong (2026-08-06, hoàn thiện OAuth Client thật 2026-08-08)** — tính năng mô tả
+> trong tài liệu này đã chạy thật trong code hiện tại (`src/services/google_credentials.py`,
+> `src/services/calendar_service.py`, bảng `GoogleCalendarCredential`, trang `/calendar`). Tài liệu
+> này **giữ lại làm tham khảo thiết kế/kỹ thuật** (lý do các quyết định, sequence diagram OAuth, các
+> bẫy đã gặp) — không còn là danh sách việc cần làm, các đoạn code mẫu bên dưới có thể đã lệch nhẹ so
+> với implementation thật theo thời gian. Xem [../ARCHITECTURE.md](../ARCHITECTURE.md) mục Database/
+> Design Decisions để có mô tả đúng với code hiện tại, và mục "16. Bẫy thường gặp" ở cuối file này
+> vẫn còn hữu ích để debug.
+
 > Mục tiêu: mỗi user đăng nhập Orbit có **calendar Google thật của chính họ** (hiện trên điện thoại họ, đồng bộ 2 chiều), thay vì dùng chung một account như hiện tại.
 >
 > Quyết định đã chốt:
