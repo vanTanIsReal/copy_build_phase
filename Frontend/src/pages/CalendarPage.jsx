@@ -121,7 +121,7 @@ export default function CalendarPage() {
     ) : (
       <div className="calendar-layout"><section className="content-card calendar-card">
         {eventsLoading && <p className="text-muted small mb-2">Refreshing...</p>}
-        <FullCalendar plugins={[dayGridPlugin,timeGridPlugin,interactionPlugin,momentTimezonePlugin]} initialView="dayGridMonth" timeZone={HANOI_TZ} headerToolbar={{left:'prev,next today',center:'title',right:'dayGridMonth,timeGridWeek,timeGridDay'}} events={events} eventClick={({event:e})=>setSelected(e)} datesSet={onDatesSet} height="auto"/>
+        <FullCalendar plugins={[dayGridPlugin,timeGridPlugin,interactionPlugin,momentTimezonePlugin]} initialView="dayGridMonth" timeZone={HANOI_TZ} headerToolbar={{left:'prev,next today',center:'title',right:'dayGridMonth,timeGridWeek,timeGridDay'}} events={events} eventClick={(info)=>{ info.jsEvent.preventDefault(); setSelected(info.event) }} datesSet={onDatesSet} height="auto"/>
       </section>
         <aside className="detected-sidebar"><div className="detected-head"><span><i className="bi bi-stars"/></span><div><h3>AI-detected events</h3><p>Active</p></div></div><p className="text-muted small">Orbit đang tự động rà tin nhắn tìm cam kết/lịch hẹn. Khi phát hiện, việc gợi ý sẽ xuất hiện trong <Link to="/tasks">Tasks → AI suggestions</Link> để bạn Accept/Dismiss trước khi tạo event thật.</p></aside>
       </div>

@@ -235,6 +235,12 @@ def _build_window_prompt(
     )
 
 
+def _strip_name_suffix(name: str) -> str:
+    """Drop one trailing " (...)" annotation, e.g. "Quỳnh (Demo)" -> "Quỳnh". Used only as a
+    fallback match key in _verify_owner, never in place of the exact display name anywhere else."""
+    return re.sub(r"\s*\([^)]*\)\s*$", "", name).strip()
+
+
 def _is_plain_int(value: object) -> bool:
     # bool is a subclass of int in Python - json.loads("true") -> True, which would otherwise pass
     # an isinstance(x, int) check and be silently treated as message_index 1.
@@ -254,7 +260,20 @@ def _verify_owner(
     dropped, never guessed at. The LLM proposes; this function is what actually decides."""
     if not isinstance(claim, dict):
         return None
-    user_id = roster.get((claim.get("name") or "").strip())
+    claim_name = (claim.get("name") or "").strip()
+    user_id = roster.get(claim_name)
+    if user_id is None:
+        # Fall back to matching by "core" name - display name with a trailing "(...)" annotation
+        # stripped (e.g. "Quỳnh (Demo)" -> "Quỳnh"). The prompt shows the LLM full display names,
+        # but it naturally refers back to people by their plain name in its own JSON output; without
+        # this fallback, every claim for a participant whose display name carries such a suffix is
+        # silently dropped, since the exact-match lookup above can never succeed for them. Still
+        # fail-closed: only resolves if exactly one roster entry's core name matches - two people
+        # whose names collide once stripped are left unresolved, same as the existing same-full-name
+        # collision handling in _load_window.
+        core = _strip_name_suffix(claim_name)
+        matches = {uid for name, uid in roster.items() if _strip_name_suffix(name) == core}
+        user_id = matches.pop() if len(matches) == 1 else None
     if user_id is None:  # name not a known, unambiguous participant
         return None
     idx = claim.get("message_index")
