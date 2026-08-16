@@ -1,130 +1,340 @@
 # Manual Test Cases — Orbit (P-132)
 
-> Bộ test case kiểm thử **thủ công** (khác với test tự động `pytest tests/` đã có trong CI) — theo
-> format mentor gửi tham khảo. Người thực thi tự làm theo `Mô tả các bước`, ghi kết quả thật vào
-> `Actual Result` và `Status` (PASS/FAIL/BLOCKED/SKIP).
->
-> **Môi trường:** backend `http://localhost:8000` (`python scripts/run_dev.py`), app người dùng
-> `http://localhost:5173` (`Frontend/user`), app admin `http://localhost:5174` (`Frontend/admin`,
-> chỉ cần khi test nhóm Admin) — xem [../README.md](../README.md) mục "Cách chạy web" để setup.
-> Một số nhóm cần `GOOGLE_API_KEY`/tương đương (AI) hoặc `GOOGLE_CALENDAR_CLIENT_ID/SECRET` (Calendar)
-> điền thật trong `.env` — nếu thiếu, đánh dấu case đó `BLOCKED` kèm lý do thay vì `FAIL`.
+Tài liệu mô tả chi tiết 10 test case thủ công cho các luồng chính của Orbit. Người kiểm thử thực hiện lần lượt từng bước, đối chiếu kết quả mong đợi và ghi nhận bằng chứng thực tế.
 
-## Tổng hợp kết quả
+## 1. Thông tin lần kiểm thử
 
-*(Điền lại sau khi chạy hết — đếm theo cột Status ở các bảng bên dưới)*
+| Trường | Giá trị |
+| --- | --- |
+| Phiên bản/Commit | |
+| Môi trường | Local / Staging / Production |
+| Ngày kiểm thử | |
+| Người kiểm thử | |
+| Trình duyệt/Thiết bị | |
 
-| Pass | Fail | Blocked | Skip | Tổng |
-| --- | --- | --- | --- | --- |
-| | | | | 64 |
+## 2. Môi trường và dữ liệu chuẩn bị
+
+- Backend chạy tại `http://localhost:8000` bằng `python scripts/run_dev.py`.
+- User app chạy tại `http://localhost:5173` từ thư mục `Frontend/user`.
+- Admin app chạy tại `http://localhost:5174` từ thư mục `Frontend/admin`.
+- PostgreSQL đã được cấu hình và backend kết nối thành công.
+- Có ít nhất ba tài khoản người dùng riêng biệt: User A, User B và User C.
+- Có một tài khoản admin và một tài khoản user thường để kiểm tra phân quyền.
+- Các test case AI cần LLM provider/API key hợp lệ và ngân sách token chưa vượt giới hạn.
+- Test case Calendar cần cấu hình Google OAuth và thêm tài khoản Google dùng để test vào danh sách test user.
+- Trình duyệt cho phép thông báo khi thực hiện test case Reminder.
+
+## 3. Quy ước trạng thái
+
+- `PASS`: Kết quả thực tế khớp toàn bộ kết quả mong đợi.
+- `FAIL`: Có ít nhất một bước cho kết quả sai hoặc phát sinh lỗi.
+- `BLOCKED`: Không thể tiếp tục do môi trường, dữ liệu hoặc dịch vụ phụ thuộc chưa sẵn sàng.
+- Mỗi case `FAIL` hoặc `BLOCKED` cần ghi rõ bước lỗi, ảnh chụp/log và mã lỗi liên quan.
 
 ---
 
-## 1. Authentication & Authorization
+## TC-01 — Đăng ký tài khoản mới
 
-| Test ID | Test Case | Mô tả các bước | Pre-conditions | Expected Result | Actual Result | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| AUTH-01 | Đăng ký tài khoản mới | 1. Vào `/register` 2. Nhập email chưa tồn tại + mật khẩu hợp lệ + tên hiển thị 3. Bấm "Create account" | Email chưa từng đăng ký | Tạo tài khoản thành công, tự đăng nhập, chuyển tới `/assistant` | | |
-| AUTH-02 | Đăng ký trùng email | 1. Vào `/register` 2. Nhập email đã tồn tại 3. Bấm "Create account" | Đã có tài khoản với email đó (từ AUTH-01) | Hiện lỗi rõ ràng ("Could not create account" hoặc tương tự), không tạo tài khoản trùng | | |
-| AUTH-03 | Đăng nhập đúng thông tin | 1. Vào `/login` 2. Nhập đúng email/mật khẩu vừa tạo 3. Bấm "Sign in" | Tài khoản đã tồn tại | Đăng nhập thành công, chuyển tới `/assistant`, JWT lưu trong localStorage | | |
-| AUTH-04 | Đăng nhập sai mật khẩu | 1. Vào `/login` 2. Nhập đúng email, sai mật khẩu 3. Bấm "Sign in" | Tài khoản đã tồn tại | Hiện lỗi "Invalid email or password", không tạo session | | |
-| AUTH-05 | Nút hiện/ẩn mật khẩu | 1. Vào `/login` 2. Gõ mật khẩu vào ô 3. Bấm icon con mắt | — | Mật khẩu chuyển giữa dạng ẩn (••••) và hiện chữ thật | | |
-| AUTH-06 | Route được bảo vệ khi chưa đăng nhập | 1. Đăng xuất (hoặc mở tab ẩn danh) 2. Truy cập thẳng URL `/tasks` (hoặc `/chat`, `/calendar`...) | Chưa có JWT hợp lệ | Tự động chuyển hướng về `/login`, không hiện được nội dung trang | | |
-| AUTH-07 | Đăng xuất | 1. Đăng nhập thành công 2. Bấm nút đăng xuất (avatar/TopNavbar) | Đang đăng nhập | Quay về `/login`, JWT bị xoá khỏi localStorage, truy cập lại route cũ bị chặn | | |
-| AUTH-08 | Khôi phục phiên khi F5 | 1. Đăng nhập thành công 2. Nhấn F5 reload trang | Đang đăng nhập, đang ở 1 route protected | Vẫn ở nguyên trang đó, không bị đá về `/login`, thông tin user hiện đúng (gọi `GET /auth/me`) | | |
-| AUTH-09 | Đăng nhập bằng Google | 1. Vào `/login` 2. Bấm nút "Sign in with Google" 3. Chọn tài khoản Google, đồng ý quyền | Đã cấu hình `GOOGLE_OAUTH_CLIENT_ID`/`VITE_GOOGLE_CLIENT_ID` thật | Lần đầu tự tạo tài khoản mới, các lần sau đăng nhập lại đúng tài khoản đó, chuyển vào `/assistant` | | |
-| AUTH-10 | Đổi mật khẩu ở Profile | 1. Vào `/profile` 2. Nhập đúng mật khẩu cũ + mật khẩu mới 3. Lưu | Đang đăng nhập bằng tài khoản có mật khẩu (không phải tài khoản Google thuần) | Đổi thành công; đăng xuất rồi đăng nhập lại bằng mật khẩu mới hoạt động, mật khẩu cũ không còn dùng được | | |
-| AUTH-11 | Đổi mật khẩu sai mật khẩu cũ | 1. Vào `/profile` 2. Nhập sai mật khẩu cũ 3. Lưu | Đang đăng nhập | Hiện lỗi, không đổi mật khẩu | | |
+**Mục tiêu:** Xác nhận người dùng có thể tạo tài khoản bằng thông tin hợp lệ và được đăng nhập vào hệ thống.
 
-## 2. Chat 1-1 & Nhóm (realtime)
+**Tiền điều kiện:**
 
-| Test ID | Test Case | Mô tả các bước | Pre-conditions | Expected Result | Actual Result | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| CHAT-01 | Tạo chat 1-1 mới | 1. Vào `/chat` 2. Bấm nút soạn tin (icon bút) 3. Tìm và chọn 1 người dùng khác 4. Gửi tin đầu tiên | Có ít nhất 2 tài khoản test | Tạo hội thoại 1-1 mới, hiện trong danh sách, tin nhắn gửi thành công | | |
-| CHAT-02 | Tạo chat 1-1 trùng (dedupe) | 1. Từ tài khoản A, mở lại hội thoại 1-1 đã có với B (thử tạo mới lần nữa qua nút soạn tin, chọn đúng B) | Đã có hội thoại 1-1 A↔B từ CHAT-01 | Mở lại đúng hội thoại cũ, KHÔNG tạo hội thoại trùng thứ 2 | | |
-| CHAT-03 | Tạo nhóm chat | 1. Bấm nút soạn tin 2. Chọn ≥2 người dùng 3. Đặt tên nhóm 4. Tạo | Có ≥3 tài khoản test | Tạo nhóm thành công, mọi thành viên đều thấy nhóm trong danh sách hội thoại của họ | | |
-| CHAT-04 | Nhận tin nhắn realtime | 1. Mở cùng 1 hội thoại ở 2 trình duyệt/tài khoản khác nhau 2. Gửi tin từ tài khoản A | Cả 2 tài khoản đang mở đúng hội thoại đó | Tài khoản B nhận tin ngay lập tức, không cần F5 (qua WebSocket) | | |
-| CHAT-05 | Đếm tin nhắn chưa đọc | 1. Tài khoản A gửi vài tin trong khi B không mở hội thoại đó 2. B vào `/chat` | B đang không mở đúng hội thoại lúc A gửi | Danh sách hội thoại của B hiện badge số tin chưa đọc đúng số lượng | | |
-| CHAT-06 | Nhảy tới tin chưa đọc đầu tiên | 1. B có backlog nhiều tin chưa đọc trong 1 hội thoại dài 2. B mở hội thoại đó | Hội thoại có đủ tin nhắn để tạo backlog thật (hơn 1 màn hình) | Hiện nút/divider nhảy tới đúng tin đầu tiên chưa đọc, bấm vào cuộn đúng vị trí | | |
-| CHAT-07 | Bật/tắt quyền AI ngay trên danh sách hội thoại | 1. Vào `/chat` 2. Gạt công tắc AI trên 1 dòng hội thoại trong danh sách | Đang đăng nhập, có ít nhất 1 hội thoại | Trạng thái đổi ngay, đồng bộ với badge trên header hội thoại đó và AIPanel (mở hội thoại ra kiểm tra lại) | | |
-| CHAT-08 | Xoá hội thoại (chỉ với tôi) | 1. Mở menu "..." trên header hội thoại 2. Chọn Delete 3. Xác nhận | Đang có ít nhất 1 hội thoại | Hội thoại biến mất khỏi danh sách của người xoá; người còn lại vẫn thấy bình thường | | |
-| CHAT-09 | Hội thoại đã xoá tự hiện lại khi có tin mới | 1. Sau CHAT-08, người còn lại gửi 1 tin mới vào hội thoại đó | Đã xoá hội thoại (chỉ với tôi) ở CHAT-08 | Hội thoại tự xuất hiện lại trong danh sách của người đã xoá | | |
-| CHAT-10 | Rời nhóm | 1. Mở menu "..." trên header 1 nhóm chat 2. Chọn Leave 3. Xác nhận | Đang là thành viên 1 nhóm ≥3 người | Mất quyền truy cập hội thoại đó ngay; các thành viên còn lại thấy roster cập nhật realtime | | |
+- Email kiểm thử chưa tồn tại trong cơ sở dữ liệu.
+- Backend và user app đang hoạt động.
 
-## 3. AI Agent — Quick Actions & Ask Orbit
+**Dữ liệu kiểm thử:**
 
-| Test ID | Test Case | Mô tả các bước | Pre-conditions | Expected Result | Actual Result | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| AGENT-01 | Summarize hội thoại | 1. Mở 1 hội thoại có vài tin nhắn 2. Bấm icon AI trên header → Summarize | Đã cấp quyền AI cho hội thoại này (xem CHAT-07); có API key LLM hợp lệ trong `.env` | Trả về đúng 1 bản tóm tắt (không lặp 3 định dạng), nội dung phản ánh đúng tin nhắn thật | | |
-| AGENT-02 | Extract tasks | 1. Trong hội thoại có nhắc tới việc cần làm/lịch hẹn 2. Bấm "Extract tasks" | Đã cấp quyền AI; hội thoại có nội dung task thật | Task được trích ra, xuất hiện trong `/tasks` mục "AI suggestions" với status `suggested` | | |
-| AGENT-03 | Find schedule / Deadlines | 1. Bấm lần lượt "Find schedule" và "Deadlines" trong AIPanel | Đã cấp quyền AI | Trả lời có nội dung liên quan tới lịch/hạn chót được nhắc trong hội thoại | | |
-| AGENT-04 | Ask Orbit — câu hỏi tự do | 1. Gõ 1 câu hỏi tự do vào ô "Ask Orbit" (vd "tóm tắt hộ tôi ai đang phải làm gì") 2. Gửi | Đã cấp quyền AI | Nhận được câu trả lời liên quan, hiển thị đúng định dạng markdown (đậm/gạch đầu dòng render thật, không hiện `**`/`-` thô) | | |
-| AGENT-05 | Chặn khi chưa cấp quyền AI | 1. Tắt quyền AI cho 1 hội thoại (CHAT-07) 2. Thử bấm Summarize/Ask Orbit | Đã tắt quyền AI cho hội thoại đang mở | AIPanel disable quick action, báo rõ "Permission required" — không gọi được API AI | | |
-| AGENT-06 | AI Assistant cá nhân (`/assistant`) — hỏi tự do | 1. Vào `/assistant` 2. Gõ câu hỏi tự do 3. Gửi | Đang đăng nhập | Nhận câu trả lời từ agent, hiện trong khung chat, markdown render đúng | | |
-| AGENT-07 | Danh sách phiên chat cũ ở `/assistant` | 1. Chat vài lượt ở `/assistant` 2. Bấm nút tạo phiên mới/chọn phiên khác 3. Bấm lại vào phiên cũ | Đã có ít nhất 1 phiên chat trước đó | Danh sách bên trái hiện đúng các phiên thật (tiêu đề lấy từ tin đầu tiên); bấm vào tải đúng lại lịch sử hội thoại đó | | |
-| AGENT-08 | Panel ngữ cảnh ở `/assistant` | 1. Vào `/assistant`, quan sát panel bên phải | Có sẵn vài task/sự kiện lịch/memory thật | Hiện đúng dữ liệu thật (task cần chú ý, lịch sắp tới, memory) — không phải số liệu cố định | | |
+- Tên hiển thị: `Manual Test User`
+- Email: dùng một email duy nhất, ví dụ `manual.test+<timestamp>@example.com`
+- Mật khẩu: một mật khẩu đáp ứng chính sách hiện tại của hệ thống
 
-## 4. AI Agent — Human-in-the-loop (Calendar & Reminder)
+| Bước | Thao tác | Kết quả mong đợi |
+| --- | --- | --- |
+| 1 | Mở `http://localhost:5173/register`. | Trang đăng ký hiển thị đầy đủ các trường bắt buộc và nút tạo tài khoản. |
+| 2 | Để trống các trường bắt buộc rồi gửi form. | Form không được gửi; các trường thiếu dữ liệu hiển thị cảnh báo phù hợp. |
+| 3 | Nhập tên, email và mật khẩu hợp lệ. | Dữ liệu được hiển thị đúng; mật khẩu được che trên giao diện. |
+| 4 | Bấm **Create account** một lần. | Hệ thống tạo đúng một tài khoản, không xuất hiện lỗi và không tạo bản ghi trùng. |
+| 5 | Quan sát URL và thông tin người dùng sau khi đăng ký. | Người dùng được đăng nhập tự động, chuyển đến `/assistant` và hiển thị đúng thông tin tài khoản. |
+| 6 | Tải lại trang. | Phiên đăng nhập vẫn hợp lệ; người dùng không bị chuyển về trang đăng nhập. |
 
-| Test ID | Test Case | Mô tả các bước | Pre-conditions | Expected Result | Actual Result | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| HITL-01 | Tạo sự kiện lịch qua chat — xác nhận | 1. Ở `/assistant` hoặc AIPanel, gõ "đặt lịch họp team 3h chiều mai" 2. Chờ thẻ xác nhận hiện ra 3. Bấm "Xác nhận" | Đã Connect Google Calendar (xem CAL-01) | Hiện thẻ xác nhận có đủ tiêu đề/thời gian TRƯỚC khi tạo; sau khi xác nhận, sự kiện thật xuất hiện trên `/calendar` và trên Google Calendar thật | | |
-| HITL-02 | Tạo sự kiện lịch qua chat — huỷ | 1. Lặp lại như HITL-01 nhưng bấm "Huỷ" ở bước xác nhận | Đã Connect Google Calendar | KHÔNG có sự kiện nào được tạo trên Google Calendar; agent xác nhận đã huỷ | | |
-| HITL-03 | Cảnh báo trùng lịch + gợi ý khung giờ thay thế | 1. Đã có sẵn 1 sự kiện trong khung giờ X 2. Nhờ agent tạo sự kiện mới trùng khung giờ X | Đã Connect Google Calendar, đã có sẵn 1 event trong khung giờ sẽ test | Thẻ xác nhận cảnh báo trùng lịch, gợi ý tối đa 2 khung giờ trống thay thế trước khi tạo | | |
-| HITL-04 | Tạo reminder qua chat — xác nhận | 1. Gõ "nhắc tôi gọi khách hàng lúc 5h chiều nay" 2. Bấm Xác nhận | — | Hiện thẻ xác nhận trước; sau khi xác nhận, reminder thật xuất hiện trong `/reminders` | | |
-| HITL-05 | Sửa/xoá sự kiện lịch qua chat | 1. Nhờ agent "đổi giờ họp team sang 4h chiều" (event đã tạo ở HITL-01) 2. Xác nhận | Đã có event thật từ HITL-01 | Thẻ xác nhận hiện đúng thay đổi; sau xác nhận, event trên Google Calendar cập nhật đúng giờ mới | | |
-| HITL-06 | Chưa Connect Calendar — agent báo rõ thay vì treo | 1. Dùng tài khoản CHƯA Connect Google Calendar 2. Nhờ agent tạo sự kiện lịch | Tài khoản test chưa Connect Calendar | Agent trả lời hướng dẫn kết nối Calendar trước, không bị treo/lỗi im lặng | | |
+**Kết quả thực tế:**
 
-## 5. Tasks
+**Trạng thái:** `PASS` / `FAIL` / `BLOCKED`
 
-| Test ID | Test Case | Mô tả các bước | Pre-conditions | Expected Result | Actual Result | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| TASK-01 | Tạo task thủ công | 1. Vào `/tasks` 2. Bấm "Add task" 3. Điền tiêu đề/hạn/priority 4. Lưu | — | Task mới xuất hiện trong bảng chính, `source="manual"` | | |
-| TASK-02 | Accept task AI đề xuất | 1. Có task trong mục "AI suggestions" (từ AGENT-02 hoặc proactive) 2. Bấm "Accept" | Có ít nhất 1 AI suggestion, có `due_at` | Task chuyển từ "suggested" sang chính thức; nếu có `due_at`, tự tạo thêm sự kiện Calendar + Reminder thật | | |
-| TASK-03 | Dismiss task AI đề xuất | 1. Bấm "Dismiss" trên 1 AI suggestion | Có ít nhất 1 AI suggestion | Task biến mất khỏi mục suggestions, không vào danh sách chính thức | | |
-| TASK-04 | Đánh dấu hoàn thành / xoá task | 1. Trên 1 task đã có, bấm hoàn thành, sau đó bấm xoá | Có ít nhất 1 task pending | Trạng thái đổi đúng, lỗi (nếu có) báo qua toast thay vì im lặng | | |
-| TASK-05 | Task Inbox nhóm đúng 4 mức | 1. Chuẩn bị vài task: 1 quá hạn, 1 sắp đến hạn <48h, 1 priority cao, 1 suggestion chưa xử lý 2. Vào `/tasks/inbox` | Có đủ 4 loại task như mô tả | Mỗi task nằm đúng nhóm tương ứng, không lẫn nhóm | | |
-| TASK-06 | Realtime đồng bộ giữa 2 tab | 1. Mở `/tasks` ở 2 tab 2. Ở tab A, Accept 1 suggestion | Có sẵn 1 AI suggestion | Tab B tự cập nhật ngay không cần F5 | | |
+**Bằng chứng/Ghi chú:**
 
-## 6. Calendar
+---
 
-| Test ID | Test Case | Mô tả các bước | Pre-conditions | Expected Result | Actual Result | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| CAL-01 | Connect Google Calendar | 1. Vào `/calendar` (chưa từng connect) 2. Bấm "Connect Google Calendar" 3. Chọn tài khoản Google, đồng ý quyền | Đã cấu hình `GOOGLE_CALENDAR_CLIENT_ID/SECRET` thật, email test nằm trong Test users của OAuth consent | Popup Google thật hiện ra, sau khi đồng ý popup tự đóng, `/calendar` chuyển sang hiện lịch thật | | |
-| CAL-02 | Tạo sự kiện từ UI | 1. Trên `/calendar` đã connect, bấm tạo sự kiện mới 2. Điền thông tin 3. Lưu | Đã Connect Calendar | Sự kiện hiện trên FullCalendar VÀ trên Google Calendar thật của đúng tài khoản đó | | |
-| CAL-03 | Sửa/xoá sự kiện từ UI | 1. Bấm vào 1 sự kiện đã tạo 2. Sửa giờ hoặc xoá | Có sẵn ≥1 sự kiện từ CAL-02 | Thay đổi phản ánh đúng trên cả UI và Google Calendar thật | | |
-| CAL-04 | Cách ly dữ liệu giữa 2 user | 1. User A và User B tự Connect 2 tài khoản Google KHÁC NHAU 2. A tạo 1 sự kiện | 2 tài khoản Orbit, 2 Google account riêng biệt đã Connect | Sự kiện của A KHÔNG hiện trên `/calendar` của B | | |
-| CAL-05 | Đồng bộ 2 chiều — tạo trực tiếp trên Google Calendar | 1. Vào Google Calendar thật (ngoài app Orbit) 2. Tạo 1 sự kiện mới trực tiếp trên đó | Đã Connect Calendar, đang online trên Orbit | Trong khoảng ~20s (`CALENDAR_POLL_INTERVAL_SECONDS`), sự kiện tự xuất hiện trên `/calendar` không cần F5 | | |
-| CAL-06 | Đúng giờ hiển thị theo timezone | 1. Tạo 1 sự kiện lúc 9:00 sáng giờ Việt Nam | Đã Connect Calendar | FullCalendar hiện đúng 9:00 sáng, không lệch múi giờ | | |
-| CAL-07 | "Tuần này tôi có lịch gì" hỏi qua chat | 1. Đã có 1 sự kiện đầu tuần (không phải hôm nay) 2. Hỏi agent "tuần này tôi có lịch gì" | Đã Connect Calendar, có ≥1 event đầu tuần | Agent liệt kê đúng cả sự kiện đầu tuần, không chỉ từ thời điểm hỏi trở đi | | |
+## TC-02 — Từ chối đăng nhập khi sai mật khẩu
 
-## 7. Reminders
+**Mục tiêu:** Đảm bảo hệ thống không tạo phiên đăng nhập khi thông tin xác thực không hợp lệ.
 
-| Test ID | Test Case | Mô tả các bước | Pre-conditions | Expected Result | Actual Result | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| REM-01 | Tạo reminder qua UI | 1. Vào `/reminders` 2. Tạo reminder mới, đặt giờ gần (vd +2 phút) | — | Reminder hiện trong danh sách với status "scheduled" | | |
-| REM-02 | Reminder bắn đúng giờ | 1. Chờ tới đúng giờ đã đặt ở REM-01 | Có reminder sắp tới giờ | Toast/thông báo realtime hiện đúng lúc, dù đang ở trang nào của app; status đổi thành "fired" | | |
-| REM-03 | Reminder sống sót qua restart backend | 1. Tạo reminder giờ gần 2. Restart backend (Ctrl+C rồi chạy lại `run_dev.py`) trước giờ hẹn 3. Chờ tới giờ | Có quyền restart backend trong lúc test | Reminder vẫn bắn đúng giờ dù backend đã restart giữa chừng | | |
+**Tiền điều kiện:**
 
-## 8. Memory
+- Có một tài khoản user đang hoạt động.
+- Người dùng đã đăng xuất hoặc đang sử dụng tab ẩn danh.
 
-| Test ID | Test Case | Mô tả các bước | Pre-conditions | Expected Result | Actual Result | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| MEM-01 | Thêm memory mới | 1. Vào `/memory` 2. Bấm "Add memory" 3. Điền category/tiêu đề/chi tiết 4. Lưu | — | Memory mới xuất hiện trong danh sách | | |
-| MEM-02 | Sửa/xoá memory | 1. Mở menu 3 chấm trên 1 memory 2. Sửa nội dung, lưu 3. Xoá | Có ≥1 memory từ MEM-01 | Thay đổi/xoá phản ánh đúng, không cần F5 | | |
-| MEM-03 | Search + lọc theo category | 1. Gõ từ khoá vào ô search 2. Chuyển qua các tab category | Có ≥3 memory với category khác nhau | Kết quả lọc đúng theo từ khoá và category chọn | | |
+**Dữ liệu kiểm thử:** Email đúng của user và một mật khẩu sai.
 
-## 9. Admin
+| Bước | Thao tác | Kết quả mong đợi |
+| --- | --- | --- |
+| 1 | Mở `http://localhost:5173/login`. | Form đăng nhập hiển thị trường email, mật khẩu và nút **Sign in**. |
+| 2 | Nhập email hợp lệ và mật khẩu sai. | Form nhận dữ liệu; mật khẩu không hiển thị dạng văn bản thuần. |
+| 3 | Bấm **Sign in**. | Hệ thống từ chối đăng nhập và hiển thị thông báo email hoặc mật khẩu không đúng. |
+| 4 | Quan sát URL và nội dung trang. | Người dùng vẫn ở trang đăng nhập và không xem được nội dung cần xác thực. |
+| 5 | Tải lại trang rồi truy cập trực tiếp `/assistant`. | Không có phiên đăng nhập được tạo; trình duyệt chuyển về `/login`. |
+| 6 | Đăng nhập lại bằng đúng mật khẩu. | Đăng nhập thành công, chứng minh tài khoản không bị thay đổi bởi lần thử sai. |
 
-| Test ID | Test Case | Mô tả các bước | Pre-conditions | Expected Result | Actual Result | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| ADM-01 | Đăng nhập admin | 1. Vào `http://localhost:5174/login` 2. Đăng nhập bằng tài khoản role `admin` | Đã có tài khoản admin (`INITIAL_ADMIN_EMAIL` hoặc bootstrap qua `ADMIN_BOOTSTRAP_KEY`) | Vào được Dashboard; tài khoản không phải admin bị từ chối dù đúng mật khẩu | | |
-| ADM-02 | Đổi role user | 1. Vào `/users` 2. Chọn 1 user thường 3. Đổi role thành admin rồi đổi lại | Có ≥1 user role `user` | Đổi thành công, phản ánh ngay trên bảng; user đó đăng nhập lại có quyền tương ứng | | |
-| ADM-03 | Khoá/mở tài khoản | 1. Trên `/users`, khoá 1 tài khoản 2. Thử đăng nhập bằng tài khoản đó | Có ≥1 user không phải chính admin đang thao tác | Tài khoản bị khoá không đăng nhập được; mở khoá lại thì đăng nhập được bình thường | | |
-| ADM-04 | Kiểm duyệt/xoá hội thoại | 1. Vào `/conversations` 2. Xem tin nhắn 1 hội thoại 3. Xoá hội thoại đó | Có ≥1 hội thoại thật | Xem được nội dung tin nhắn; sau khi xoá, hội thoại biến mất khỏi cả 2 phía user | | |
-| ADM-05 | Đổi Daily token budget | 1. Vào Dashboard 2. Sửa giá trị "Daily token budget" 3. Lưu | Đang đăng nhập admin | Áp dụng ngay không cần restart backend, phản ánh đúng ở stat card | | |
-| ADM-06 | Cảnh báo vượt ngân sách token | 1. Hạ tạm `DAILY_TOKEN_BUDGET` xuống rất thấp (vd 50) qua ADM-05 2. Dùng tính năng AI ở app user tới khi vượt 80% | Đã hạ budget thấp | Toast cảnh báo `usage_budget_alert` hiện ở BẤT KỲ trang nào admin đang mở (cả app user lẫn admin nếu tài khoản đó có role admin) | | |
-| ADM-07 | Chặn gọi LLM khi vượt hẳn ngân sách | 1. Tiếp tục dùng AI tới khi vượt 100% budget | Đã vượt 80% ở ADM-06 | `/chat` bị chặn hẳn với thông báo rõ ràng, không chỉ cảnh báo suông | | |
-| ADM-08 | AI Management — đổi provider/model | 1. Vào `/ai-management` 2. Đổi provider/model/temperature 3. Lưu | Có API key hợp lệ cho provider định đổi sang | Áp dụng ngay cho lượt gọi LLM tiếp theo, không cần restart backend | | |
-| ADM-09 | AI Usage — xem chi phí | 1. Vào `/ai-usage` | Đã có usage log thật (từ các test AGENT-* ở trên) | Hiện đúng token đã dùng, chi phí ước tính, breakdown theo ngày/model | | |
-| ADM-10 | Audit Log ghi đúng hành động | 1. Thực hiện 1 hành động có audit (vd đổi role ở ADM-02) 2. Vào `/audit-log` | Vừa thực hiện 1 hành động admin | Có entry mới ghi đúng ai đã làm gì, tìm/lọc được | | |
+**Kết quả thực tế:**
+
+**Trạng thái:** `PASS` / `FAIL` / `BLOCKED`
+
+**Bằng chứng/Ghi chú:**
+
+---
+
+## TC-03 — Chặn truy cập khi chưa đăng nhập
+
+**Mục tiêu:** Xác nhận route và dữ liệu riêng tư không thể truy cập nếu không có phiên đăng nhập hợp lệ.
+
+**Tiền điều kiện:** Dùng tab ẩn danh hoặc xóa token/cookie đăng nhập của ứng dụng.
+
+| Bước | Thao tác | Kết quả mong đợi |
+| --- | --- | --- |
+| 1 | Mở tab ẩn danh và truy cập trực tiếp `http://localhost:5173/tasks`. | Trình duyệt chuyển về `/login`; nội dung trang Tasks không xuất hiện. |
+| 2 | Dùng nút Back của trình duyệt. | Trang được bảo vệ vẫn không hiển thị nếu chưa đăng nhập. |
+| 3 | Truy cập trực tiếp `/assistant`. | Trình duyệt tiếp tục chuyển về `/login`. |
+| 4 | Gửi một request đến API cần xác thực mà không có header Authorization. | Backend trả về `401 Unauthorized` hoặc phản hồi xác thực tương đương; không trả dữ liệu người dùng. |
+| 5 | Đăng nhập hợp lệ rồi truy cập lại `/tasks`. | Trang Tasks hiển thị bình thường với dữ liệu thuộc đúng người dùng vừa đăng nhập. |
+
+**Kết quả thực tế:**
+
+**Trạng thái:** `PASS` / `FAIL` / `BLOCKED`
+
+**Bằng chứng/Ghi chú:**
+
+---
+
+## TC-04 — Gửi và nhận tin nhắn theo thời gian thực
+
+**Mục tiêu:** Kiểm tra tin nhắn 1-1 được lưu và chuyển đến người nhận qua realtime mà không bị trùng.
+
+**Tiền điều kiện:**
+
+- User A và User B đăng nhập trên hai trình duyệt hoặc hai cửa sổ độc lập.
+- Hai user có một hội thoại 1-1 và cùng mở hội thoại đó.
+- Kết nối WebSocket của cả hai phía đang hoạt động.
+
+**Dữ liệu kiểm thử:** Tin nhắn duy nhất, ví dụ `Realtime test <timestamp>`.
+
+| Bước | Thao tác | Kết quả mong đợi |
+| --- | --- | --- |
+| 1 | Tại User A, nhập nội dung tin nhắn nhưng chưa gửi. | Nút gửi sẵn sàng; nội dung chưa xuất hiện trong lịch sử chat của hai bên. |
+| 2 | User A bấm gửi một lần. | Tin nhắn xuất hiện một lần trong khung chat của A, đúng nội dung, người gửi và thời gian. |
+| 3 | Quan sát màn hình User B mà không tải lại trang. | B nhận được tin nhắn ngay qua realtime và tin nhắn chỉ xuất hiện một lần. |
+| 4 | User B trả lời bằng một nội dung khác. | A nhận phản hồi ngay, đúng người gửi và đúng hội thoại. |
+| 5 | Tải lại trang ở cả hai phía. | Hai tin nhắn vẫn tồn tại, đúng thứ tự và không có bản ghi trùng. |
+| 6 | User B rời hội thoại; User A gửi thêm một tin. | Chỉ báo chưa đọc của B tăng phù hợp; khi B mở lại hội thoại, tin nhắn mới được hiển thị. |
+
+**Kết quả thực tế:**
+
+**Trạng thái:** `PASS` / `FAIL` / `BLOCKED`
+
+**Bằng chứng/Ghi chú:**
+
+---
+
+## TC-05 — Tạo hội thoại nhóm
+
+**Mục tiêu:** Xác nhận nhóm chat được tạo đúng tên, đúng thành viên và không lộ cho người ngoài nhóm.
+
+**Tiền điều kiện:** User A, User B và User C đang hoạt động; chuẩn bị thêm User D để kiểm tra người ngoài nhóm nếu có.
+
+**Dữ liệu kiểm thử:** Tên nhóm duy nhất, ví dụ `Manual Test Group <timestamp>`.
+
+| Bước | Thao tác | Kết quả mong đợi |
+| --- | --- | --- |
+| 1 | User A mở `/chat` và chọn chức năng tạo hội thoại mới. | Form tạo hội thoại hiển thị danh sách người dùng và trường tên nhóm. |
+| 2 | Chọn User B và User C, nhập tên nhóm rồi xác nhận. | Hệ thống tạo một nhóm với A, B, C; nhóm xuất hiện trong danh sách hội thoại của A. |
+| 3 | Kiểm tra danh sách thành viên và tên nhóm. | Tên nhóm khớp dữ liệu nhập; không thiếu hoặc thừa thành viên. |
+| 4 | Kiểm tra màn hình User B và User C. | Nhóm xuất hiện trong danh sách hội thoại của cả B và C mà không cần tạo lại. |
+| 5 | User A gửi một tin nhắn vào nhóm. | B và C nhận tin realtime; nội dung hiển thị đúng trong đúng nhóm. |
+| 6 | Kiểm tra bằng tài khoản User D không thuộc nhóm. | D không thấy nhóm, không nhận sự kiện realtime và không thể đọc lịch sử nhóm qua giao diện/API. |
+| 7 | Tải lại trang của một thành viên. | Nhóm, danh sách thành viên và lịch sử tin nhắn vẫn được lưu chính xác. |
+
+**Kết quả thực tế:**
+
+**Trạng thái:** `PASS` / `FAIL` / `BLOCKED`
+
+**Bằng chứng/Ghi chú:**
+
+---
+
+## TC-06 — AI tóm tắt hội thoại
+
+**Mục tiêu:** Kiểm tra AI tạo một bản tóm tắt đúng phạm vi hội thoại và không gây tác dụng phụ.
+
+**Tiền điều kiện:**
+
+- Hội thoại có tối thiểu 20 tin nhắn với một số quyết định và đầu việc rõ ràng.
+- Người dùng đã bật quyền AI cho hội thoại.
+- LLM được cấu hình hợp lệ và còn ngân sách token.
+
+| Bước | Thao tác | Kết quả mong đợi |
+| --- | --- | --- |
+| 1 | Mở hội thoại có dữ liệu và mở AI Panel. | AI Panel hiển thị các hành động khả dụng, bao gồm **Summarize**. |
+| 2 | Chọn phạm vi tóm tắt nếu giao diện hỗ trợ. | Phạm vi được chọn và hiển thị rõ ràng trước khi gửi yêu cầu. |
+| 3 | Bấm **Summarize** một lần. | Giao diện hiển thị trạng thái đang xử lý và ngăn gửi trùng ngoài ý muốn. |
+| 4 | Chờ phản hồi hoàn tất. | Một bản tóm tắt dễ đọc được hiển thị; nội dung phản ánh đúng các ý chính trong phạm vi đã chọn. |
+| 5 | Đối chiếu tên người, quyết định, deadline và đầu việc với hội thoại gốc. | Không bịa thêm dữ kiện quan trọng; các thông tin được nêu khớp nội dung nguồn. |
+| 6 | Kiểm tra hội thoại, task, reminder và calendar. | Thao tác tóm tắt không tự tạo tin nhắn, task, reminder hoặc sự kiện ngoài ý muốn. |
+| 7 | Tải lại trang nếu kết quả được thiết kế để lưu. | Kết quả được giữ hoặc mất đúng theo thiết kế; không xuất hiện nhiều bản sao. |
+
+**Kết quả thực tế:**
+
+**Trạng thái:** `PASS` / `FAIL` / `BLOCKED`
+
+**Bằng chứng/Ghi chú:**
+
+---
+
+## TC-07 — Tạo và hoàn thành task
+
+**Mục tiêu:** Xác nhận người dùng có thể tạo task, lưu đúng dữ liệu và cập nhật trạng thái hoàn thành.
+
+**Tiền điều kiện:** Người dùng đã đăng nhập và có quyền truy cập trang Tasks.
+
+**Dữ liệu kiểm thử:**
+
+- Tiêu đề: `Hoàn thành báo cáo manual test`
+- Hạn: một thời điểm trong tương lai
+- Độ ưu tiên: `High` hoặc giá trị tương đương trên giao diện
+
+| Bước | Thao tác | Kết quả mong đợi |
+| --- | --- | --- |
+| 1 | Mở `/tasks`. | Trang hiển thị danh sách task và nút **Add task**. |
+| 2 | Bấm **Add task**. | Form/modal tạo task mở và hiển thị các trường cần thiết. |
+| 3 | Thử lưu khi chưa nhập tiêu đề. | Hệ thống không tạo task và hiển thị cảnh báo trường bắt buộc. |
+| 4 | Nhập tiêu đề, hạn và độ ưu tiên theo dữ liệu kiểm thử rồi lưu. | Task được tạo đúng một lần và xuất hiện trong danh sách với dữ liệu chính xác. |
+| 5 | Tải lại trang. | Task vẫn tồn tại; deadline và độ ưu tiên không bị thay đổi. |
+| 6 | Đánh dấu task là hoàn thành. | Trạng thái task chuyển sang hoàn thành và giao diện phản ánh thay đổi ngay. |
+| 7 | Tải lại trang hoặc đăng nhập lại. | Trạng thái hoàn thành vẫn được lưu chính xác. |
+
+**Kết quả thực tế:**
+
+**Trạng thái:** `PASS` / `FAIL` / `BLOCKED`
+
+**Bằng chứng/Ghi chú:**
+
+---
+
+## TC-08 — Reminder được kích hoạt đúng thời điểm
+
+**Mục tiêu:** Xác nhận reminder được lưu, kích hoạt một lần vào đúng thời điểm và chỉ gửi cho chủ sở hữu.
+
+**Tiền điều kiện:**
+
+- Người dùng đã đăng nhập.
+- Backend scheduler và WebSocket đang hoạt động.
+- Trình duyệt đã cho phép thông báo nếu ứng dụng sử dụng browser notification.
+
+**Dữ liệu kiểm thử:** Reminder có tiêu đề duy nhất và thời gian kích hoạt sau hiện tại khoảng 2–3 phút.
+
+| Bước | Thao tác | Kết quả mong đợi |
+| --- | --- | --- |
+| 1 | Mở `/reminders` và chọn tạo reminder mới. | Form tạo reminder hiển thị trường nội dung và thời gian. |
+| 2 | Nhập dữ liệu kiểm thử rồi lưu. | Reminder xuất hiện với đúng nội dung, đúng thời gian và trạng thái `scheduled` hoặc tương đương. |
+| 3 | Chuyển sang trang khác trong ứng dụng nhưng không đóng trình duyệt. | Phiên đăng nhập và kết nối realtime vẫn hoạt động. |
+| 4 | Chờ đến thời điểm đã đặt. | Toast/browser notification xuất hiện gần đúng thời điểm, đúng nội dung và chỉ xuất hiện một lần. |
+| 5 | Mở lại `/reminders`. | Reminder chuyển sang trạng thái `fired` hoặc trạng thái đã kích hoạt tương đương. |
+| 6 | Tải lại trang và chờ thêm một khoảng ngắn. | Trạng thái vẫn được lưu; reminder không kích hoạt lặp ngoài cấu hình. |
+| 7 | Kiểm tra bằng tài khoản khác. | Tài khoản khác không nhận và không xem được reminder của người tạo. |
+
+**Kết quả thực tế:**
+
+**Trạng thái:** `PASS` / `FAIL` / `BLOCKED`
+
+**Bằng chứng/Ghi chú:**
+
+---
+
+## TC-09 — Kết nối và tạo sự kiện Google Calendar
+
+**Mục tiêu:** Xác nhận OAuth hoạt động và sự kiện được đồng bộ đến đúng Google Calendar của người dùng.
+
+**Tiền điều kiện:**
+
+- Google OAuth client đã được cấu hình đúng redirect URI.
+- Tài khoản Google kiểm thử nằm trong danh sách test user nếu ứng dụng OAuth chưa được publish.
+- Người dùng Orbit đã đăng nhập và chưa kết nối nhầm tài khoản Google khác.
+
+**Dữ liệu kiểm thử:**
+
+- Tiêu đề: `Orbit manual calendar test <timestamp>`
+- Thời gian bắt đầu: một thời điểm trong tương lai
+- Thời lượng: 30 hoặc 60 phút
+
+| Bước | Thao tác | Kết quả mong đợi |
+| --- | --- | --- |
+| 1 | Mở `/calendar` và bấm **Connect Google Calendar**. | Trình duyệt chuyển đến luồng đăng nhập/cấp quyền của Google. |
+| 2 | Chọn tài khoản Google test và chấp thuận các quyền được yêu cầu. | Trình duyệt quay về Orbit; giao diện báo kết nối thành công và không lộ token OAuth. |
+| 3 | Tạo sự kiện bằng dữ liệu kiểm thử trên giao diện Orbit. | Hệ thống báo tạo thành công; sự kiện xuất hiện một lần trên lịch Orbit. |
+| 4 | Mở Google Calendar của đúng tài khoản vừa kết nối. | Sự kiện xuất hiện đúng tiêu đề, ngày, giờ và thời lượng. |
+| 5 | Tải lại trang Calendar trong Orbit. | Sự kiện vẫn hiển thị và không bị nhân đôi. |
+| 6 | Kiểm tra múi giờ hiển thị ở cả Orbit và Google Calendar. | Thời gian tương ứng chính xác theo múi giờ được cấu hình, không bị lệch ngày hoặc lệch giờ ngoài ý muốn. |
+
+**Kết quả thực tế:**
+
+**Trạng thái:** `PASS` / `FAIL` / `BLOCKED`
+
+**Bằng chứng/Ghi chú:**
+
+---
+
+## TC-10 — Admin khóa và mở khóa người dùng
+
+**Mục tiêu:** Kiểm tra admin có thể thay đổi trạng thái tài khoản và user bị khóa không thể đăng nhập.
+
+**Tiền điều kiện:**
+
+- Có một tài khoản admin đăng nhập được tại `http://localhost:5174`.
+- Có một tài khoản User A đang hoạt động và biết thông tin đăng nhập.
+- Không sử dụng chính tài khoản admin làm đối tượng bị khóa.
+
+| Bước | Thao tác | Kết quả mong đợi |
+| --- | --- | --- |
+| 1 | Admin đăng nhập vào admin app. | Đăng nhập thành công và trang quản trị hiển thị đúng quyền admin. |
+| 2 | Mở trang quản lý Users và tìm User A. | User A xuất hiện đúng email/tên và đang ở trạng thái hoạt động. |
+| 3 | Chọn thao tác khóa User A và xác nhận. | Hệ thống báo thành công; trạng thái User A chuyển sang bị khóa và không tạo thay đổi cho user khác. |
+| 4 | Đăng xuất User A nếu đang đăng nhập, sau đó thử đăng nhập lại. | Hệ thống từ chối đăng nhập và hiển thị thông báo tài khoản bị khóa hoặc thông báo phù hợp. |
+| 5 | Thử gọi API bằng phiên/token cũ của User A nếu thiết kế yêu cầu vô hiệu hóa phiên. | Request bị từ chối theo chính sách khóa tài khoản; không trả dữ liệu riêng tư. |
+| 6 | Admin quay lại danh sách Users và mở khóa User A. | Hệ thống báo thành công; trạng thái User A trở lại hoạt động. |
+| 7 | User A đăng nhập lại bằng thông tin cũ. | Đăng nhập thành công; dữ liệu cũ của user vẫn còn nguyên. |
+| 8 | Kiểm tra audit log nếu hệ thống hỗ trợ. | Có bản ghi đúng admin, user mục tiêu, hành động khóa/mở khóa và thời gian thực hiện. |
+
+**Kết quả thực tế:**
+
+**Trạng thái:** `PASS` / `FAIL` / `BLOCKED`
+
+**Bằng chứng/Ghi chú:**
+
+---
+
+## 4. Tổng hợp kết quả
+
+| Test ID | Chức năng | Trạng thái | Mã lỗi/Ticket | Ghi chú |
+| --- | --- | --- | --- | --- |
+| TC-01 | Đăng ký tài khoản mới | | | |
+| TC-02 | Đăng nhập sai mật khẩu | | | |
+| TC-03 | Chặn truy cập khi chưa đăng nhập | | | |
+| TC-04 | Tin nhắn realtime | | | |
+| TC-05 | Tạo hội thoại nhóm | | | |
+| TC-06 | AI tóm tắt hội thoại | | | |
+| TC-07 | Tạo và hoàn thành task | | | |
+| TC-08 | Reminder đúng thời điểm | | | |
+| TC-09 | Google Calendar | | | |
+| TC-10 | Admin khóa/mở khóa user | | | |
+
+| Pass | Fail | Blocked | Chưa chạy | Tổng |
+| --- | --- | --- | --- | --- |
+| | | | | 10 |
