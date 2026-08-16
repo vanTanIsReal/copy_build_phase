@@ -7,6 +7,7 @@ from src.auth.dependencies import get_current_user
 from src.db.models import Memory, User
 from src.db.session import get_db
 from src.models.memory_schemas import MemoryCreateRequest, MemoryOut, MemoryUpdateRequest
+from src.services import memory_service
 
 router = APIRouter(dependencies=[Depends(crud_rate_limit)])
 
@@ -28,14 +29,8 @@ async def _get_own_memory_or_404(memory_id: str, current_user: User, db: AsyncSe
 
 
 @router.get("/memories", response_model=list[MemoryOut])
-async def list_memories(
-    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
-) -> list[MemoryOut]:
-    memories = (
-        await db.execute(
-            select(Memory).where(Memory.owner_id == current_user.id).order_by(Memory.created_at.desc())
-        )
-    ).scalars().all()
+async def list_memories(current_user: User = Depends(get_current_user)) -> list[MemoryOut]:
+    memories = await memory_service.list_memories_for_owner(current_user.id)
     return [_to_out(m) for m in memories]
 
 

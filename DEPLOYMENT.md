@@ -4,8 +4,16 @@
 đó — không phải cho một hệ thống chạy nhiều tháng. Phần [Cố tình KHÔNG làm](#cố-tình-không-làm) giải
 thích những gì bị lược bỏ và lý do, để sau này ai đọc lại không tưởng là thiếu sót.
 
-Tài liệu này là **kế hoạch + quyết định**. Các bước bấm dashboard chi tiết đã có sẵn ở
-[docs/deploy.md](docs/deploy.md) — không lặp lại, chỉ bổ sung chỗ khác đi.
+Tài liệu này là **kế hoạch + quyết định**. Bản hướng dẫn bấm dashboard chi tiết từng bước
+(`docs/deploy.md`) từng tồn tại nhưng đã bị xoá khỏi repo (2026-08-12, không rõ lý do trong commit
+message) và **chưa được viết lại** — mục 4 "Lộ trình" bên dưới vẫn tham chiếu tới các bước của nó
+(D-1 → "Theo docs/deploy.md bước 1→13") để giữ ý định ban đầu, nhưng người thực hiện deploy cần tự
+suy ra thao tác dashboard cụ thể từ [render.yaml](render.yaml)/[Frontend/vercel.json](Frontend/vercel.json)
+và phần "Kiến trúc production" + "Phải sửa trước khi deploy" dưới đây, hoặc viết lại file đó trước.
+Ngoài ra bản hướng dẫn cũ được viết **trước** khi frontend tách thành 2 app Vite riêng
+(`Frontend/user/`, `Frontend/admin/`, 2026-08-14) nên bước Vercel của nó (1 project trỏ Root
+Directory = `Frontend`) không còn đúng nguyên trạng — cần quyết định deploy cả 2 app hay chỉ app
+user cho bản demo trước khi viết lại.
 
 ---
 
@@ -151,7 +159,9 @@ tạo lại DB (mất dữ liệu demo), hoặc chạy `ALTER TABLE` tay trên S
 
 ### D-1 — Dựng hạ tầng
 
-Theo [docs/deploy.md](docs/deploy.md) bước 1→13, với **3 điểm khác**:
+Theo bước 1→13 của `docs/deploy.md` (đã xoá khỏi repo, xem cảnh báo ở đầu tài liệu này — cần viết
+lại hoặc tự suy ra từ [render.yaml](render.yaml)/Google Cloud Console/Vercel dashboard trước khi làm
+mục này), với **3 điểm khác** so với bản đó:
 
 1. Bước 5 — trong Render Blueprint đổi **`plan: free` → `plan: starter`** (hoặc apply free rồi
    Settings → Instance Type → Starter). [render.yaml](render.yaml) hiện vẫn ghi `free`, sửa dòng đó
@@ -276,5 +286,5 @@ còn nằm trong danh sách này.)
 | [.github/workflows/ci.yml](.github/workflows/ci.yml) | Lint + test, có Postgres service | Có sẵn |
 | [.github/workflows/deploy.yml](.github/workflows/deploy.yml) | CD qua Deploy Hook, gate sau CI | Có sẵn |
 | [.github/workflows/keep-alive.yml](.github/workflows/keep-alive.yml) | Chống sleep gói free | **Disable sau khi lên Starter** |
-| [Frontend/vercel.json](Frontend/vercel.json) | SPA rewrite | Có sẵn |
-| [docs/deploy.md](docs/deploy.md) | Hướng dẫn bấm dashboard từng bước | Có sẵn |
+| [Frontend/vercel.json](Frontend/vercel.json) | SPA rewrite — viết cho 1 project duy nhất, chưa cập nhật cho 2 app `Frontend/user/`+`Frontend/admin/` | Cần rà lại trước khi dùng |
+| `docs/deploy.md` | Hướng dẫn bấm dashboard từng bước | **Đã xoá khỏi repo** (2026-08-12) — cần viết lại, xem cảnh báo đầu tài liệu này |

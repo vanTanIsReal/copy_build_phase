@@ -7,7 +7,7 @@ from langgraph.prebuilt import InjectedState
 
 from src.agents.state import AgentState
 from src.config import get_settings
-from src.services import usage_service
+from src.services import chat_service, task_service, usage_service
 from src.services.llm import get_llm
 
 
@@ -48,3 +48,20 @@ async def extract_tasks(
     """Extract action items, tasks, and appointments mentioned in the conversation the user is
     currently asking about, as a JSON array."""
     return await generate_tasks_json((state or {}).get("context", ""))
+
+
+@tool
+async def list_tasks(state: Annotated[AgentState, InjectedState] = None) -> str:  # type: ignore[assignment]
+    """List the current user's own tasks (from /tasks - manually created, or previously accepted
+    from an AI suggestion), sorted soonest-due first. Use this to answer questions about their
+    deadlines, to-do list, or what's overdue/upcoming - it is NOT the same as extract_tasks, which
+    only reads the conversation currently open in the chat panel and never touches saved tasks.
+    Read-only, no confirmation needed."""
+    tasks = await task_service.list_tasks_for_owner((state or {}).get("user_id"))
+    if not tasks:
+        return "The user has no tasks saved."
+    lines = []
+    for t in tasks:
+        due = chat_service.format_local_timestamp(t.due_at.isoformat()) if t.due_at else "no due date"
+        lines.append(f"- {t.title} (status: {t.status}, priority: {t.priority}, due: {due})")
+    return "\n".join(lines)

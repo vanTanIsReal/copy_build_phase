@@ -63,7 +63,7 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
       setPending({ thread_id: res.thread_id, interrupt: res.interrupt })
       pushMessage({ text: describeInterrupt(res.interrupt), interrupt: res.interrupt })
     } else {
-      pushMessage({ text: res.response || (res.status === 'error' ? 'Đã có lỗi xảy ra, thử lại sau.' : '') })
+      pushMessage({ text: res.response || (res.status === 'error' ? 'Đã có lỗi xảy ra, thử lại sau.' : 'Orbit không có câu trả lời cho yêu cầu này.') })
     }
     if (res.status !== 'error') onActivity?.()
   }

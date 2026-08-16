@@ -39,6 +39,32 @@ def test_state_hidden_from_llm_tool_schema():
 
 
 @pytest.mark.asyncio
+async def test_list_tasks_formats_saved_tasks(client, auth_headers):
+    me = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()
+    await client.post(
+        "/api/v1/tasks",
+        json={"title": "Send report", "priority": "High", "due_at": "2026-08-20T15:00:00"},
+        headers=auth_headers,
+    )
+
+    result = await task_tool.list_tasks.coroutine(state={"user_id": me["id"]})
+
+    assert "Send report" in result
+    assert "High" in result
+    assert "suggested" in result
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_no_saved_tasks():
+    result = await task_tool.list_tasks.coroutine(state={"user_id": "no-such-user"})
+    assert result == "The user has no tasks saved."
+
+
+def test_list_tasks_hidden_from_llm_tool_schema():
+    assert list(task_tool.list_tasks.args.keys()) == []
+
+
+@pytest.mark.asyncio
 async def test_generate_tasks_json_logs_usage(monkeypatch):
     """★ fix: generate_tasks_json tự gọi LLM riêng nhưng trước đây không log usage - budget
     tracking tính thiếu lượt này. Xác nhận log_usage được gọi đúng với usage_metadata thật."""

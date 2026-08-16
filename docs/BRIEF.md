@@ -8,7 +8,7 @@
 | **Repo** | https://github.com/AI20K-Build-Phase-Cohort-3/P-132 |
 | **Đề bài gốc** | [Frontend/detai.md](../Frontend/detai.md) |
 | **Tài liệu liên quan** | [PRD.md](PRD.md) · [UI_FLOW.md](UI_FLOW.md) · [wireframes.html](wireframes.html) · [AI_LOG.md](AI_LOG.md) · [../ARCHITECTURE.md](../ARCHITECTURE.md) · [../ROADMAP.md](../ROADMAP.md) |
-| **Cập nhật** | 2026-08-04 |
+| **Cập nhật** | 2026-08-15 |
 
 ---
 
@@ -68,9 +68,9 @@ gì để "cache embedding" như tech stack gợi ý).
 
 | Chỉ số | Mục tiêu | Hiện tại |
 | --- | --- | --- |
-| Độ chính xác trích task (F1) | ≥ 85% | 100% trên 8 case tay (VI+EN) — mẫu nhỏ, xem [ROADMAP](../ROADMAP.md) |
+| Độ chính xác trích task (F1) | ≥ 85% | Title F1 ≈ 94%, date accuracy ≈ 75–89% trên 37 case (VI+EN, có case đối kháng) — xem [ROADMAP](../ROADMAP.md) |
 | Hành động có tác dụng phụ được xác nhận | 100% | 100% (`interrupt()` bắt buộc) |
-| Test backend pass | 100% | Pass toàn bộ ở lần chạy gần nhất (87/87 tại WORKLOG 2026-08-03, +3 test calendar sync bổ sung sau đó), ruff sạch |
+| Test backend pass | 100% | Pass toàn bộ ở lần chạy gần nhất (282/282 tại WORKLOG 2026-08-15), ruff sạch |
 | Reminder sống sót qua restart backend | Có | Có (`SQLAlchemyJobStore`) |
 | Deploy online | Có | **Chưa** — hạng mục lớn nhất còn lại |
 
@@ -85,7 +85,9 @@ gì để "cache embedding" như tech stack gợi ý).
 
 ## 8. Trạng thái & bước tiếp theo
 
-Sản phẩm đã chạy end-to-end ở local (backend `:8000` + frontend `:5173`, Postgres). Ba việc lớn còn
-lại, theo thứ tự ưu tiên: **(1)** deploy online thật + CD, **(2)** bảng quyền `ai_permissions` theo
-từng conversation thay cho toggle local ở UI, **(3)** mở rộng bộ eval trích task. Chi tiết trong
-[ROADMAP.md](../ROADMAP.md).
+Sản phẩm đã chạy end-to-end ở local (backend `:8000` + 2 app frontend `:5173` người dùng/`:5174`
+admin, Postgres). Việc lớn còn lại, theo thứ tự ưu tiên: **(1)** deploy online thật + CD — code/CI/CD
+workflow đã sẵn sàng nhưng bản hướng dẫn bấm dashboard từng bước đã bị xoá khỏi repo và chưa viết
+lại, xem [DEPLOYMENT.md](../DEPLOYMENT.md); **(2)** gộp thật Summarize+Extract tasks thành 1 lệnh LLM
+(ưu tiên thấp); **(3)** rate limiting cho kênh WebSocket `/ws` (REST đã xong); **(4)** mở rộng thêm bộ
+eval trích task khi phát hiện kiểu hội thoại mới gây lỗi. Chi tiết trong [ROADMAP.md](../ROADMAP.md).
