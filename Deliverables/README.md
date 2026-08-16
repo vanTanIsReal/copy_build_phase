@@ -1,5 +1,7 @@
 # P-132 — Orbit AI Assistant
 
+> **Đây là bản sao của [`/README.md`](../README.md) ở gốc repo**, gom vào `Deliverables/` cho tiện xem cùng Architecture Diagram và Manual Test Cases. File gốc ở `/README.md` mới là bản chính thức theo checklist khoá học — sửa nội dung thì sửa ở đó trước, bản này chỉ đồng bộ lại đường dẫn tương đối.
+
 Dự án AI20K Build Phase: một AI agent nhúng trong ứng dụng chat, giúp tóm tắt hội thoại, trích xuất công việc/lịch hẹn, tạo nhắc nhở (có xác nhận trước khi thực hiện) và quản lý lịch cá nhân. Repo gồm 2 phần: **backend** (FastAPI + LangGraph, thư mục `src/`) và **frontend** (React + Vite, thư mục `Frontend/`).
 
 🎬 **[Video demo MVP (end-to-end)](https://drive.google.com/file/d/1S-7vckhZs2X3D8sJyeHxmniavZOVGubY/view?usp=drive_link)** — luồng chat → AI chủ động phát hiện cam kết (1-1 và nhóm) → xác nhận human-in-the-loop → Calendar 2 chiều → Reminder → Memory.
@@ -38,7 +40,7 @@ Dự án AI20K Build Phase: một AI agent nhúng trong ứng dụng chat, giúp
 
 ## Kiến trúc
 
-> **Backend nằm ở thư mục [`src/`](src/) ở gốc repo** (FastAPI + LangGraph), tách biệt hoàn toàn với frontend ở [`Frontend/`](Frontend/) (React + Vite). Chạy backend bằng lệnh `uvicorn src.main:app ...` từ thư mục gốc repo, không phải từ bên trong `src/`.
+> **Backend nằm ở thư mục [`src/`](../src/) ở gốc repo** (FastAPI + LangGraph), tách biệt hoàn toàn với frontend ở [`Frontend/`](../Frontend/) (React + Vite). Chạy backend bằng lệnh `uvicorn src.main:app ...` từ thư mục gốc repo, không phải từ bên trong `src/`.
 
 ```
 ├── src/                  # Backend — FastAPI + LangGraph
@@ -251,20 +253,20 @@ Gõ trực tiếp vào `/assistant` (không cần chọn hội thoại nào) ho�
 
 ## Tài liệu thiết kế (deliverable "Chốt bài toán + thiết kế")
 
-- [docs/BRIEF.md](docs/BRIEF.md) — 1-page brief: vấn đề, người dùng, giải pháp, phạm vi, chỉ số thành công, rủi ro.
-- [docs/PRD.md](docs/PRD.md) — PRD: user stories + acceptance criteria, yêu cầu phi chức năng, ERD, API surface, luồng agent.
-- [docs/UI_FLOW.md](docs/UI_FLOW.md) — sitemap, luồng người dùng (tóm tắt/trích task, human-in-the-loop, proactive), mô tả từng màn hình.
-- [docs/wireframes.html](docs/wireframes.html) — wireframe các màn hình chính (mở bằng trình duyệt).
-- [docs/AI_LOG.md](docs/AI_LOG.md) — setup & bằng chứng hệ thống ghi log sử dụng AI trong repo.
-- [Deliverables/MANUAL_TEST_CASES.md](Deliverables/MANUAL_TEST_CASES.md) — 10/10 test case kiểm thử thủ công PASS (khác `pytest tests/` tự động), cho các luồng chính (auth, chat 1-1/nhóm realtime, AI summarize, task, reminder, Google Calendar, admin) — có ảnh chụp UI thật kèm theo trong `Deliverables/evidence/`, phát hiện 2 lỗi thật (reminder misfire âm thầm, `/auth/login` thiếu check tài khoản bị khoá) và 1 điểm UX cần review.
+- [docs/BRIEF.md](../docs/BRIEF.md) — 1-page brief: vấn đề, người dùng, giải pháp, phạm vi, chỉ số thành công, rủi ro.
+- [docs/PRD.md](../docs/PRD.md) — PRD: user stories + acceptance criteria, yêu cầu phi chức năng, ERD, API surface, luồng agent.
+- [docs/UI_FLOW.md](../docs/UI_FLOW.md) — sitemap, luồng người dùng (tóm tắt/trích task, human-in-the-loop, proactive), mô tả từng màn hình.
+- [docs/wireframes.html](../docs/wireframes.html) — wireframe các màn hình chính (mở bằng trình duyệt).
+- [docs/AI_LOG.md](../docs/AI_LOG.md) — setup & bằng chứng hệ thống ghi log sử dụng AI trong repo.
+- [MANUAL_TEST_CASES.md](MANUAL_TEST_CASES.md) — 10/10 test case kiểm thử thủ công PASS (khác `pytest tests/` tự động), cho các luồng chính (auth, chat 1-1/nhóm realtime, AI summarize, task, reminder, Google Calendar, admin) — có ảnh chụp UI thật kèm theo trong [`evidence/`](evidence/), phát hiện 2 lỗi thật (reminder misfire âm thầm, `/auth/login` thiếu check tài khoản bị khoá) và 1 điểm UX cần review.
 
 ## Tài liệu khác
 
-- [CLAUDE.md](CLAUDE.md) — hướng dẫn chi tiết cho AI coding assistant làm việc trong repo này (quy ước code, lệnh chạy đầy đủ).
-- [Frontend/README.md](Frontend/README.md) — hướng dẫn riêng cho 2 app frontend (cấu trúc, xử lý lỗi thường gặp khi chạy npm trên Windows).
-- [Frontend/detai.md](Frontend/detai.md) — đề bài / yêu cầu gốc của dự án.
-- [ARCHITECTURE.md](ARCHITECTURE.md) — kiến trúc hệ thống hiện tại và các quyết định công nghệ.
-- [ROADMAP.md](ROADMAP.md) — bảng đối chiếu từng yêu cầu đề bài với trạng thái thật hiện tại + việc còn lại theo độ ưu tiên.
-- [DEPLOYMENT.md](DEPLOYMENT.md) — kế hoạch hạ tầng deploy production (Render + Supabase + Vercel + CD qua GitHub Actions): stack, chi phí, việc phải sửa trước khi deploy, lộ trình, sự cố hay gặp. Bản hướng dẫn bấm dashboard từng bước cũ (`docs/deploy.md`) đã bị xoá khỏi repo và chưa được viết lại — còn thiếu trước khi deploy thật, xem [ROADMAP.md](ROADMAP.md) mục 1.
-- [WORKLOG.md](WORKLOG.md) — nhật ký công việc theo ngày của cả nhóm.
-- [docs/guide/](docs/guide/) — tài liệu khóa học AI20K (setup, LangGraph, FastAPI, testing, deploy).
+- [CLAUDE.md](../CLAUDE.md) — hướng dẫn chi tiết cho AI coding assistant làm việc trong repo này (quy ước code, lệnh chạy đầy đủ).
+- [Frontend/README.md](../Frontend/README.md) — hướng dẫn riêng cho 2 app frontend (cấu trúc, xử lý lỗi thường gặp khi chạy npm trên Windows).
+- [Frontend/detai.md](../Frontend/detai.md) — đề bài / yêu cầu gốc của dự án.
+- [ARCHITECTURE.md](../ARCHITECTURE.md) — kiến trúc hệ thống hiện tại và các quyết định công nghệ.
+- [ROADMAP.md](../ROADMAP.md) — bảng đối chiếu từng yêu cầu đề bài với trạng thái thật hiện tại + việc còn lại theo độ ưu tiên.
+- [DEPLOYMENT.md](../DEPLOYMENT.md) — kế hoạch hạ tầng deploy production (Render + Supabase + Vercel + CD qua GitHub Actions): stack, chi phí, việc phải sửa trước khi deploy, lộ trình, sự cố hay gặp. Bản hướng dẫn bấm dashboard từng bước cũ (`docs/deploy.md`) đã bị xoá khỏi repo và chưa được viết lại — còn thiếu trước khi deploy thật, xem [ROADMAP.md](../ROADMAP.md) mục 1.
+- [WORKLOG.md](../WORKLOG.md) — nhật ký công việc theo ngày của cả nhóm.
+- [docs/guide/](../docs/guide/) — tài liệu khóa học AI20K (setup, LangGraph, FastAPI, testing, deploy).
