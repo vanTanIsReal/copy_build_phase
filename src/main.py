@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -23,6 +24,16 @@ from src.db.session import init_db
 from src.services import ai_config_service, calendar_service
 from src.services.scheduler import scheduler
 from src.websocket.routes import router as ws_router
+
+# No logging config existed anywhere in the project before this - every `logger.exception(...)`
+# across the codebase (proactive_service's background detection included) had no handler
+# anywhere in its chain, so it silently relied on Python's last-resort stderr handler, which is
+# easy to lose across the `--reload` watcher/worker process boundary on Windows. This makes
+# background-task failures actually show up in the console instead of failing invisibly.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 
 @asynccontextmanager
