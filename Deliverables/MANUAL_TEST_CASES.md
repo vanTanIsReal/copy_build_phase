@@ -12,7 +12,7 @@ Tài liệu mô tả chi tiết 10 test case thủ công cho các luồng chính
 | Người kiểm thử | Claude (Claude Code) — kiểm thử tự động qua REST API + WebSocket thật, và qua trình duyệt Chromium thật (Playwright) điều khiển đúng 2 app Vite đang chạy (`localhost:5173`/`5174`) |
 | Trình duyệt/Thiết bị | Chromium (Playwright), viewport 1280×800/900, chạy headless trên máy dev local |
 
-**Lưu ý về phạm vi lần kiểm thử này:** Toàn bộ 10/10 case được thực thi bằng **trình duyệt Chromium thật** (Playwright điều khiển UI thật tại `localhost:5173` và `localhost:5174`: điền form, bấm nút, đăng nhập nhiều tài khoản song song, thao tác trang admin, chờ sự kiện realtime) kết hợp gọi thẳng REST API/WebSocket khi cần dựng dữ liệu nền hoặc đối chiếu ở tầng backend. Ảnh trong `docs/evidence/` là ảnh chụp thật từ phiên chạy này, không phải dựng/minh hoạ — trừ ảnh `TC-03-step04` (dựng giao diện kiểu DevTools để hiển thị rõ response, nhưng dữ liệu response bên trong là gọi API thật lúc chụp). TC-09 dùng tài khoản Google Calendar đã kết nối sẵn do người dùng cung cấp; TC-10 dùng 1 tài khoản admin QA tạo riêng theo yêu cầu người dùng (không đụng tài khoản admin thật có sẵn) — xem ghi chú chi tiết ở từng case, bao gồm 2 lỗi thật và 1 điểm UX phát hiện được trong quá trình test (xem mục 5).
+**Lưu ý về phạm vi lần kiểm thử này:** Toàn bộ 10/10 case được thực thi bằng **trình duyệt Chromium thật** (Playwright điều khiển UI thật tại `localhost:5173` và `localhost:5174`: điền form, bấm nút, đăng nhập nhiều tài khoản song song, thao tác trang admin, chờ sự kiện realtime) kết hợp gọi thẳng REST API/WebSocket khi cần dựng dữ liệu nền hoặc đối chiếu ở tầng backend. Ảnh trong `evidence/` (cùng thư mục `Deliverables/`) là ảnh chụp thật từ phiên chạy này, không phải dựng/minh hoạ — trừ ảnh `TC-03-step04` (dựng giao diện kiểu DevTools để hiển thị rõ response, nhưng dữ liệu response bên trong là gọi API thật lúc chụp). TC-09 dùng tài khoản Google Calendar đã kết nối sẵn do người dùng cung cấp; TC-10 dùng 1 tài khoản admin QA tạo riêng theo yêu cầu người dùng (không đụng tài khoản admin thật có sẵn) — xem ghi chú chi tiết ở từng case, bao gồm 2 lỗi thật và 1 điểm UX phát hiện được trong quá trình test (xem mục 5).
 
 ## 2. Môi trường và dữ liệu chuẩn bị
 
@@ -35,7 +35,7 @@ Tài liệu mô tả chi tiết 10 test case thủ công cho các luồng chính
 
 ## 4. Quy ước lưu bằng chứng ảnh chụp màn hình
 
-- Toàn bộ ảnh chụp lưu trong thư mục [`docs/evidence/`](evidence/), mỗi test case một thư mục con đã được tạo sẵn: `docs/evidence/TC-01/` … `docs/evidence/TC-10/`.
+- Toàn bộ ảnh chụp lưu trong thư mục [`evidence/`](evidence/) (cùng cấp với file này trong `Deliverables/`), mỗi test case một thư mục con đã được tạo sẵn: `evidence/TC-01/` … `evidence/TC-10/`.
 - Đặt tên file theo mẫu `TC-XX-stepNN-mo-ta-ngan.png`, ví dụ `TC-01-step04-dang-ky-thanh-cong.png` (không dấu, không khoảng trắng).
 - Định dạng khuyến nghị: `.png` hoặc `.jpg`, không giới hạn kích thước nhưng nên crop vào đúng vùng cần minh chứng (toàn bộ cửa sổ trình duyệt + thanh địa chỉ để thấy rõ URL).
 - Sau khi thêm ảnh vào đúng thư mục, chèn ảnh vào placeholder tương ứng trong bảng **Bằng chứng hình ảnh** của từng test case bằng cú pháp Markdown đã có sẵn (`![Mô tả](evidence/TC-XX/...)`), chỉ cần sửa lại tên file nếu khác với gợi ý.
@@ -282,9 +282,8 @@ Tài liệu mô tả chi tiết 10 test case thủ công cho các luồng chính
 | --- | --- | --- |
 | 3 | Trạng thái đang xử lý (loading), không cho gửi trùng | ![TC-06 bước 3 - đang xử lý](evidence/TC-06/TC-06-step03-dang-xu-ly.png) |
 | 4 | Bản tóm tắt hiển thị đầy đủ trên AI Panel | ![TC-06 bước 4 - kết quả tóm tắt](evidence/TC-06/TC-06-step04-ket-qua-tom-tat.png) |
-| 6 | Task/Reminder/Calendar không bị thay đổi ngoài ý muốn | ![TC-06 bước 6 - không tác dụng phụ](evidence/TC-06/TC-06-step06-khong-tac-dung-phu.png) |
 
-**Ghi chú:** Nội dung tóm tắt thật (không mock) đã đối chiếu khớp nguồn. Task "Deadline sprint Orbit" xuất hiện thêm là do Proactive detection, không phải bug của Summarize — nên ghi rõ khi báo cáo để tránh hiểu nhầm thành lỗi. Đã dùng ngân sách token thật (LLM_PROVIDER hiện tại trong `.env`) cho 1 lượt gọi.
+**Ghi chú:** Nội dung tóm tắt thật (không mock) đã đối chiếu khớp nguồn. Task "Deadline sprint Orbit" xuất hiện thêm là do Proactive detection, không phải bug của Summarize — nên ghi rõ khi báo cáo để tránh hiểu nhầm thành lỗi. Đã dùng ngân sách token thật (LLM_PROVIDER hiện tại trong `.env`) cho 1 lượt gọi. Bước 6 (không có tác dụng phụ) xác minh bằng đối chiếu số lượng Task/Reminder trước/sau qua API (xem "Kết quả thực tế" ở trên) — không đính kèm ảnh chụp vì khó minh hoạ trực quan việc "không có gì thay đổi" bằng 1 tấm ảnh.
 
 ---
 
@@ -498,7 +497,7 @@ APScheduler coi đây là "misfire" (job có giờ chạy đã ở quá khứ kh
 | --- | --- | --- | --- | --- |
 | 10 | 0 | 0 | 0 | 10 |
 
-> **Quan trọng:** Cả 10/10 case đã kiểm **đầy đủ bằng trình duyệt Chromium thật** (Playwright điều khiển UI thật ở `localhost:5173`/`5174`: điền form, bấm nút, nhiều phiên đăng nhập song song, chờ sự kiện realtime, thao tác trang admin), có ảnh chụp thật trong [`docs/evidence/`](evidence/) — không phải suy luận từ API. Quá trình test phát hiện:
+> **Quan trọng:** Cả 10/10 case đã kiểm **đầy đủ bằng trình duyệt Chromium thật** (Playwright điều khiển UI thật ở `localhost:5173`/`5174`: điền form, bấm nút, nhiều phiên đăng nhập song song, chờ sự kiện realtime, thao tác trang admin), có ảnh chụp thật trong [`evidence/`](evidence/) — không phải suy luận từ API. Quá trình test phát hiện:
 > - 🐛 **2 lỗi thật cần sửa**: (1) TC-08 — reminder có hạn quá sát lúc tạo bị APScheduler bỏ qua âm thầm (misfire), không bao giờ fire, không báo lỗi; (2) **TC-10, ưu tiên cao vì liên quan bảo mật** — route `/auth/login` không kiểm tra `is_active`, tài khoản bị admin khóa vẫn lấy được JWT hợp lệ (chỉ bị chặn gián tiếp ở các API con phía sau, kèm thông báo sai bản chất "phiên hết hạn" thay vì "tài khoản bị khóa").
 > - ⚠️ **1 điểm UX cần review**: TC-07 — task tạo thủ công qua "Add task" bị xếp chung vào khu "AI suggestions", phải Accept trước khi dùng như task thường.
 >

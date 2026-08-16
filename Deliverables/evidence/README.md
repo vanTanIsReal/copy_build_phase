@@ -5,7 +5,7 @@ Thư mục này chứa ảnh chụp màn hình làm bằng chứng (evidence) ch
 ## Cấu trúc thư mục
 
 ```
-docs/evidence/
+Deliverables/evidence/
 ├── TC-01/   # Đăng ký tài khoản mới
 ├── TC-02/   # Từ chối đăng nhập khi sai mật khẩu
 ├── TC-03/   # Chặn truy cập khi chưa đăng nhập
