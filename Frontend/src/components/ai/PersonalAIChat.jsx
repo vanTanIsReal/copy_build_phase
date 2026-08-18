@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAuth } from '../../context/AuthContext'
 import { chatWithAgent, resumeAgent } from '../../api/agent'
@@ -24,6 +24,30 @@ export default function PersonalAIChat({ onContext }) {
   const [threadId,setThreadId]=useState(null)
   const [pending,setPending]=useState(null)
   const [sending,setSending]=useState(false)
+  const [hydrated,setHydrated]=useState(false)
+  const endRef = useRef(null)
+  const storageKey = user?.id ? `orbit_ai_assistant_${user.id}` : null
+
+  useEffect(() => {
+    if (!storageKey) return
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || '{}')
+      setMessages(Array.isArray(saved.messages) ? saved.messages : [])
+      setThreadId(saved.threadId || null)
+      setPending(saved.pending || null)
+    } catch {
+      setMessages([]); setThreadId(null); setPending(null)
+    } finally { setHydrated(true) }
+  }, [storageKey])
+
+  useEffect(() => {
+    if (!storageKey || !hydrated) return
+    localStorage.setItem(storageKey, JSON.stringify({ messages, threadId, pending }))
+  }, [storageKey, hydrated, messages, threadId, pending])
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [messages, sending])
 
   const pushMessage = (msg) => setMessages(prev => [...prev, { id: Date.now() + Math.random(), ...msg }])
 
@@ -68,7 +92,7 @@ export default function PersonalAIChat({ onContext }) {
       {messages.length===0 && <div className="personal-welcome"><motion.div initial={{scale:.85,opacity:0}} animate={{scale:1,opacity:1}} className="welcome-ai-mark"><i className="bi bi-stars"/></motion.div><span className="welcome-kicker">Chào {user?.display_name || 'bạn'}</span><h1>Hôm nay mình có thể<br/><em>giúp gì cho bạn?</em></h1><p>Hỏi mình về lịch, công việc, deadline hoặc thông tin từ các cuộc trò chuyện đã được cấp quyền.</p><div className="prompt-grid">{prompts.map(p=><motion.button whileHover={{y:-3}} whileTap={{scale:.98}} key={p.label} onClick={()=>send(p.prompt)}><span><i className={`bi ${p.icon}`}/></span><strong>{p.label}</strong><small>{p.prompt}</small><i className="bi bi-arrow-up-right"/></motion.button>)}</div></div>}
       <AnimatePresence>{messages.map(m=><motion.div key={m.id} initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} className={`personal-message ${m.own?'own':''}`}>
         {!m.own&&<div className="message-ai-icon"><i className="bi bi-stars"/></div>}<div><div className="personal-message-bubble">{m.text}{m.interrupt && pending?.thread_id===threadId && <div className="d-flex gap-2 mt-2"><button className="btn btn-sm btn-primary" disabled={sending} onClick={()=>respond(true)}>Xác nhận</button><button className="btn btn-sm btn-light" disabled={sending} onClick={()=>respond(false)}>Huỷ</button></div>}</div><time>Bây giờ</time></div>
-      </motion.div>)}</AnimatePresence>
+      </motion.div>)}</AnimatePresence><div ref={endRef} aria-hidden="true" />
       {sending && <div className="personal-message"><div className="message-ai-icon"><i className="bi bi-stars"/></div><div className="personal-message-bubble">Đang xử lý...</div></div>}
     </div>
     <div className="personal-composer-wrap"><div className="active-sources"><span><i className="bi bi-shield-check"/> Actions require confirmation</span></div><form className="personal-composer" onSubmit={e=>{e.preventDefault();send()}}><textarea rows="1" value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Hỏi Orbit về công việc và lịch trình của bạn..." onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}}}/><button className="personal-send" aria-label="Gửi" disabled={sending} onClick={e=>{e.preventDefault();send()}}><i className="bi bi-arrow-up"/></button></form><small>Orbit có thể mắc lỗi. Hãy kiểm tra lại thông tin quan trọng.</small></div>

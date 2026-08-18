@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import SettingsSection from '../components/profile/SettingsSection'
 import { useAuth } from '../context/AuthContext'
@@ -16,6 +16,11 @@ export default function ProfilePage(){
   const [pwStatus, setPwStatus] = useState('')
   const [pwSaving, setPwSaving] = useState(false)
   const [notifPermission, setNotifPermission] = useState(() => getNotificationPermission())
+
+  useEffect(() => {
+    if (!user) return
+    setForm(current => ({ ...current, display_name: user.display_name || '', job_title: user.job_title || '', timezone: user.timezone || 'Asia/Ho_Chi_Minh', ...DEFAULT_PREFS, ...(user.preferences || {}) }))
+  }, [user?.id])
 
   const set = key => e => setForm(f => ({ ...f, [key]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }))
 
