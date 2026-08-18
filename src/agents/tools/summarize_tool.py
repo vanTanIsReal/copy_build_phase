@@ -8,7 +8,9 @@ from langgraph.prebuilt import InjectedState
 from src.agents.state import AgentState
 from src.config import get_settings
 from src.services import usage_service
-from src.services.llm import invoke_with_fallback
+from src.services.llm import get_llm, invoke_with_test_override
+
+_DEFAULT_GET_LLM = get_llm
 
 _STYLE_INSTRUCTIONS = {
     "brief": "2-3 short sentences, plain prose",
@@ -42,7 +44,9 @@ async def generate_summary(context: str, style: Literal["brief", "detailed", "bu
         f"({settings.calendar_timezone}).\n\n"
         f"{text}"
     )
-    call = await invoke_with_fallback(prompt)
+    call = await invoke_with_test_override(
+        prompt, get_llm_override=get_llm, default_get_llm=_DEFAULT_GET_LLM
+    )
     result = call.message
     await usage_service.log_usage(
         provider=call.provider, model=call.model, usage_metadata=result.usage_metadata

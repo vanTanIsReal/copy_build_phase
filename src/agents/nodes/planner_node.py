@@ -7,7 +7,9 @@ from src.agents.state import AgentState
 from src.agents.tools import ALL_TOOLS
 from src.config import get_settings
 from src.services import usage_service
-from src.services.llm import invoke_with_fallback
+from src.services.llm import get_llm, invoke_with_test_override
+
+_DEFAULT_GET_LLM = get_llm
 
 SYSTEM_PROMPT_TEMPLATE = (
     "You are a personal assistant embedded in a chat app. You can summarize conversations, "
@@ -89,7 +91,12 @@ async def planner_node(state: AgentState) -> dict:
     try:
         messages = state.get("messages", [])
         system_prompt = _build_system_prompt(state.get("context", ""))
-        call = await invoke_with_fallback([SystemMessage(content=system_prompt), *messages], tools=ALL_TOOLS)
+        call = await invoke_with_test_override(
+            [SystemMessage(content=system_prompt), *messages],
+            get_llm_override=get_llm,
+            default_get_llm=_DEFAULT_GET_LLM,
+            tools=ALL_TOOLS,
+        )
         ai_message: AIMessage = call.message
         await usage_service.log_usage(
             provider=call.provider,

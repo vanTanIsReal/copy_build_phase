@@ -45,4 +45,9 @@ jobs:
         env:
           APP_ENV: test
           OPENAI_API_KEY: test-key
+          GOOGLE_API_KEY: test-key
+          GOOGLE_OAUTH_CLIENT_ID: test-client-id
+          GOOGLE_CALENDAR_CLIENT_ID: test-calendar-client-id
+          GOOGLE_CALENDAR_CLIENT_SECRET: test-calendar-client-secret
+          CREDENTIAL_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
           TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/orbit_test

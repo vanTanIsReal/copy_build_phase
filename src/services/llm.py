@@ -81,3 +81,23 @@ async def invoke_with_fallback(prompt: Any, *, tools: list | None = None) -> LLM
             logger.warning("AI provider failed; trying fallback (%s/%s): %s", provider, model, exc)
             failures.append(f"{provider}/{model}: {type(exc).__name__}")
     raise AllLLMProvidersFailedError("All configured AI providers failed (" + ", ".join(failures) + ").")
+
+
+async def invoke_with_test_override(
+    prompt: Any,
+    *,
+    get_llm_override: Any,
+    default_get_llm: Any,
+    tools: list | None = None,
+) -> LLMResult:
+    """Keep the legacy ``get_llm`` monkeypatch seam without disabling production fallback."""
+    if get_llm_override is default_get_llm:
+        return await invoke_with_fallback(prompt, tools=tools)
+    llm = get_llm_override()
+    runnable = llm.bind_tools(tools) if tools else llm
+    settings = get_settings()
+    return LLMResult(
+        message=await runnable.ainvoke(prompt),
+        provider=settings.llm_provider,
+        model=settings.model_name,
+    )

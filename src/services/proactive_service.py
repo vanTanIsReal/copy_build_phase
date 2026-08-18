@@ -11,10 +11,12 @@ from src.config import get_settings
 from src.db import session as db_session
 from src.db.models import Message, Task, User
 from src.services import chat_service, usage_service
-from src.services.llm import invoke_with_fallback
+from src.services.llm import get_llm, invoke_with_test_override
 from src.websocket.manager import manager
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_GET_LLM = get_llm
 
 # How much conversation context to hand the LLM per check - bounded on 3 independent axes so
 # neither a busy group (drowns a proposal in noise within seconds) nor a quiet 1-1 (a reply hours
@@ -323,7 +325,11 @@ async def maybe_suggest_task(*, conversation_id: str, sender_id: str, content: s
 
         settings = get_settings()
 
-        relevance_call = await invoke_with_fallback(_build_relevance_prompt(content))
+        relevance_call = await invoke_with_test_override(
+            _build_relevance_prompt(content),
+            get_llm_override=get_llm,
+            default_get_llm=_DEFAULT_GET_LLM,
+        )
         relevance = relevance_call.message
         await usage_service.log_usage(
             provider=relevance_call.provider, model=relevance_call.model, usage_metadata=relevance.usage_metadata
@@ -341,7 +347,9 @@ async def maybe_suggest_task(*, conversation_id: str, sender_id: str, content: s
         # to land on the wrong YEAR half the time. Same fix as planner_node.py/task_tool.py.
         now = datetime.now(ZoneInfo(settings.calendar_timezone))
         prompt = _build_window_prompt(window, now=now, tz_name=settings.calendar_timezone)
-        result_call = await invoke_with_fallback(prompt)
+        result_call = await invoke_with_test_override(
+            prompt, get_llm_override=get_llm, default_get_llm=_DEFAULT_GET_LLM
+        )
         result = result_call.message
         await usage_service.log_usage(
             provider=result_call.provider, model=result_call.model, usage_metadata=result.usage_metadata
