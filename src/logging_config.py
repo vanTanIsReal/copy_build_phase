@@ -3,7 +3,6 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-
 _TOKEN_PATTERN = re.compile(r"([?&]token=)[^&\s\"']+", re.IGNORECASE)
 
 

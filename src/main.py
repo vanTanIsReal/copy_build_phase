@@ -24,7 +24,6 @@ from src.services import ai_config_service, calendar_service
 from src.services.scheduler import scheduler
 from src.websocket.routes import router as ws_router
 
-
 install_sensitive_log_filter()
 
 
