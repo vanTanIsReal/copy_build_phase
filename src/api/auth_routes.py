@@ -96,7 +96,19 @@ async def google_auth(
     google_sub = str(claims.get("sub", "")).strip()
     email = str(claims.get("email", "")).strip().lower()
     email_verified = claims.get("email_verified") is True
-    if not google_sub or not email or not email_verified:
+    if not google_sub or not email:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Google did not provide a usable identity",
+        )
+
+    if not email_verified:
+        existing_user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+        if existing_user is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email not verified by Google; sign in with your password instead",
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Google did not provide a verified email address",
@@ -115,13 +127,6 @@ async def google_auth(
             )
     else:
         user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
-        if user is not None and not email_verified:
-            # Don't silently attach a Google identity to an existing account on the strength of an
-            # email Google itself won't vouch for - that would be an account-takeover vector.
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Email not verified by Google; sign in with your password instead",
-            )
         if user is None:
             user = User(
                 email=email,
