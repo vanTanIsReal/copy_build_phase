@@ -53,7 +53,10 @@ export default function AssistantContextPanel({ open, onClose }) {
     { icon: 'bi-journal-bookmark', label: 'Memory', value: memories.length, color: '#f59e0b' },
   ]
 
-  return <><div className={`context-backdrop ${open?'show':''}`} onClick={onClose}/><aside className={`assistant-context ${open?'open':''}`}>
+  // assistant-context keeps all structural/positioning/responsive CSS (assistant.css) untouched -
+  // the Tailwind utilities below are additive-only glassmorphism (design brief Phase 1), same
+  // pattern as Sidebar.jsx's app-sidebar.
+  return <><div className={`context-backdrop ${open?'show':''}`} onClick={onClose}/><aside className={`assistant-context ${open?'open':''} bg-background/80 backdrop-blur-md border-l border-white/10`}>
     <div className="context-title"><div><span>Bối cảnh của bạn</span><h3>Tổng quan hôm nay</h3></div><button className="icon-btn context-close" onClick={onClose}><i className="bi bi-x-lg"/></button></div>
     <div className="context-source-grid">{contextSources.map(x=><div key={x.label}><span style={{background:`${x.color}12`,color:x.color}}><i className={`bi ${x.icon}`}/></span><strong>{x.value}</strong><small>{x.label}</small></div>)}</div>
     <section className="context-section">

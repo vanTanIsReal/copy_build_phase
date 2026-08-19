@@ -28,7 +28,11 @@ export default function Sidebar({ open, onClose }) {
   return (
     <>
       <div className={`sidebar-backdrop ${open ? 'show' : ''}`} onClick={onClose} />
-      <aside className={`app-sidebar ${open ? 'open' : ''}`}>
+      {/* app-sidebar keeps all structural/positioning/responsive CSS (styles.css) untouched -
+          the Tailwind utilities below are additive-only (Design brief Phase 1: glassmorphism).
+          Loaded after styles.css in main.jsx so bg-background/80 wins over .app-sidebar's plain
+          `background:#fff`. */}
+      <aside className={`app-sidebar ${open ? 'open' : ''} bg-background/80 backdrop-blur-md border-r border-white/10`}>
         <div className="brand"><span className="brand-mark"><i className="bi bi-command" /></span><span>Orbit</span></div>
         <nav className="sidebar-nav">
           <div className="nav-caption">Workspace</div>

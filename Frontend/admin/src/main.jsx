@@ -5,6 +5,9 @@ import 'bootstrap-icons/font/bootstrap-icons.css'
 import 'bootstrap/dist/js/bootstrap.bundle.min.js'
 import '../../src/styles.css'
 import './admin.css'
+// Tailwind loaded LAST - see the matching comment in Frontend/user/src/main.jsx for why the
+// order matters (Tailwind v3 has no native CSS @layer isolation; last-imported wins ties).
+import '../../src/tailwind.css'
 import { AuthProvider } from '../../src/context/AuthContext'
 import { ToastProvider } from '../../src/context/ToastContext'
 import AdminRouter from './AdminRouter'

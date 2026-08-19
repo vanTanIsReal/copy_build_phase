@@ -1,0 +1,65 @@
+/* Shared Tailwind/Shadcn design tokens for both apps (imported once per app - see
+   Frontend/user/src/main.jsx / Frontend/admin/src/main.jsx). Dark mode is the default and only
+   theme for now (design brief: "Dark Mode làm mặc định") - :root and .dark carry the same values
+   so nothing depends on a theme-toggle class being present yet.
+
+   Values below are literal conversions of the brief's exact hex spec, not an approximated Tailwind
+   preset:
+   - background #0A0A0A -> 0 0% 4%
+   - card       #121212 -> 0 0% 7%
+   - border     #27272A -> 240 4% 16%
+   - primary (Orbit violet, vivid) -> 262 83% 58%  (~ #7c3aed)
+*/
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root,
+  .dark {
+    --background: 0 0% 4%;
+    --foreground: 0 0% 98%;
+
+    --card: 0 0% 7%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 0 0% 7%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 262 83% 58%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 4% 12%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 240 4% 12%;
+    --muted-foreground: 240 5% 65%;
+
+    --accent: 240 4% 14%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 4% 16%;
+    --input: 240 4% 16%;
+    --ring: 262 83% 58%;
+
+    --radius: 0.75rem;
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+}
+
+@layer utilities {
+  /* One reusable "glow" text/icon treatment for the Orbit violet primary, referenced by
+     AILoadingState and other AI-presence components (Phase 3) - kept here instead of duplicated
+     inline so the glow color/spread only has one place to tune. */
+  .text-glow {
+    text-shadow: 0 0 16px hsl(var(--primary) / 0.6);
+  }
+}
