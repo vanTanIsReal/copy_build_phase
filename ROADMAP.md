@@ -58,6 +58,19 @@ thành.
    `edge_cases.py` đã có) — đặc biệt nên điều tra sâu hơn phát hiện "thứ Hai tuần sau" resolve sai
    sang thứ Bảy ghi ở bảng trên trước khi coi đây là việc xong hẳn.
 
+## Mở rộng ngoài đề bài — Multi-agent workspace (đang triển khai)
+
+Không thuộc yêu cầu đề bài gốc (`Frontend/detai.md`) — quyết định mở rộng riêng của nhóm, kế hoạch
+đầy đủ tại [docs/MULTI_AGENT_IMPLEMENTATION_PLAN.md](docs/MULTI_AGENT_IMPLEMENTATION_PLAN.md), thiết
+kế prompt/tool/guardrail tại [docs/AGENT_SYSTEM_DESIGN.md](docs/AGENT_SYSTEM_DESIGN.md), tiến độ theo
+ngày tại [docs/MULTI_AGENT_PROGRESS.md](docs/MULTI_AGENT_PROGRESS.md). Tóm tắt: thêm 3 agent theo
+Agent Workspace nghiệp vụ (Product Delivery / Quality Assurance / Executive) chạy trên cùng core với
+Personal Agent hiện có, dùng contract chung (`AgentContext`, `WorkspaceBrief`, `ExecutiveBrief`,
+`ActionProposal`) và guardrail nhiều lớp (G0–G6). Trạng thái hiện tại: **Giai đoạn 0 — Foundation**
+(contract, model Agent Workspace, scope resolver, router skeleton) đã xong trong working tree; 3 agent
+nghiệp vụ và việc nối router vào `/chat` **chưa triển khai** — không ảnh hưởng luồng Personal Agent
+đang chạy thật cho người dùng hiện tại.
+
 ## Ngoài phạm vi (quyết định có chủ đích)
 
 - Không đổi frontend sang Next.js, không đổi backend sang NestJS.

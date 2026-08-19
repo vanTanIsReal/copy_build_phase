@@ -99,6 +99,11 @@ graph TB
   tạo bởi đúng `create_access_token` dùng chung với flow mật khẩu — cấu trúc token không đổi.
 
 ### 3. AI Agent (LangGraph)
+> Mô tả dưới đây là **agent cá nhân đang chạy thật** (`AgentProfile.personal`). Kế hoạch mở rộng
+> thêm 3 agent theo Agent Workspace nghiệp vụ (Product Delivery/Quality Assurance/Executive, chạy
+> song song trên cùng core, chưa nối vào `/chat`) nằm ở
+> [docs/MULTI_AGENT_IMPLEMENTATION_PLAN.md](docs/MULTI_AGENT_IMPLEMENTATION_PLAN.md) và
+> [docs/AGENT_SYSTEM_DESIGN.md](docs/AGENT_SYSTEM_DESIGN.md) — không thuộc phạm vi tài liệu này.
 - **Agent Type:** Plan-and-execute dạng đơn giản — 1 node `planner` (LLM bound tools) ⇄ 1 node
   `tools` (`ToolNode`), lặp tới khi planner trả lời không kèm tool call. Tool không cần xác nhận
   (`summarize_conversation`, `extract_tasks`) dừng ngay sau khi chạy — dùng thẳng output làm câu trả
