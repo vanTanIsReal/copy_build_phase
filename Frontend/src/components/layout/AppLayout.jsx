@@ -5,6 +5,7 @@ import TopNavbar from './TopNavbar'
 import ReminderToast from './ReminderToast'
 import TaskSuggestedToast from './TaskSuggestedToast'
 import BudgetAlertToast from './BudgetAlertToast'
+import CommandPalette from '../command/CommandPalette'
 import { useAuth } from '../../context/AuthContext'
 import { useChatSocket } from '../../api/useWebSocket'
 import { getNotificationPermission, isNotificationSupported, notifyTaskSuggested } from '../../utils/browserNotifications'
@@ -45,6 +46,7 @@ export default function AppLayout() {
 
   return (
     <div className="app-shell">
+      <CommandPalette />
       <Sidebar open={open} onClose={() => setOpen(false)} />
       <div className="app-column"><TopNavbar onMenu={() => setOpen(true)} /><main className="app-main"><Outlet context={{ sendJson, subscribe }} /></main></div>
       {toastReminder && <ReminderToast reminder={toastReminder} onClose={() => setToastReminder(null)} />}
