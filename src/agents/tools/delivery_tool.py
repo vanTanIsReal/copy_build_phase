@@ -1,31 +1,35 @@
 """Product Delivery agent's specialist tools.
 
-Mock vertical slice for the ``product_delivery`` agent profile registered in
+Real vertical slice for the ``product_delivery`` agent profile registered in
 ``src.agents.tools.registry``. Every function here is a plain async callable (NOT a LangChain
-``@tool``) returning the shared ``ToolResult`` contract from ``src.agents.contracts`` — this is
-the tool boundary shape the multi-agent workspace foundation expects specialist agents to speak,
+``@tool``) returning the shared ``ToolResult`` contract from ``src.agents.contracts`` - the tool
+boundary shape the multi-agent workspace foundation expects specialist agents to speak,
 independent of the LangGraph ``@tool`` wiring the PERSONAL profile still uses in ``graph.py``.
 
-Data below is mocked (no DB/service calls yet): the foundation's Resource Guard and Scope
-Resolver aren't wired to a real Delivery data source. Real reads/writes land once the Delivery
-brief producer graduates past fixtures (see docs/MULTI_AGENT_PROGRESS.md, "Thứ tự công việc tiếp
-theo"). Every returned ``SourceReference.agent_workspace_id`` matches the caller-supplied
-``agent_workspace_id`` so downstream WorkspaceBrief.sources ownership checks hold.
+Every function takes the caller's ``AgentContext`` and re-checks it live via
+``resource_guard.enforce_agent_workspace_access`` before touching any data (G2) - the context's own
+``authorization.decision`` is a snapshot from the start of the turn and is NOT trusted on its own.
+Reads go through ``src.services.delivery_workspace_service`` (real Postgres, scoped to
+``agent_workspace_id``); no fixture/mock data. Milestones and cross-workspace dependencies are not
+yet modeled as their own DB records - callers get an honest ``data_gaps`` entry instead of
+fabricated content (G4: "Không có source thì ghi inference/data gap, không biến suy đoán thành
+fact").
 
-``propose_delivery_reminder``/``propose_delivery_meeting`` never create anything — they only
-preview an ``ActionProposal`` for a human to confirm later, per the project's human-in-the-loop
-rule for any tool with a side effect (see CLAUDE.md). Actually scheduling the reminder/meeting is
-the HITL executor's job (not yet built), not this module's.
+``propose_delivery_reminder``/``propose_delivery_meeting`` never create anything - they only draft
+an ``ActionProposal`` for the shared HITL executor (``src.agents.hitl_executor``) to actually run
+once a human confirms, per CLAUDE.md's human-in-the-loop rule for any tool with a side effect.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from uuid import uuid4
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents.contracts import (
     ActionProposal,
+    AgentContext,
     AgentProfile,
     BriefType,
     SourceReference,
@@ -34,98 +38,10 @@ from src.agents.contracts import (
     WorkspaceBrief,
     action_payload_hash,
 )
+from src.agents.policies.resource_guard import enforce_agent_workspace_access
 from src.agents.schemas.delivery import DeliveryBriefPayload
 from src.agents.tools.registry import assert_tool_allowed
-
-DEFAULT_ORGANIZATION_WORKSPACE_ID = "org_orbit_demo"
-DEFAULT_AGENT_WORKSPACE_ID = "agent_ws_product_delivery"
-
-_MOCK_TASKS: tuple[dict[str, Any], ...] = (
-    {
-        "id": "delivery-task-001",
-        "title": "API đăng nhập",
-        "status": "blocked",
-        "priority": "high",
-        "owner_id": "delivery-user-1",
-        "due_at": "2026-08-20T00:00:00+00:00",
-        "blocked_reason": "Thiếu refresh-token contract từ nhóm nền tảng",
-    },
-    {
-        "id": "delivery-task-002",
-        "title": "Trang release",
-        "status": "due_soon",
-        "priority": "medium",
-        "owner_id": "delivery-user-2",
-        "due_at": "2026-08-19T00:00:00+00:00",
-        "blocked_reason": None,
-    },
-    {
-        "id": "delivery-task-003",
-        "title": "Audit dashboard",
-        "status": "in_progress",
-        "priority": "medium",
-        "owner_id": "delivery-user-3",
-        "due_at": "2026-08-25T00:00:00+00:00",
-        "blocked_reason": None,
-    },
-)
-
-_MOCK_MILESTONES: tuple[dict[str, Any], ...] = (
-    {
-        "id": "delivery-milestone-001",
-        "name": "Release R1 — Đăng nhập & Onboarding",
-        "due_date": "2026-08-22",
-        "status": "at_risk",
-    },
-    {
-        "id": "delivery-milestone-002",
-        "name": "Release R1 — Calendar sync",
-        "due_date": "2026-08-29",
-        "status": "on_track",
-    },
-)
-
-_MOCK_PEOPLE: tuple[dict[str, Any], ...] = (
-    {"id": "delivery-lead", "name": "Delivery Lead", "role": "lead"},
-    {"id": "delivery-user-1", "name": "Delivery Member 1", "role": "member"},
-    {"id": "delivery-user-2", "name": "Delivery Member 2", "role": "member"},
-    {"id": "delivery-user-3", "name": "Delivery Member 3", "role": "member"},
-)
-
-_MOCK_MESSAGES: tuple[dict[str, Any], ...] = (
-    {
-        "id": "delivery-message-001",
-        "author_id": "delivery-user-1",
-        "content": "API đăng nhập: thiếu refresh-token contract từ nhóm nền tảng",
-        "sent_at": "2026-08-17T09:15:00+00:00",
-    },
-    {
-        "id": "delivery-message-002",
-        "author_id": "delivery-lead",
-        "content": "Trang release đang chờ review responsive",
-        "sent_at": "2026-08-17T14:30:00+00:00",
-    },
-    {
-        "id": "delivery-message-003",
-        "author_id": "delivery-user-3",
-        "content": "Audit dashboard đang hoàn thiện filter theo trace",
-        "sent_at": "2026-08-18T08:00:00+00:00",
-    },
-)
-
-_DEPENDENCY: dict[str, Any] = {
-    "id": "delivery-dependency-001",
-    "from_agent_workspace_id": DEFAULT_AGENT_WORKSPACE_ID,
-    "to_agent_workspace_id": "agent_ws_quality_assurance",
-    "description": "Release R1 chờ Quality regression gate trước khi freeze.",
-}
-
-_DECISION: dict[str, Any] = {
-    "id": "delivery-decision-001",
-    "question": "Có trì hoãn Release R1 sang tuần sau để chờ QA gate không?",
-    "owner_id": "delivery-lead",
-    "due_date": "2026-08-21",
-}
+from src.services import delivery_workspace_service, workspace_brief_service
 
 _TOOL_NAMES: tuple[str, ...] = (
     "get_delivery_tasks",
@@ -144,6 +60,13 @@ for _name in _TOOL_NAMES:
     assert_tool_allowed(AgentProfile.PRODUCT_DELIVERY, _name)
 
 
+def _workspace_id(context: AgentContext) -> str:
+    workspace_id = context.request.target_agent_workspace_id
+    if not workspace_id:
+        raise ValueError("Delivery tools require an AgentContext with a target_agent_workspace_id")
+    return workspace_id
+
+
 def _source(resource_id: str, resource_type: str, agent_workspace_id: str) -> SourceReference:
     return SourceReference(
         resource_id=resource_id,
@@ -154,90 +77,122 @@ def _source(resource_id: str, resource_type: str, agent_workspace_id: str) -> So
     )
 
 
+def _task_dict(task) -> dict:
+    return {
+        "id": task.id,
+        "title": task.title,
+        "status": task.status,
+        "priority": task.priority,
+        "owner_id": task.owner_id,
+        "due_at": task.due_at.isoformat() if task.due_at else None,
+        "needs_clarification": task.needs_clarification,
+    }
+
+
 async def get_delivery_tasks(
-    agent_workspace_id: str = DEFAULT_AGENT_WORKSPACE_ID,
-    *,
-    include_completed: bool = False,
+    db: AsyncSession, context: AgentContext, *, include_completed: bool = False
 ) -> ToolResult:
-    """Read-only: list tasks tracked in the Delivery agent workspace."""
-    tasks = list(_MOCK_TASKS)
-    if not include_completed:
-        tasks = [task for task in tasks if task["status"] != "completed"]
+    """Read-only: list tasks tracked in the caller's Delivery agent workspace."""
+    workspace_id = _workspace_id(context)
+    await enforce_agent_workspace_access(db, context=context, agent_workspace_id=workspace_id)
+
+    tasks = await delivery_workspace_service.list_tasks(db, workspace_id, include_completed=include_completed)
     return ToolResult(
         status=ToolResultStatus.SUCCESS,
-        payload={"tasks": tasks},
-        sources=(_source("delivery-tasks-snapshot", "task_list", agent_workspace_id),),
+        payload={"tasks": [_task_dict(task) for task in tasks]},
+        sources=(_source("delivery-tasks-snapshot", "task_list", workspace_id),),
     )
 
 
 async def search_delivery_messages(
-    query: str = "",
-    agent_workspace_id: str = DEFAULT_AGENT_WORKSPACE_ID,
-    limit: int = 10,
+    db: AsyncSession, context: AgentContext, *, query: str = "", limit: int = 10
 ) -> ToolResult:
-    """Read-only: keyword search over Delivery workspace conversation messages."""
-    needle = query.strip().lower()
-    matches = [message for message in _MOCK_MESSAGES if not needle or needle in message["content"].lower()]
-    matches = matches[: max(1, limit)]
+    """Read-only: keyword search over messages in conversations linked to this Delivery workspace."""
+    workspace_id = _workspace_id(context)
+    await enforce_agent_workspace_access(db, context=context, agent_workspace_id=workspace_id)
+
+    rows = await delivery_workspace_service.search_messages(db, workspace_id, query, limit=limit)
+    messages = [
+        {"id": message.id, "author_id": message.sender_id, "content": message.content, "sent_at": message.created_at.isoformat()}
+        for message, _sender in rows
+    ]
     return ToolResult(
         status=ToolResultStatus.SUCCESS,
-        payload={"query": query, "messages": matches},
-        sources=(_source("delivery-messages-snapshot", "message_list", agent_workspace_id),),
+        payload={"query": query, "messages": messages},
+        sources=(_source("delivery-messages-snapshot", "message_list", workspace_id),),
     )
 
 
-async def get_delivery_milestones(agent_workspace_id: str = DEFAULT_AGENT_WORKSPACE_ID) -> ToolResult:
-    """Read-only: list Delivery workspace milestones and their status."""
+async def get_delivery_milestones(db: AsyncSession, context: AgentContext) -> ToolResult:
+    """Read-only: milestones are not yet their own DB record (see module docstring) - reports an
+    honest empty result with a data gap instead of fabricating milestone content."""
+    workspace_id = _workspace_id(context)
+    await enforce_agent_workspace_access(db, context=context, agent_workspace_id=workspace_id)
+
     return ToolResult(
-        status=ToolResultStatus.SUCCESS,
-        payload={"milestones": list(_MOCK_MILESTONES)},
-        sources=(_source("delivery-milestones-snapshot", "milestone_list", agent_workspace_id),),
+        status=ToolResultStatus.PARTIAL,
+        payload={"milestones": []},
+        data_gaps=("Milestone tracking is not yet modeled beyond Task - only task-level status is available.",),
+        sources=(_source("delivery-milestones-snapshot", "milestone_list", workspace_id),),
     )
 
 
-async def get_delivery_people(agent_workspace_id: str = DEFAULT_AGENT_WORKSPACE_ID) -> ToolResult:
-    """Read-only: list people who are members of the Delivery agent workspace."""
+async def get_delivery_people(db: AsyncSession, context: AgentContext) -> ToolResult:
+    """Read-only: list active members of the Delivery agent workspace."""
+    workspace_id = _workspace_id(context)
+    await enforce_agent_workspace_access(db, context=context, agent_workspace_id=workspace_id)
+
+    members = await delivery_workspace_service.list_members(db, workspace_id)
+    people = [{"id": user.id, "name": user.display_name, "role": role} for user, role in members]
     return ToolResult(
         status=ToolResultStatus.SUCCESS,
-        payload={"people": list(_MOCK_PEOPLE)},
-        sources=(_source("delivery-people-snapshot", "person_list", agent_workspace_id),),
+        payload={"people": people},
+        sources=(_source("delivery-people-snapshot", "person_list", workspace_id),),
     )
 
 
-async def build_delivery_brief(
-    agent_workspace_id: str = DEFAULT_AGENT_WORKSPACE_ID,
-    organization_workspace_id: str = DEFAULT_ORGANIZATION_WORKSPACE_ID,
-    trace_id: str = "trace-delivery-mock",
-) -> ToolResult:
-    """Brief producer: assemble a DeliveryBriefPayload and wrap it in a validated WorkspaceBrief.
-
-    ``release_readiness`` is deliberately left unset - WorkspaceBrief.validate_brief_envelope
-    raises if a DELIVERY brief carries one (that field belongs only to a Quality brief).
+async def build_delivery_brief(db: AsyncSession, context: AgentContext) -> ToolResult:
+    """Brief producer: assemble a DeliveryBriefPayload from real tasks and wrap it in a validated
+    WorkspaceBrief. ``release_readiness`` is deliberately left unset - WorkspaceBrief's own
+    validator raises if a DELIVERY brief carries one (that field belongs only to a Quality brief).
+    Dependencies are not yet modeled (see module docstring) and are reported as a data gap, not
+    fabricated.
     """
-    blocked_items = [task for task in _MOCK_TASKS if task["status"] == "blocked"]
+    workspace_id = _workspace_id(context)
+    await enforce_agent_workspace_access(db, context=context, agent_workspace_id=workspace_id)
+
+    tasks = await delivery_workspace_service.list_tasks(db, workspace_id)
+    blocked = [task for task in tasks if task.status == "blocked"]
+    needs_clarification = [task for task in tasks if task.needs_clarification]
+    data_gaps: list[str] = [
+        "Milestone tracking is not yet modeled beyond Task.",
+        "Cross-workspace dependency tracking is not yet modeled.",
+    ]
+
+    if blocked:
+        headline = f"Delivery: {len(blocked)} task đang blocked, cần xử lý trước khi tiếp tục."
+    elif needs_clarification:
+        headline = f"Delivery: {len(needs_clarification)} task còn thiếu owner/deadline rõ ràng."
+    else:
+        headline = f"Delivery: {len(tasks)} task đang mở, không có task nào bị blocked."
+
     payload = DeliveryBriefPayload(
-        headline="Delivery tuần này: 1 milestone at-risk, 1 task blocked chờ dependency ngoài team.",
-        milestones=list(_MOCK_MILESTONES),
-        blocked_items=blocked_items,
-        dependencies=[_DEPENDENCY],
-        decisions_needed=[_DECISION],
+        headline=headline,
+        milestones=[],
+        blocked_items=[_task_dict(task) for task in blocked],
+        dependencies=[],
+        decisions_needed=[_task_dict(task) for task in needs_clarification],
     )
 
-    contributing_ids = (
-        [milestone["id"] for milestone in _MOCK_MILESTONES]
-        + [task["id"] for task in blocked_items]
-        + [_DEPENDENCY["id"], _DECISION["id"]]
-    )
-    sources = tuple(
-        _source(resource_id, "delivery_fact", agent_workspace_id) for resource_id in contributing_ids
-    )
+    contributing_ids = [task.id for task in blocked] + [task.id for task in needs_clarification]
+    sources = tuple(_source(task_id, "delivery_fact", workspace_id) for task_id in contributing_ids)
 
     now = datetime.now(UTC)
     brief = WorkspaceBrief(
         brief_id=f"delivery-brief-{uuid4()}",
-        trace_id=trace_id,
-        organization_workspace_id=organization_workspace_id,
-        agent_workspace_id=agent_workspace_id,
+        trace_id=context.trace_id,
+        organization_workspace_id=context.actor.organization_workspace_id,
+        agent_workspace_id=workspace_id,
         brief_type=BriefType.DELIVERY,
         producer_profile=AgentProfile.PRODUCT_DELIVERY,
         period_start=now - timedelta(days=7),
@@ -245,38 +200,45 @@ async def build_delivery_brief(
         generated_at=now,
         expires_at=now + timedelta(hours=24),
         headline=payload.headline,
-        facts=tuple(payload.milestones) + tuple(payload.blocked_items),
-        dependencies=tuple(payload.dependencies),
+        facts=tuple(payload.blocked_items) + tuple(payload.decisions_needed),
+        dependencies=(),
         decisions_needed=tuple(payload.decisions_needed),
+        data_gaps=tuple(data_gaps),
         sources=sources,
         # release_readiness intentionally omitted - stays None, as required for BriefType.DELIVERY.
     )
+    await workspace_brief_service.save_brief(db, brief)
 
     return ToolResult(
-        status=ToolResultStatus.SUCCESS,
+        status=ToolResultStatus.PARTIAL if data_gaps else ToolResultStatus.SUCCESS,
         payload={
             "delivery_brief": payload.model_dump(),
             "workspace_brief": brief.model_dump(mode="json"),
         },
+        data_gaps=tuple(data_gaps),
         sources=sources,
     )
 
 
 async def propose_delivery_reminder(
+    db: AsyncSession,
+    context: AgentContext,
+    *,
     title: str,
     due_at: datetime,
-    agent_workspace_id: str = DEFAULT_AGENT_WORKSPACE_ID,
-    actor_user_id: str = "delivery-lead",
     message: str = "",
 ) -> ToolResult:
     """Preview-only: draft an ActionProposal for a Delivery reminder. Never schedules anything -
     a human must confirm via the HITL executor before this has any real effect."""
+    workspace_id = _workspace_id(context)
+    await enforce_agent_workspace_access(db, context=context, agent_workspace_id=workspace_id)
+
     now = datetime.now(UTC)
     draft_payload = {"title": title, "due_at": due_at.isoformat(), "message": message}
     proposal = ActionProposal(
         proposal_id=f"delivery-reminder-{uuid4()}",
-        trace_id=f"trace-{uuid4()}",
-        actor_user_id=actor_user_id,
+        trace_id=context.trace_id,
+        actor_user_id=context.actor.user_id,
         action="preview_delivery_reminder",
         payload=draft_payload,
         payload_hash=action_payload_hash(draft_payload),
@@ -287,19 +249,23 @@ async def propose_delivery_reminder(
     return ToolResult(
         status=ToolResultStatus.SUCCESS,
         payload={"proposal": proposal.model_dump(mode="json"), "requires_confirmation": True},
-        sources=(_source("delivery-reminder-preview", "action_proposal", agent_workspace_id),),
+        sources=(_source("delivery-reminder-preview", "action_proposal", workspace_id),),
     )
 
 
 async def propose_delivery_meeting(
+    db: AsyncSession,
+    context: AgentContext,
+    *,
     title: str,
     starts_at: datetime,
-    agent_workspace_id: str = DEFAULT_AGENT_WORKSPACE_ID,
-    actor_user_id: str = "delivery-lead",
     attendee_ids: tuple[str, ...] = (),
 ) -> ToolResult:
     """Preview-only: draft an ActionProposal for a Delivery meeting. Never creates a calendar
     event - a human must confirm via the HITL executor before this has any real effect."""
+    workspace_id = _workspace_id(context)
+    await enforce_agent_workspace_access(db, context=context, agent_workspace_id=workspace_id)
+
     now = datetime.now(UTC)
     draft_payload = {
         "title": title,
@@ -308,8 +274,8 @@ async def propose_delivery_meeting(
     }
     proposal = ActionProposal(
         proposal_id=f"delivery-meeting-{uuid4()}",
-        trace_id=f"trace-{uuid4()}",
-        actor_user_id=actor_user_id,
+        trace_id=context.trace_id,
+        actor_user_id=context.actor.user_id,
         action="preview_delivery_meeting",
         payload=draft_payload,
         payload_hash=action_payload_hash(draft_payload),
@@ -320,5 +286,5 @@ async def propose_delivery_meeting(
     return ToolResult(
         status=ToolResultStatus.SUCCESS,
         payload={"proposal": proposal.model_dump(mode="json"), "requires_confirmation": True},
-        sources=(_source("delivery-meeting-preview", "action_proposal", agent_workspace_id),),
+        sources=(_source("delivery-meeting-preview", "action_proposal", workspace_id),),
     )
