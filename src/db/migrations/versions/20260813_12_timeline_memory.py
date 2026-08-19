@@ -69,7 +69,12 @@ def upgrade() -> None:
         if "last_accessed_at" not in columns:
             batch_op.add_column(sa.Column("last_accessed_at", sa.DateTime(timezone=True), nullable=True))
 
-    index_names = {index["name"] for index in sa.inspect(connection).get_indexes("memories")}
+    memory_inspector = sa.inspect(connection)
+    index_names = {index["name"] for index in memory_inspector.get_indexes("memories")}
+    check_names = {
+        constraint.get("name")
+        for constraint in memory_inspector.get_check_constraints("memories")
+    }
     with op.batch_alter_table("memories") as batch_op:
         if "ix_memories_owner_type_expiry" not in index_names:
             batch_op.create_index(
@@ -77,13 +82,15 @@ def upgrade() -> None:
                 ["owner_id", "memory_type", "expires_at"],
                 unique=False,
             )
-        batch_op.create_check_constraint(
-            "ck_memory_type",
-            "memory_type IN ('preference', 'relationship', 'episodic', 'semantic')",
-        )
-        batch_op.create_check_constraint(
-            "ck_memory_sensitivity", "sensitivity IN ('normal', 'sensitive')"
-        )
+        if "ck_memory_type" not in check_names:
+            batch_op.create_check_constraint(
+                "ck_memory_type",
+                "memory_type IN ('preference', 'relationship', 'episodic', 'semantic')",
+            )
+        if "ck_memory_sensitivity" not in check_names:
+            batch_op.create_check_constraint(
+                "ck_memory_sensitivity", "sensitivity IN ('normal', 'sensitive')"
+            )
 
 
 def downgrade() -> None:
