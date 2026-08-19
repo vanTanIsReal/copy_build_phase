@@ -16,6 +16,7 @@ export default function NewEventModal({ open, onClose, onCreated }) {
   const submit = async (e) => {
     e.preventDefault()
     if (!summary.trim() || !start || !end) return
+    if (new Date(end) <= new Date(start)) { setError('End time must be after start time.'); return }
     setSubmitting(true); setError('')
     try {
       const event = await createCalendarEvent(token, {
@@ -41,8 +42,8 @@ export default function NewEventModal({ open, onClose, onCreated }) {
               {error && <div className="auth-error">{error}</div>}
               <input className="form-control" placeholder="Event title" value={summary} onChange={e => setSummary(e.target.value)} required />
               <div className="row g-2">
-                <div className="col"><label className="form-label small">Start</label><input type="datetime-local" className="form-control" value={start} onChange={e => setStart(e.target.value)} required /></div>
-                <div className="col"><label className="form-label small">End</label><input type="datetime-local" className="form-control" value={end} onChange={e => setEnd(e.target.value)} required /></div>
+                <div className="col"><label className="form-label small">Start</label><input type="datetime-local" className="form-control" value={start} onChange={e => { setStart(e.target.value); if (end && new Date(e.target.value) >= new Date(end)) setEnd('') }} required /></div>
+                <div className="col"><label className="form-label small">End</label><input type="datetime-local" min={start || undefined} className="form-control" value={end} onChange={e => setEnd(e.target.value)} required /></div>
               </div>
               <textarea className="form-control" placeholder="Description (optional)" value={description} onChange={e => setDescription(e.target.value)} rows={3} />
             </div>

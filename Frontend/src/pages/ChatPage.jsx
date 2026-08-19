@@ -9,7 +9,7 @@ import AddMembersModal from '../components/chat/AddMembersModal'
 import { useAuth } from '../context/AuthContext'
 import { useConversations } from '../hooks/useConversations'
 import { useMessages } from '../hooks/useMessages'
-import { deleteConversation, getAiPermission, leaveConversation, markRead, setAiPermission } from '../api/chat'
+import { deleteConversation, getAiPermission, leaveConversation, markRead, sendMessage, setAiPermission } from '../api/chat'
 
 export default function ChatPage() {
   const { token, user } = useAuth()
@@ -79,7 +79,14 @@ export default function ChatPage() {
     markRead(token, id).catch(() => {})
   }
 
-  const onSend = (content) => { if (selectedId) sendJson({ type: 'send_message', conversation_id: selectedId, content }) }
+  const onSend = ({ content, file }) => {
+    if (!selectedId) return
+    const attachment = file ? `[[attachment|${encodeURIComponent(file.name)}|${encodeURIComponent(file.type)}|${file.data}]]` : ''
+    const payload = `${attachment}${content ? `\n${content}` : ''}`.trim()
+    if (!sendJson({ type: 'send_message', conversation_id: selectedId, content: payload })) {
+      sendMessage(token, selectedId, payload).then(msg => setMessages(prev => [...prev, msg])).catch(err => alert(err.detail || 'Could not send message.'))
+    }
+  }
 
   const onCreated = (conv) => {
     setConversations(prev => [conv, ...prev.filter(c => c.id !== conv.id)])

@@ -30,7 +30,8 @@ export function useChatSocket(token, onMessage) {
 
   const sendJson = (obj) => {
     const ws = socketRef.current
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj))
+    if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify(obj)); return true }
+    return false
   }
 
   return { sendJson }

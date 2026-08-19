@@ -44,7 +44,9 @@ class MessageListResponse(BaseModel):
 
 
 class SendMessageRequest(BaseModel):
-    content: str = Field(..., min_length=1, max_length=5000)
+    # Attachments are carried as a compact data URL inside the message payload so they remain
+    # available to every participant after reload. The UI caps files at 2 MB.
+    content: str = Field(..., min_length=1, max_length=3_000_000)
 
 
 class AIPermissionOut(BaseModel):

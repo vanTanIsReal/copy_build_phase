@@ -16,6 +16,7 @@ export default function NewReminderModal({ open, onClose, onCreated }) {
   const submit = async (e) => {
     e.preventDefault()
     if (!title.trim() || !dueAt) return
+    if (new Date(dueAt) <= new Date()) { setError('Please choose a future date and time.'); return }
     setSubmitting(true); setError('')
     try {
       const reminder = await createReminder(token, {
@@ -41,7 +42,7 @@ export default function NewReminderModal({ open, onClose, onCreated }) {
               {error && <div className="auth-error">{error}</div>}
               <input className="form-control" placeholder="Reminder title" value={title} onChange={e => setTitle(e.target.value)} required />
               <div className="row g-2">
-                <div className="col"><label className="form-label small">Due at</label><input type="datetime-local" className="form-control" value={dueAt} onChange={e => setDueAt(e.target.value)} required /></div>
+                <div className="col"><label className="form-label small">Due at</label><input type="datetime-local" min={new Date().toISOString().slice(0, 16)} className="form-control" value={dueAt} onChange={e => setDueAt(e.target.value)} required /></div>
                 <div className="col"><label className="form-label small">Lead time (minutes)</label><input type="number" min="0" className="form-control" value={leadMinutes} onChange={e => setLeadMinutes(e.target.value)} /></div>
               </div>
               <textarea className="form-control" placeholder="Message (optional)" value={message} onChange={e => setMessage(e.target.value)} rows={2} />
