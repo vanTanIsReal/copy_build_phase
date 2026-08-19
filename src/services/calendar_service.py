@@ -90,19 +90,31 @@ async def find_conflicts(user_id: str, start_iso: str, end_iso: str) -> list[dic
     return await list_events(user_id, start_iso, end_iso)
 
 
+async def get_event(user_id: str, event_id: str) -> dict:
+    service = await _service(user_id)
+
+    def _call():
+        return service.events().get(calendarId=_PRIMARY, eventId=event_id).execute()
+
+    return await run_in_threadpool(_call)
+
+
 def _merge_busy_intervals(events: list[dict]) -> list[tuple[datetime, datetime]]:
-    """Sorted, merged busy intervals from timed events (all-day events, which only have a "date"
-    field and no precise time, are skipped here - known v1 limitation, not a bug: they still show
-    up as a conflict via find_conflicts, they just aren't accounted for when picking free gaps)."""
-    intervals = sorted(
-        (
-            (datetime.fromisoformat(e["start"]["dateTime"]).replace(tzinfo=None),
-             datetime.fromisoformat(e["end"]["dateTime"]).replace(tzinfo=None))
-            for e in events
-            if "dateTime" in e.get("start", {}) and "dateTime" in e.get("end", {})
-        ),
-        key=lambda iv: iv[0],
-    )
+    """Sorted, merged busy intervals from all events. Timed events use their exact start/end;
+    all-day events (only a "date" field, no "dateTime") count as busy for the whole day(s) they
+    span - Google's end.date is already exclusive (the day after the last day), so it maps
+    straight onto midnight of the following day with no adjustment needed."""
+    raw: list[tuple[datetime, datetime]] = []
+    for e in events:
+        start, end = e.get("start", {}), e.get("end", {})
+        if "dateTime" in start and "dateTime" in end:
+            raw.append((
+                datetime.fromisoformat(start["dateTime"]).replace(tzinfo=None),
+                datetime.fromisoformat(end["dateTime"]).replace(tzinfo=None),
+            ))
+        elif "date" in start and "date" in end:
+            raw.append((datetime.fromisoformat(start["date"]), datetime.fromisoformat(end["date"])))
+    intervals = sorted(raw, key=lambda iv: iv[0])
     merged: list[tuple[datetime, datetime]] = []
     for start, end in intervals:
         if merged and start <= merged[-1][1]:

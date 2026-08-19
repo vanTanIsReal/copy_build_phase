@@ -45,7 +45,13 @@ function describeInterrupt(interrupt) {
     }
     return `Tạo sự kiện "${d.summary}" từ ${d.start} đến ${d.end}?`
   }
-  if (interrupt.type === 'calendar_event_update') return `Cập nhật sự kiện ${d.event_id}?`
+  if (interrupt.type === 'calendar_event_update') {
+    if (d.conflicts?.length) {
+      const clash = d.conflicts.map(c => c.title).join(', ')
+      return `Trùng với "${clash}". Vẫn cập nhật sự kiện ${d.event_id} sang giờ đó, hay chọn giờ thay thế bên dưới?`
+    }
+    return `Cập nhật sự kiện ${d.event_id}?`
+  }
   if (interrupt.type === 'calendar_event_delete') return `Xoá sự kiện ${d.event_id}?`
   return 'Xác nhận hành động này?'
 }

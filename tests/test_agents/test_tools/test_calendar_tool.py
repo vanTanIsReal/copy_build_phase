@@ -217,6 +217,10 @@ async def test_create_calendar_event_conflict_confirmed_anyway(monkeypatch, fake
 @pytest.mark.asyncio
 async def test_update_calendar_event_interrupts_then_updates(monkeypatch, fake_llm_factory):
     fake_service = MagicMock()
+    fake_service.events.return_value.get.return_value.execute.return_value = {
+        "id": "evt-1", "start": {"dateTime": "2026-08-01T11:00:00"}, "end": {"dateTime": "2026-08-01T12:00:00"},
+    }
+    fake_service.events.return_value.list.return_value.execute.return_value = {"items": []}
     fake_service.events.return_value.patch.return_value.execute.return_value = {
         "id": "evt-1", "summary": "Launch review (moved)", "htmlLink": "https://calendar.google.com/event?eid=evt1",
     }
@@ -235,12 +239,89 @@ async def test_update_calendar_event_interrupts_then_updates(monkeypatch, fake_l
     interrupts = result.get("__interrupt__")
     assert interrupts is not None
     assert interrupts[0].value["type"] == "calendar_event_update"
+    assert interrupts[0].value["draft"].get("conflicts") is None
     fake_service.events.return_value.patch.assert_not_called()
 
     result2 = await agent_graph.agent.ainvoke(Command(resume={"approved": True}), config)
     final = result2["messages"][-1]
     assert "Event updated" in final.content
     fake_service.events.return_value.patch.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_update_calendar_event_conflict_offers_alternatives(monkeypatch, fake_llm_factory):
+    """Moving an event onto a time another event already occupies surfaces `conflicts` +
+    `alternatives` in the draft, same Propose & Verify treatment create_calendar_event gets - and
+    the event being moved is excluded from its own conflict list even if the old and new time
+    happen to overlap."""
+    fake_service = MagicMock()
+    fake_service.events.return_value.get.return_value.execute.return_value = {
+        "id": "evt-1", "start": {"dateTime": "2026-08-01T09:00:00"}, "end": {"dateTime": "2026-08-01T09:30:00"},
+    }
+    fake_service.events.return_value.list.return_value.execute.return_value = {
+        "items": [
+            {
+                "id": "evt-standup",
+                "summary": "Standup",
+                "start": {"dateTime": "2026-08-01T11:00:00"},
+                "end": {"dateTime": "2026-08-01T11:30:00"},
+            }
+        ]
+    }
+    fake_service.events.return_value.patch.return_value.execute.return_value = {
+        "id": "evt-1", "htmlLink": "https://calendar.google.com/event?eid=evt1",
+    }
+    _mock_service(monkeypatch, fake_service)
+
+    llm = _script_tool_call(
+        fake_llm_factory, "update_calendar_event",
+        {"event_id": "evt-1", "start_iso": "2026-08-01T11:00:00", "end_iso": "2026-08-01T11:30:00"},
+    )
+    monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
+
+    config = _config()
+    result = await agent_graph.agent.ainvoke(
+        {"messages": [HumanMessage(content="move the review to 11am")], "user_id": _USER_ID}, config
+    )
+
+    draft = result["__interrupt__"][0].value["draft"]
+    assert [c["title"] for c in draft["conflicts"]] == ["Standup"]
+    assert len(draft["alternatives"]) == 2
+
+    result2 = await agent_graph.agent.ainvoke(Command(resume={"approved": True}), config)
+    assert "Event updated" in result2["messages"][-1].content
+
+
+@pytest.mark.asyncio
+async def test_update_calendar_event_only_one_bound_merges_the_other_from_current_event(monkeypatch, fake_llm_factory):
+    """Only start_iso is being changed - the conflict check must use the *current* end time, not
+    leave the range half-open, so it actually checks against the real resulting time instead of
+    silently skipping the check (which is what happens when only one bound is given and nothing
+    is merged in)."""
+    fake_service = MagicMock()
+    fake_service.events.return_value.get.return_value.execute.return_value = {
+        "id": "evt-1", "start": {"dateTime": "2026-08-01T09:00:00"}, "end": {"dateTime": "2026-08-01T09:30:00"},
+    }
+    fake_service.events.return_value.list.return_value.execute.return_value = {"items": []}
+    fake_service.events.return_value.patch.return_value.execute.return_value = {"id": "evt-1"}
+    _mock_service(monkeypatch, fake_service)
+
+    # Only start_iso given (no end_iso) - the merged end used for the conflict check must be the
+    # current event's end (09:30), captured via the mocked list() call args below. With no
+    # merging, the check would have been skipped entirely (check_end would stay None).
+    llm = _script_tool_call(
+        fake_llm_factory, "update_calendar_event", {"event_id": "evt-1", "start_iso": "2026-08-01T11:00:00"}
+    )
+    monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
+
+    await agent_graph.agent.ainvoke(
+        {"messages": [HumanMessage(content="move the review to 11am")], "user_id": _USER_ID}, _config()
+    )
+
+    fake_service.events.return_value.get.assert_called_once()
+    kwargs = fake_service.events.return_value.list.call_args.kwargs
+    assert kwargs["timeMin"] == "2026-08-01T11:00:00"
+    assert kwargs["timeMax"] == "2026-08-01T09:30:00"
 
 
 @pytest.mark.asyncio

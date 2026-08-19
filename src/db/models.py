@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Text
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base
@@ -49,6 +49,48 @@ class GoogleIdentity(Base):
     user: Mapped["User"] = relationship()
 
 
+class Workspace(Base):
+    """An organization-level container for the (currently foundation-only, not user-facing)
+    multi-agent workspace feature - see docs/MULTI_AGENT_PROGRESS.md. Ported narrowly from the
+    G19-T132-Lương-Trí-Tuệ branch's Agent Workspace foundation to unblock that work; this is NOT a
+    reintroduction of the general multi-tenant "workspace" concept the team deliberately removed
+    from the product on 2026-08-13 (commit 13e41c3, "remove workspace authorization model") - no
+    other part of the app (chat, tasks, calendar, admin) reads or writes this table."""
+
+    __tablename__ = "workspaces"
+    __table_args__ = (
+        CheckConstraint("type IN ('personal', 'organization')", name="ck_workspace_type"),
+        CheckConstraint("status IN ('active', 'suspended', 'deleting')", name="ck_workspace_status"),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
+    type: Mapped[str]
+    name: Mapped[str]
+    status: Mapped[str] = mapped_column(default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class WorkspaceMembership(Base):
+    __tablename__ = "workspace_memberships"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "user_id", name="uq_workspace_membership_user"),
+        CheckConstraint("role IN ('owner', 'admin', 'member', 'guest')", name="ck_workspace_membership_role"),
+        CheckConstraint(
+            "status IN ('active', 'invited', 'suspended', 'revoked')",
+            name="ck_workspace_membership_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    role: Mapped[str]
+    status: Mapped[str] = mapped_column(default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 
@@ -56,6 +98,15 @@ class Conversation(Base):
     type: Mapped[str]  # "direct" | "group"
     name: Mapped[str | None] = mapped_column(default=None)
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    # workspace_id/ai_policy_version/ai_enabled below are used ONLY by the agent-workspace
+    # foundation's scope_resolver (which group conversations feed a Delivery/Quality brief) - they
+    # are NOT the app's real AI-consent mechanism and nothing else reads them. The actual, shipped
+    # per-user AI consent for chat is the AIPermission table (conversation_id, user_id, granted)
+    # below; ai_enabled here defaults False and stays that way for every real conversation unless
+    # something explicitly links it via agent_workspace_service.link_agent_workspace_conversation.
+    workspace_id: Mapped[str | None] = mapped_column(ForeignKey("workspaces.id"), default=None, index=True)
+    ai_policy_version: Mapped[str] = mapped_column(default="v0")
+    ai_enabled: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
@@ -95,6 +146,74 @@ class AIPermission(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
     granted: Mapped[bool] = mapped_column(default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+class AgentWorkspace(Base):
+    """A business-scoped agent area (Product Delivery or Quality Assurance) inside one
+    organization Workspace - part of the not-yet-wired multi-agent foundation, see
+    docs/MULTI_AGENT_PROGRESS.md. agent_profile mirrors src.agents.contracts.AgentProfile."""
+
+    __tablename__ = "agent_workspaces"
+    __table_args__ = (
+        UniqueConstraint("organization_workspace_id", "key", name="uq_agent_workspace_organization_key"),
+        CheckConstraint(
+            "agent_profile IN ('product_delivery', 'quality_assurance')",
+            name="ck_agent_workspace_profile",
+        ),
+        CheckConstraint("status IN ('active', 'suspended', 'archived')", name="ck_agent_workspace_status"),
+        Index("ix_agent_workspaces_organization_status", "organization_workspace_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
+    organization_workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    key: Mapped[str]
+    name: Mapped[str]
+    agent_profile: Mapped[str]
+    status: Mapped[str] = mapped_column(default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class AgentWorkspaceMembership(Base):
+    __tablename__ = "agent_workspace_memberships"
+    __table_args__ = (
+        UniqueConstraint("agent_workspace_id", "user_id", name="uq_agent_workspace_membership_user"),
+        CheckConstraint(
+            "business_role IN ('member', 'lead', 'executive_viewer')",
+            name="ck_agent_workspace_membership_role",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'invited', 'suspended', 'revoked')",
+            name="ck_agent_workspace_membership_status",
+        ),
+        Index("ix_agent_workspace_memberships_user_status", "user_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
+    agent_workspace_id: Mapped[str] = mapped_column(ForeignKey("agent_workspaces.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    business_role: Mapped[str]
+    status: Mapped[str] = mapped_column(default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class AgentWorkspaceConversation(Base):
+    __tablename__ = "agent_workspace_conversations"
+    __table_args__ = (
+        UniqueConstraint("conversation_id", name="uq_agent_workspace_conversation"),
+        CheckConstraint(
+            "classification IN ('delivery', 'quality')",
+            name="ck_agent_workspace_conversation_classification",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
+    agent_workspace_id: Mapped[str] = mapped_column(ForeignKey("agent_workspaces.id"), index=True)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True)
+    classification: Mapped[str]
+    linked_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
 class Message(Base):

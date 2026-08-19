@@ -117,6 +117,23 @@ async def test_suggest_alternative_slots_respects_count(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_suggest_alternative_slots_treats_all_day_event_as_busy_the_whole_day(monkeypatch):
+    """An all-day event (only "date", no "dateTime") must block the whole day it spans, not just
+    be ignored - the earlier v1 behavior skipped it entirely in the free-slot scan even though
+    find_conflicts already reports it as a conflict, so the two disagreed on the same day."""
+    items = [
+        {"id": "evt-holiday", "summary": "Company holiday",
+         "start": {"date": "2026-08-01"}, "end": {"date": "2026-08-02"}},
+    ]
+    _mock_service(monkeypatch, _with_items(items))
+
+    slots = await calendar_service.suggest_alternative_slots(_USER_ID, "2026-08-01T11:00:00", "2026-08-01T12:00:00")
+
+    assert all(not s["start"].startswith("2026-08-01") for s in slots)
+    assert slots[0] == {"start": "2026-08-02T08:00:00", "end": "2026-08-02T09:00:00"}
+
+
+@pytest.mark.asyncio
 async def test_suggest_alternative_slots_returns_fewer_when_window_is_full(monkeypatch):
     """A single busy block spanning the entire search window leaves no free gap anywhere in it -
     best-effort means returning what was found (nothing here), never raising."""

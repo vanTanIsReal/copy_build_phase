@@ -9,6 +9,8 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from src.agents.graph import close_checkpointer, init_checkpointer
 from src.api.admin_routes import router as admin_router
+from src.api.agent_workspace_routes import my_router as agent_workspace_my_router
+from src.api.agent_workspace_routes import router as agent_workspace_router
 from src.api.assistant_routes import router as assistant_router
 from src.api.auth_routes import router as auth_router
 from src.api.calendar_routes import public_router as calendar_public_router
@@ -92,6 +94,11 @@ app.include_router(calendar_public_router, prefix="/api/v1", tags=["calendar"])
 app.include_router(reminder_router, prefix="/api/v1", tags=["reminders"])
 app.include_router(memory_router, prefix="/api/v1", tags=["memory"])
 app.include_router(assistant_router, prefix="/api/v1", tags=["assistant"])
+# Multi-agent workspace foundation (not yet wired to /chat) - see docs/MULTI_AGENT_PROGRESS.md.
+# Admin CRUD (create/list/member/conversation-link) nested under the org workspace; self-service
+# "my membership"/"mine=true" mounted at a separate top-level prefix (see agent_workspace_routes.py).
+app.include_router(agent_workspace_router, prefix="/api/v1/workspaces", tags=["agent-workspaces"])
+app.include_router(agent_workspace_my_router, prefix="/api/v1/agent-workspaces", tags=["agent-workspaces"])
 
 
 @app.get("/health")

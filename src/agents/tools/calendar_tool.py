@@ -136,12 +136,37 @@ async def update_calendar_event(
         end_iso: New end time as an ISO 8601 datetime string, if changing.
         description: New details, if changing.
     """
+    user_id = (state or {}).get("user_id")
     draft = {"event_id": event_id, "summary": summary, "start": start_iso, "end": end_iso, "description": description}
+
+    if start_iso or end_iso:
+        # Only one of the two bounds may be changing - fetch the current event to fill in
+        # whichever one wasn't passed, so the conflict check runs against the event's actual
+        # resulting time instead of a half-known range. Best-effort: if the current event is
+        # all-day (no "dateTime") and only one bound was given, there's no reliable timed value
+        # to merge in, so the check is skipped rather than guessed - same "known limitation, not
+        # a bug" spirit as suggest_alternative_slots' working-hours heuristic.
+        try:
+            current = await calendar_service.get_event(user_id, event_id)
+        except CalendarNotConnected:
+            return _NOT_CONNECTED_MSG
+        check_start = start_iso or current.get("start", {}).get("dateTime")
+        check_end = end_iso or current.get("end", {}).get("dateTime")
+        if check_start and check_end:
+            conflicts = [
+                c for c in await calendar_service.find_conflicts(user_id, check_start, check_end)
+                if c.get("id") != event_id
+            ]
+            if conflicts:
+                draft["conflicts"] = [calendar_service.to_out_dict(c) for c in conflicts]
+                draft["alternatives"] = await calendar_service.suggest_alternative_slots(
+                    user_id, check_start, check_end
+                )
+
     decision = interrupt({"type": "calendar_event_update", "draft": draft})
     if not decision or not decision.get("approved"):
         return "Calendar event was not updated (user declined)."
 
-    user_id = (state or {}).get("user_id")
     draft.update(decision.get("edits") or {})
     try:
         updated = await calendar_service.update_event(
