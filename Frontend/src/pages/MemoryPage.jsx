@@ -4,6 +4,18 @@ import MemoryModal from '../components/memory/MemoryModal'
 import { useAuth } from '../context/AuthContext'
 import { listMemories, deleteMemory } from '../api/memories'
 import { formatDateShort } from '../utils/datetime'
+import { Skeleton } from '../components/ui/skeleton'
+
+// Mimics one .memory-card's shape (icon + title + two detail lines) so the loading state doesn't
+// visually jump when real cards replace it.
+const MemoryCardSkeleton = () => (
+  <div className="memory-card">
+    <div className="memory-card-top"><Skeleton className="h-9 w-9 rounded-lg" /></div>
+    <Skeleton className="mt-4 h-4 w-3/4" />
+    <Skeleton className="mt-2 h-3 w-full" />
+    <Skeleton className="mt-1 h-3 w-2/3" />
+  </div>
+)
 
 const CATEGORY_STYLE = {
   Work: { icon: 'bi-briefcase', color: '#526ff5' },
@@ -46,7 +58,7 @@ export default function MemoryPage() {
   return <div className="page-container">
     <PageHeader eyebrow="Personal context" title="Memory" description="The helpful details Orbit remembers to personalize your experience." action={<button className="btn btn-primary" onClick={openAdd}><i className="bi bi-plus-lg me-2"/>Add memory</button>}/>
     <div className="memory-toolbar"><div className="memory-search"><i className="bi bi-search"/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search memories..."/></div><div className="memory-tabs">{categories.map(c=><button key={c} className={tab===c?'active':''} onClick={()=>setTab(c)}>{c} {c==='All'&&<span>{memories.length}</span>}</button>)}</div></div>
-    {loading ? <p className="text-muted small">Loading...</p> : <div className="memory-grid">{shown.map(m=>{
+    {loading ? <div className="memory-grid">{Array.from({ length: 6 }).map((_, i) => <MemoryCardSkeleton key={i} />)}</div> : <div className="memory-grid">{shown.map(m=>{
       const style = CATEGORY_STYLE[m.category] || DEFAULT_STYLE
       return <div className="memory-card" key={m.id}><div className="memory-card-top"><div className="memory-icon" style={{background:`${style.color}12`,color:style.color}}><i className={`bi ${style.icon}`}/></div><span>{m.category}</span><div className="dropdown ms-auto"><button className="icon-btn" data-bs-toggle="dropdown"><i className="bi bi-three-dots"/></button><ul className="dropdown-menu dropdown-menu-end"><li><button className="dropdown-item" onClick={()=>openEdit(m)}><i className="bi bi-pencil me-2"/>Edit</button></li><li><button className="dropdown-item text-danger" onClick={()=>remove(m)}><i className="bi bi-trash me-2"/>Delete</button></li></ul></div></div><h3>{m.title}</h3><p>{m.detail}</p><div className="memory-footer"><span><i className="bi bi-clock"/> Remembered {formatDateShort(m.created_at)}</span><i className="bi bi-stars"/></div></div>
     })}

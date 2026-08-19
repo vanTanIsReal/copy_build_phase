@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext'
 import { listReminders, cancelReminder } from '../api/reminders'
 import { getColor } from '../utils/avatar'
 import { formatDateTime } from '../utils/datetime'
+import ListRowSkeleton from '../components/common/ListRowSkeleton'
 
 const statusLabel = { scheduled: 'Scheduled', fired: 'Fired', cancelled: 'Cancelled' }
 const statusClass = { scheduled: 'primary', fired: 'success', cancelled: 'secondary' }
@@ -35,7 +36,7 @@ export default function ReminderPage() {
   return <div className="page-container">
     <PageHeader eyebrow="Stay focused" title="Reminders" description="Gentle nudges for everything that matters." action={<button className="btn btn-primary" onClick={() => setNewOpen(true)}><i className="bi bi-plus-lg me-2"/>New reminder</button>}/>
     <div className="reminder-layout"><section className="content-card reminder-list"><div className="card-toolbar"><div><h3>Upcoming reminders</h3><span>{reminders.filter(r => r.status === 'scheduled').length} active reminders</span></div></div>
-      {loading ? <p className="text-muted small p-3 mb-0">Loading...</p> : reminders.map(r => (
+      {loading ? <ListRowSkeleton /> : reminders.map(r => (
         <div className={`reminder-row ${r.status !== 'scheduled' ? 'disabled' : ''}`} key={r.id}>
           <div className="reminder-icon" style={{ background: `${getColor(r.id)}12`, color: getColor(r.id) }}><i className="bi bi-alarm"/></div>
           <div className="reminder-info"><h4>{r.title}</h4><strong>{formatDateTime(r.due_at)}</strong><div><span><i className="bi bi-bell"/>Reminds at {formatDateTime(r.fire_at)}</span>{r.message && <span><i className="bi bi-chat-left-text"/>{r.message}</span>}</div></div>

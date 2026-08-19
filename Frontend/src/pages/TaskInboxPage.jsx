@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { listTasks, updateTaskStatus } from '../api/tasks'
 import { groupTasks } from '../utils/taskGrouping'
+import ListRowSkeleton from '../components/common/ListRowSkeleton'
 
 const sourceLabel = { manual: 'Manual', proactive: 'AI suggestion' }
 const priorityClass = { High: 'danger', Medium: 'warning', Low: 'info' }
@@ -88,7 +89,7 @@ export default function TaskInboxPage() {
         <StatCard label="High priority" value={highPriority.length} icon="bi-flag" color={highPriority.length ? 'warning' : 'success'} />
       </div>
 
-      {loading && <p className="text-muted small p-3 mb-0">Loading...</p>}
+      {loading && <ListRowSkeleton />}
 
       {!loading && totalInboxCount === 0 && (
         <div className="content-card p-4 text-center text-muted">

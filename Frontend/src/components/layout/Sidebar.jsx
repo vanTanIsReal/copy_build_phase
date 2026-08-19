@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { getUsageStatus } from '../../api/usage'
+import { Skeleton } from '../ui/skeleton'
 
 const nav = [
   ['assistant', 'bi-stars', 'AI Assistant'], ['chat', 'bi-chat-dots', 'Chats'], ['tasks', 'bi-check2-square', 'Tasks'],
@@ -50,7 +51,7 @@ export default function Sidebar({ open, onClose }) {
             <div className="progress"><div className="progress-bar" style={{ width: `${usedPct}%` }} /></div>
             <small>{usage ? `${usage.tokens_used_today.toLocaleString()} / ${usage.daily_token_budget ? usage.daily_token_budget.toLocaleString() : '∞'} tokens · reset mỗi ngày` : 'Không tải được số liệu'}</small>
           </div>
-          <NavLink to="/profile" className="user-mini"><span className="avatar-photo">{getInitials(user?.display_name)}</span><span><strong>{user?.display_name || 'Loading...'}</strong><small>{user?.email}</small></span><i className="bi bi-three-dots ms-auto" /></NavLink>
+          <NavLink to="/profile" className="user-mini"><span className="avatar-photo">{getInitials(user?.display_name)}</span><span>{user?.display_name ? <><strong>{user.display_name}</strong><small>{user?.email}</small></> : <Skeleton className="h-3 w-20" />}</span><i className="bi bi-three-dots ms-auto" /></NavLink>
         </div>
       </aside>
     </>

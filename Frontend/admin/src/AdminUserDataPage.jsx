@@ -12,6 +12,7 @@ import {
   listReminders, deleteReminder,
   listMemories, deleteMemory,
 } from '../../src/api/admin'
+import TableRowsSkeleton from '../../src/components/common/TableRowsSkeleton'
 
 const TABS = [
   { key: 'tasks', label: 'Tasks' },
@@ -70,7 +71,7 @@ export default function AdminUserDataPage() {
             </select>
           </div>
         </div>
-        {loading ? <p className="text-muted small p-3 mb-0">Loading...</p> : (
+        {loading ? <TableRowsSkeleton /> : (
           <>
             {tab === 'tasks' && <AdminTaskTable tasks={items} onDelete={setPendingDelete} />}
             {tab === 'reminders' && <AdminReminderTable reminders={items} onDelete={setPendingDelete} />}
