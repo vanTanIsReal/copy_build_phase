@@ -268,6 +268,13 @@ class Task(Base):
     severity: Mapped[str | None] = mapped_column(default=None)  # "low" | "medium" | "high" | "critical"
     quality_status: Mapped[str | None] = mapped_column(default=None)
     # "open" | "testing" | "passed" | "failed" | "blocked"
+    # Free-text release/milestone tag (MULTI_AGENT_IMPLEMENTATION_PLAN.md Ngày 4 "cross-workspace
+    # scenario") - a Delivery task and a Quality work item that share the same release_target are
+    # the cross-workspace dependency executive_tool.get_cross_workspace_dependencies resolves.
+    # Deliberately a plain string, not a foreign key to a Milestone table - there is no Milestone
+    # model (see delivery_tool.py's own data-gap note); this is the same "no parallel tracking
+    # system" reuse decision already made for QA metadata above, applied to release tagging too.
+    release_target: Mapped[str | None] = mapped_column(default=None, index=True)
 
     owner: Mapped["User"] = relationship()
     conversation: Mapped["Conversation | None"] = relationship()

@@ -76,6 +76,7 @@ def _work_item_dict(item) -> dict:
         "quality_status": item.quality_status,
         "owner_id": item.owner_id,
         "due_at": item.due_at.isoformat() if item.due_at else None,
+        "release_target": item.release_target,
     }
 
 
@@ -157,6 +158,11 @@ async def build_quality_brief(db: AsyncSession, context: AgentContext) -> ToolRe
         item for item in items if item.work_item_type == "bug" and item.severity == "critical"
     ]
     blocked_tests = [item for item in items if item.work_item_type == "test_case" and item.quality_status == "blocked"]
+    # Every work item tagged with a release_target (MULTI_AGENT_IMPLEMENTATION_PLAN.md Ngày 4
+    # "cross-workspace scenario") - self-describing, matched against Delivery's own release_target
+    # tags by executive_tool.get_cross_workspace_dependencies. Does not reach into Delivery's data
+    # itself (G2 - stays within this workspace's own scope).
+    release_linked = [item for item in items if item.release_target]
     test_progress = {
         "total": len([i for i in items if i.work_item_type == "test_case"]),
         "passed": len([i for i in items if i.work_item_type == "test_case" and i.quality_status == "passed"]),
@@ -177,7 +183,9 @@ async def build_quality_brief(db: AsyncSession, context: AgentContext) -> ToolRe
         blocked_tests=[_work_item_dict(item) for item in blocked_tests],
     )
 
-    contributing_ids = [item.id for item in critical_defects] + [item.id for item in blocked_tests]
+    contributing_ids = list(dict.fromkeys(
+        [item.id for item in critical_defects] + [item.id for item in blocked_tests] + [item.id for item in release_linked]
+    ))
     sources = tuple(_source(item_id, "quality_fact", workspace_id) for item_id in contributing_ids)
 
     now = datetime.now(UTC)
@@ -194,6 +202,7 @@ async def build_quality_brief(db: AsyncSession, context: AgentContext) -> ToolRe
         expires_at=now + timedelta(hours=24),
         headline=payload.headline,
         facts=tuple(payload.critical_defects) + tuple(payload.blocked_tests),
+        dependencies=tuple(_work_item_dict(item) for item in release_linked),
         sources=sources,
         release_readiness=ReleaseReadiness(readiness),
     )

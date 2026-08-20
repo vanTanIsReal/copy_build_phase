@@ -86,6 +86,7 @@ def _task_dict(task) -> dict:
         "owner_id": task.owner_id,
         "due_at": task.due_at.isoformat() if task.due_at else None,
         "needs_clarification": task.needs_clarification,
+        "release_target": task.release_target,
     }
 
 
@@ -155,8 +156,14 @@ async def build_delivery_brief(db: AsyncSession, context: AgentContext) -> ToolR
     """Brief producer: assemble a DeliveryBriefPayload from real tasks and wrap it in a validated
     WorkspaceBrief. ``release_readiness`` is deliberately left unset - WorkspaceBrief's own
     validator raises if a DELIVERY brief carries one (that field belongs only to a Quality brief).
-    Dependencies are not yet modeled (see module docstring) and are reported as a data gap, not
-    fabricated.
+
+    ``dependencies`` carries every task that has ``release_target`` set (MULTI_AGENT_IMPLEMENTATION_
+    PLAN.md Ngày 4 "cross-workspace scenario") - this is the self-describing tag a Quality brief with
+    a matching release_target links back to. Executive cross-references the two briefs'
+    release_targets itself (see executive_tool.get_cross_workspace_dependencies); this tool does not
+    reach into another workspace's data to do that matching, staying within its own scope (G2).
+    Full milestone tracking (due dates, status beyond a task's own) is still not modeled - see
+    get_delivery_milestones's own data gap.
     """
     workspace_id = _workspace_id(context)
     await enforce_agent_workspace_access(db, context=context, agent_workspace_id=workspace_id)
@@ -164,10 +171,8 @@ async def build_delivery_brief(db: AsyncSession, context: AgentContext) -> ToolR
     tasks = await delivery_workspace_service.list_tasks(db, workspace_id)
     blocked = [task for task in tasks if task.status == "blocked"]
     needs_clarification = [task for task in tasks if task.needs_clarification]
-    data_gaps: list[str] = [
-        "Milestone tracking is not yet modeled beyond Task.",
-        "Cross-workspace dependency tracking is not yet modeled.",
-    ]
+    release_linked = [task for task in tasks if task.release_target]
+    data_gaps: list[str] = ["Milestone tracking is not yet modeled beyond Task."]
 
     if blocked:
         headline = f"Delivery: {len(blocked)} task đang blocked, cần xử lý trước khi tiếp tục."
@@ -180,11 +185,11 @@ async def build_delivery_brief(db: AsyncSession, context: AgentContext) -> ToolR
         headline=headline,
         milestones=[],
         blocked_items=[_task_dict(task) for task in blocked],
-        dependencies=[],
+        dependencies=[_task_dict(task) for task in release_linked],
         decisions_needed=[_task_dict(task) for task in needs_clarification],
     )
 
-    contributing_ids = [task.id for task in blocked] + [task.id for task in needs_clarification]
+    contributing_ids = list(dict.fromkeys([task.id for task in blocked] + [task.id for task in needs_clarification] + [task.id for task in release_linked]))
     sources = tuple(_source(task_id, "delivery_fact", workspace_id) for task_id in contributing_ids)
 
     now = datetime.now(UTC)
@@ -201,7 +206,7 @@ async def build_delivery_brief(db: AsyncSession, context: AgentContext) -> ToolR
         expires_at=now + timedelta(hours=24),
         headline=payload.headline,
         facts=tuple(payload.blocked_items) + tuple(payload.decisions_needed),
-        dependencies=(),
+        dependencies=tuple(payload.dependencies),
         decisions_needed=tuple(payload.decisions_needed),
         data_gaps=tuple(data_gaps),
         sources=sources,

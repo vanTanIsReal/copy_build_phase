@@ -48,6 +48,12 @@ _TOOL_NAMES: tuple[str, ...] = (
     "propose_executive_meeting",
 )
 
+# AgentWorkspace.agent_profile ("product_delivery"/"quality_assurance") -> the BriefType value
+# ("delivery"/"quality") workspace_brief_service.get_latest_brief expects. Explicit mapping instead
+# of the .replace()-chain this used to be (tech debt flagged in an earlier review) - fails loudly on
+# an unmapped profile instead of silently producing a lookup that matches nothing.
+_BRIEF_TYPE_BY_PROFILE = {"product_delivery": "delivery", "quality_assurance": "quality"}
+
 for _name in _TOOL_NAMES:
     assert_tool_allowed(AgentProfile.EXECUTIVE, _name)
 
@@ -91,9 +97,11 @@ async def get_workspace_briefs(db: AsyncSession, context: AgentContext) -> ToolR
     data_gaps: list[str] = []
     sources: list[SourceReference] = []
     for workspace in workspaces:
-        brief = await workspace_brief_service.get_latest_brief(db, workspace.id, workspace.agent_profile.replace(
-            "product_delivery", "delivery"
-        ).replace("quality_assurance", "quality"))
+        brief_type = _BRIEF_TYPE_BY_PROFILE.get(workspace.agent_profile)
+        if brief_type is None:
+            data_gaps.append(f"Workspace '{workspace.name}' has an unrecognized agent_profile '{workspace.agent_profile}'.")
+            continue
+        brief = await workspace_brief_service.get_latest_brief(db, workspace.id, brief_type)
         if brief is None:
             data_gaps.append(f"No brief has been published yet for workspace '{workspace.name}'.")
             continue
@@ -111,13 +119,63 @@ async def get_workspace_briefs(db: AsyncSession, context: AgentContext) -> ToolR
 
 
 async def get_cross_workspace_dependencies(db: AsyncSession, context: AgentContext) -> ToolResult:
-    """Not yet modeled (see delivery_tool.py's own data-gap note for the same reason) - reported
-    honestly instead of inferred from brief text."""
-    await _reverify(db, context)
+    """Real cross-workspace dependencies, matched purely from already-fetched brief content -
+    never by querying another workspace's Task rows directly (this module's own docstring: "Executive
+    NEVER reads raw chat/task rows"). Both build_delivery_brief and build_quality_brief tag their own
+    release_target-linked items into WorkspaceBrief.dependencies (MULTI_AGENT_IMPLEMENTATION_PLAN.md
+    Ngày 4 "cross-workspace scenario"); a Delivery item and a Quality item sharing the same
+    release_target are the dependency pair returned here. Work not tagged with a release_target on
+    either side is invisible to this matching - an honest data gap, not a false negative."""
+    briefs_result = await get_workspace_briefs(db, context)
+    briefs = briefs_result.payload["briefs"]
+
+    delivery_items = [
+        (brief, item)
+        for brief in briefs
+        if brief["brief_type"] == "delivery"
+        for item in brief.get("dependencies", [])
+        if item.get("release_target")
+    ]
+    quality_items = [
+        (brief, item)
+        for brief in briefs
+        if brief["brief_type"] == "quality"
+        for item in brief.get("dependencies", [])
+        if item.get("release_target")
+    ]
+
+    dependencies: list[dict] = []
+    for delivery_brief, delivery_item in delivery_items:
+        for quality_brief, quality_item in quality_items:
+            if delivery_item["release_target"] != quality_item["release_target"]:
+                continue
+            dependencies.append(
+                {
+                    "release_target": delivery_item["release_target"],
+                    "delivery_agent_workspace_id": delivery_brief["agent_workspace_id"],
+                    "delivery_task_id": delivery_item["id"],
+                    "delivery_task_title": delivery_item["title"],
+                    "delivery_task_status": delivery_item["status"],
+                    "quality_agent_workspace_id": quality_brief["agent_workspace_id"],
+                    "quality_item_id": quality_item["id"],
+                    "quality_item_title": quality_item["title"],
+                    "quality_item_severity": quality_item.get("severity"),
+                    "quality_item_status": quality_item.get("quality_status"),
+                    "quality_release_readiness": quality_brief.get("release_readiness"),
+                }
+            )
+
+    data_gaps = list(briefs_result.data_gaps)
+    if not dependencies:
+        data_gaps.append(
+            "No cross-workspace dependency found - no Delivery task and Quality work item currently share a release_target."
+        )
+
     return ToolResult(
-        status=ToolResultStatus.PARTIAL,
-        payload={"dependencies": []},
-        data_gaps=("Cross-workspace dependency tracking is not yet modeled as its own record.",),
+        status=ToolResultStatus.PARTIAL if data_gaps else ToolResultStatus.SUCCESS,
+        payload={"dependencies": dependencies},
+        data_gaps=tuple(data_gaps),
+        sources=briefs_result.sources,
     )
 
 
@@ -134,13 +192,49 @@ async def build_executive_brief(db: AsyncSession, context: AgentContext) -> Tool
         workspace_brief_ids.append(brief["brief_id"])
         facts.extend(brief.get("facts", []))
         decisions_needed.extend(brief.get("decisions_needed", []))
-        if brief["brief_type"] == "quality" and brief.get("release_readiness") in ("NOT_READY", "AT_RISK"):
-            risks.append(
-                {
-                    "text": f"Release is {brief['release_readiness']} per the latest Quality brief.",
-                    "severity": "high" if brief["release_readiness"] == "NOT_READY" else "medium",
-                }
-            )
+
+    # Cross-workspace dependencies first (MULTI_AGENT_IMPLEMENTATION_PLAN.md Ngày 4) - a
+    # release_target-matched pair produces a specific, named risk ("QA báo NOT_READY do critical
+    # bug X, ảnh hưởng trực tiếp đến Delivery Y") instead of the generic per-brief fallback below.
+    deps_result = await get_cross_workspace_dependencies(db, context)
+    cross_workspace_dependencies = deps_result.payload["dependencies"]
+    linked_quality_item_ids: set[str] = set()
+    for dep in cross_workspace_dependencies:
+        if dep["quality_release_readiness"] not in ("NOT_READY", "AT_RISK"):
+            continue
+        linked_quality_item_ids.add(dep["quality_item_id"])
+        risks.append(
+            {
+                "text": (
+                    f"QA báo {dep['quality_release_readiness']} do "
+                    f"{'critical bug' if dep['quality_item_severity'] == 'critical' else 'work item'} "
+                    f"\"{dep['quality_item_title']}\", ảnh hưởng trực tiếp đến Delivery "
+                    f"\"{dep['delivery_task_title']}\" (release {dep['release_target']})."
+                ),
+                "severity": "high" if dep["quality_release_readiness"] == "NOT_READY" else "medium",
+                "release_target": dep["release_target"],
+                "delivery_task_id": dep["delivery_task_id"],
+                "quality_item_id": dep["quality_item_id"],
+            }
+        )
+
+    # Generic per-brief fallback risk - only for a NOT_READY/AT_RISK quality brief that had no
+    # cross-workspace match above (avoids double-reporting the same brief as two separate risks).
+    for brief in briefs:
+        if brief["brief_type"] != "quality" or brief.get("release_readiness") not in ("NOT_READY", "AT_RISK"):
+            continue
+        brief_defect_ids = {item["id"] for item in brief.get("facts", [])}
+        if brief_defect_ids & linked_quality_item_ids:
+            continue
+        risks.append(
+            {
+                "text": f"Release is {brief['release_readiness']} per the latest Quality brief.",
+                "severity": "high" if brief["release_readiness"] == "NOT_READY" else "medium",
+            }
+        )
+
+    if deps_result.data_gaps:
+        data_gaps.extend(gap for gap in deps_result.data_gaps if gap not in data_gaps)
 
     if not workspace_brief_ids and not data_gaps:
         # ExecutiveBrief's own validator requires this - defensive, should be unreachable since
@@ -162,6 +256,7 @@ async def build_executive_brief(db: AsyncSession, context: AgentContext) -> Tool
         headline=headline,
         facts=tuple(facts),
         risks=tuple(risks),
+        cross_workspace_dependencies=tuple(cross_workspace_dependencies),
         decisions_needed=tuple(decisions_needed),
         data_gaps=tuple(data_gaps),
     )

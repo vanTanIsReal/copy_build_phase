@@ -117,6 +117,95 @@ async def test_executive_brief_aggregates_real_published_delivery_and_quality_br
 
 
 @pytest.mark.asyncio
+async def test_get_cross_workspace_dependencies_matches_by_shared_release_target(auth_headers, other_auth_headers):
+    alice = await _user("alice@example.com")
+    bob = await _user("bob@example.com")
+    org_id, delivery_id, quality_id = await _make_org_with_delivery_and_quality(alice.id, bob.id)
+
+    async with db_session.async_session_maker() as db:
+        db.add(Task(owner_id=alice.id, title="Ship login page", agent_workspace_id=delivery_id, status="in_progress", release_target="R1"))
+        db.add(
+            Task(
+                owner_id=alice.id,
+                title="Crash on save",
+                agent_workspace_id=quality_id,
+                work_item_type="bug",
+                severity="critical",
+                quality_status="open",
+                release_target="R1",
+            )
+        )
+        # A second, unrelated Quality bug with no release_target - must not match anything.
+        db.add(Task(owner_id=alice.id, title="Unrelated bug", agent_workspace_id=quality_id, work_item_type="bug", severity="low", quality_status="open"))
+        await db.commit()
+
+    delivery_context = await _workspace_context(alice, org_id, delivery_id, AgentProfile.PRODUCT_DELIVERY, AgentIntent.DELIVERY_BRIEF)
+    quality_context = await _workspace_context(alice, org_id, quality_id, AgentProfile.QUALITY_ASSURANCE, AgentIntent.QUALITY_READINESS)
+    async with db_session.async_session_maker() as db:
+        await delivery_tool.build_delivery_brief(db, delivery_context)
+    async with db_session.async_session_maker() as db:
+        await quality_tool.build_quality_brief(db, quality_context)
+
+    executive_context = await _executive_context(bob, org_id)
+    async with db_session.async_session_maker() as db:
+        deps_result = await executive_tool.get_cross_workspace_dependencies(db, executive_context)
+
+    deps = deps_result.payload["dependencies"]
+    assert len(deps) == 1
+    assert deps[0]["release_target"] == "R1"
+    assert deps[0]["delivery_task_title"] == "Ship login page"
+    assert deps[0]["quality_item_title"] == "Crash on save"
+    assert deps[0]["quality_release_readiness"] == "NOT_READY"
+
+
+@pytest.mark.asyncio
+async def test_executive_brief_names_the_specific_delivery_item_at_risk(auth_headers, other_auth_headers):
+    """The design brief's own example: "QA báo NOT_READY do critical bug, ảnh hưởng trực tiếp đến
+    Delivery Milestone X" - not just a generic "release is NOT_READY" risk."""
+    alice = await _user("alice@example.com")
+    bob = await _user("bob@example.com")
+    org_id, delivery_id, quality_id = await _make_org_with_delivery_and_quality(alice.id, bob.id)
+
+    async with db_session.async_session_maker() as db:
+        db.add(Task(owner_id=alice.id, title="Ship login page", agent_workspace_id=delivery_id, status="in_progress", release_target="R1"))
+        db.add(
+            Task(
+                owner_id=alice.id,
+                title="Crash on save",
+                agent_workspace_id=quality_id,
+                work_item_type="bug",
+                severity="critical",
+                quality_status="open",
+                release_target="R1",
+            )
+        )
+        await db.commit()
+
+    delivery_context = await _workspace_context(alice, org_id, delivery_id, AgentProfile.PRODUCT_DELIVERY, AgentIntent.DELIVERY_BRIEF)
+    quality_context = await _workspace_context(alice, org_id, quality_id, AgentProfile.QUALITY_ASSURANCE, AgentIntent.QUALITY_READINESS)
+    async with db_session.async_session_maker() as db:
+        await delivery_tool.build_delivery_brief(db, delivery_context)
+    async with db_session.async_session_maker() as db:
+        await quality_tool.build_quality_brief(db, quality_context)
+
+    executive_context = await _executive_context(bob, org_id)
+    async with db_session.async_session_maker() as db:
+        result = await executive_tool.build_executive_brief(db, executive_context)
+
+    brief = result.payload["executive_brief"]
+    named_risks = [r for r in brief["risks"] if r.get("delivery_task_id")]
+    assert len(named_risks) == 1
+    assert "Crash on save" in named_risks[0]["text"]
+    assert "Ship login page" in named_risks[0]["text"]
+    assert "NOT_READY" in named_risks[0]["text"]
+    assert named_risks[0]["severity"] == "high"
+    # Only the specific, named risk - the generic per-brief fallback must not also fire for the
+    # same quality brief (would double-report the same NOT_READY release).
+    assert len(brief["risks"]) == 1
+    assert len(brief["cross_workspace_dependencies"]) == 1
+
+
+@pytest.mark.asyncio
 async def test_non_executive_viewer_is_denied_aggregate_scope(auth_headers, other_auth_headers):
     """alice is only a lead (member/lead role), never granted executive_viewer anywhere - the
     AGGREGATE route must deny her, not silently show her own workspaces' briefs."""
