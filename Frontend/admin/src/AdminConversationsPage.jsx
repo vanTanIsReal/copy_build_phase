@@ -6,7 +6,6 @@ import ConfirmDialog from '../../src/components/common/ConfirmDialog'
 import { useAuth } from '../../src/context/AuthContext'
 import { useToast } from '../../src/context/ToastContext'
 import { listConversations, deleteConversation } from '../../src/api/admin'
-import TableRowsSkeleton from '../../src/components/common/TableRowsSkeleton'
 
 export default function AdminConversationsPage() {
   const { token } = useAuth()
@@ -39,7 +38,7 @@ export default function AdminConversationsPage() {
       <PageHeader eyebrow="Admin" title="Conversations" description="Review and moderate 1-1 and group conversations." />
       <section className="content-card">
         <div className="card-toolbar"><div><h3>All conversations</h3><span>{conversations.length} conversations</span></div></div>
-        {loading ? <TableRowsSkeleton /> : (
+        {loading ? <p className="text-muted small p-3 mb-0">Loading...</p> : (
           <ConversationTable conversations={conversations} onView={setViewing} onDelete={setPendingDelete} />
         )}
       </section>

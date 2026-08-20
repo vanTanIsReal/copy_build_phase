@@ -19,17 +19,6 @@ export default defineConfig({
       // matter how correctly it's listed in this app's package.json. Alias forces it explicitly.
       'react-markdown': path.resolve(rootDir, 'node_modules/react-markdown'),
       'remark-gfm': path.resolve(rootDir, 'node_modules/remark-gfm'),
-      // Same reasoning, for the Tailwind/Shadcn UI primitives under ../src/components/ui and
-      // ../src/components/command - all shared code, all otherwise unresolvable from here.
-      'lucide-react': path.resolve(rootDir, 'node_modules/lucide-react'),
-      cmdk: path.resolve(rootDir, 'node_modules/cmdk'),
-      '@radix-ui/react-dialog': path.resolve(rootDir, 'node_modules/@radix-ui/react-dialog'),
-      '@radix-ui/react-slot': path.resolve(rootDir, 'node_modules/@radix-ui/react-slot'),
-      '@radix-ui/react-tabs': path.resolve(rootDir, 'node_modules/@radix-ui/react-tabs'),
-      vaul: path.resolve(rootDir, 'node_modules/vaul'),
-      'class-variance-authority': path.resolve(rootDir, 'node_modules/class-variance-authority'),
-      clsx: path.resolve(rootDir, 'node_modules/clsx'),
-      'tailwind-merge': path.resolve(rootDir, 'node_modules/tailwind-merge'),
     },
   },
   server: {

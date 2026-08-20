@@ -4,7 +4,6 @@ import UserTable from './UserTable'
 import { useAuth } from '../../src/context/AuthContext'
 import { useToast } from '../../src/context/ToastContext'
 import { listUsers, updateUserRole, updateUserStatus } from '../../src/api/admin'
-import TableRowsSkeleton from '../../src/components/common/TableRowsSkeleton'
 
 export default function AdminUsersPage() {
   const { token, user } = useAuth()
@@ -57,7 +56,7 @@ export default function AdminUsersPage() {
             <div className="mini-search"><i className="bi bi-search" /><input placeholder="Search by name or email" value={search} onChange={e => setSearch(e.target.value)} /></div>
           </div>
         </div>
-        {loading ? <TableRowsSkeleton cols={5} /> : (
+        {loading ? <p className="text-muted small p-3 mb-0">Loading...</p> : (
           <UserTable users={users} currentUserId={user?.id} pendingId={pendingId} onToggleRole={toggleRole} onToggleStatus={toggleStatus} />
         )}
       </section>

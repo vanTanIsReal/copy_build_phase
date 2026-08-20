@@ -6,13 +6,6 @@ import 'bootstrap-icons/font/bootstrap-icons.css'
 import 'bootstrap/dist/js/bootstrap.bundle.min.js'
 import '../../src/styles.css'
 import '../../src/assistant.css'
-// Tailwind loaded LAST, with Preflight off (tailwind.config.js): Tailwind v3 compiles
-// `@tailwind utilities` to plain (non-@layer) CSS, so within one page's cascade the file loaded
-// last wins same-specificity ties - a Tailwind utility className (e.g. bg-background/80) on an
-// element that also carries a legacy styles.css class (e.g. .app-sidebar{background:#fff}) needs
-// to load after styles.css to actually apply. Coexists during the incremental migration instead
-// of a single flag-day rewrite of the ~40-page styles.css light theme.
-import '../../src/tailwind.css'
 import UserRouter from './UserRouter'
 import { AuthProvider } from '../../src/context/AuthContext'
 import { ToastProvider } from '../../src/context/ToastContext'
