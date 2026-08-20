@@ -186,6 +186,10 @@ class AgentWorkspaceMembership(Base):
             "status IN ('active', 'invited', 'suspended', 'revoked')",
             name="ck_agent_workspace_membership_status",
         ),
+        CheckConstraint(
+            "consent_status IN ('active', 'revoked')",
+            name="ck_agent_workspace_membership_consent_status",
+        ),
         Index("ix_agent_workspace_memberships_user_status", "user_id", "status"),
     )
 
@@ -194,6 +198,12 @@ class AgentWorkspaceMembership(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     business_role: Mapped[str]
     status: Mapped[str] = mapped_column(default="active")
+    # The member's own opt-in for a specialist agent to operate in THIS Agent Workspace on their
+    # behalf - independent of `status` above (membership itself). A member can revoke this without
+    # leaving the workspace, same idea as the existing per-conversation `AIPermission.granted` for
+    # the Personal Agent. Checked by resolve_agent_scope in addition to status=="active"; revoking
+    # it takes effect on the very next request (no cache - see scope_resolver.py).
+    consent_status: Mapped[str] = mapped_column(default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

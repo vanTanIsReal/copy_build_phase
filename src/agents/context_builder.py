@@ -106,9 +106,11 @@ def _default_business_role():
 
 
 class AgentRunRecorder:
-    """G6 (audit/monitoring) - records one AgentRun row per turn. A thin context manager so every
-    call site (router today, /chat tomorrow) gets consistent latency timing and a guaranteed record
-    even on an exception (status="error"), without hand-rolling try/finally at each call site."""
+    """G6 (audit/monitoring) - records one AgentRun row per turn (used by
+    src.api.routes._run_specialist_chat, the real WORKSPACE/AGGREGATE /chat path). A thin context
+    manager so every call site gets consistent latency timing and a guaranteed record even on an
+    exception (status="error"), without hand-rolling try/finally at each call site. Also triggers
+    agent_audit_service.maybe_alert_denial_spike on a denied run - see that module for why."""
 
     def __init__(self, db: AsyncSession, context: AgentContext):
         self._db = db
@@ -149,4 +151,12 @@ class AgentRunRecorder:
             )
         )
         await self._db.commit()
+        if status == "denied":
+            from src.services import agent_audit_service
+
+            await agent_audit_service.maybe_alert_denial_spike(
+                self._db,
+                actor_user_id=context.actor.user_id,
+                organization_workspace_id=context.actor.organization_workspace_id,
+            )
         return False  # never swallow the caller's exception

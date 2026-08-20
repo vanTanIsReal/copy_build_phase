@@ -330,3 +330,29 @@ async def list_my_agent_workspaces_out(db: AsyncSession, *, user_id: str) -> lis
     scope_resolver.list_my_agent_workspaces - kept here too so routes only ever import from the
     service layer, not from src.agents.policies directly."""
     return list(await list_my_agent_workspaces(db, user_id=user_id))
+
+
+async def set_my_agent_workspace_consent(
+    db: AsyncSession, *, user_id: str, agent_workspace_id: str, granted: bool
+) -> AgentWorkspaceMembership:
+    """Self-service opt-in/out for a specialist agent acting on this member's behalf in this Agent
+    Workspace (Sprint 3 consent-gap fix - AgentWorkspaceMembership.consent_status, independent of
+    membership.status). Same idea as the existing per-conversation AIPermission.granted toggle for
+    the Personal Agent (AIPanel's Grant/Revoke button), applied to Agent Workspace membership.
+    Takes effect on the caller's very next request - resolve_agent_scope reads this column live,
+    there is no cache to invalidate."""
+    membership = (
+        await db.execute(
+            select(AgentWorkspaceMembership).where(
+                AgentWorkspaceMembership.agent_workspace_id == agent_workspace_id,
+                AgentWorkspaceMembership.user_id == user_id,
+                AgentWorkspaceMembership.status == "active",
+            )
+        )
+    ).scalar_one_or_none()
+    if membership is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not an active member of this agent workspace")
+    membership.consent_status = "active" if granted else "revoked"
+    membership.updated_at = datetime.now(UTC)
+    await db.flush()
+    return membership

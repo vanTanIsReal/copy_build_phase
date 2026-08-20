@@ -57,7 +57,11 @@ _PROFILE_REGISTRY = {
         profile=AgentProfile.PRODUCT_DELIVERY,
         prompt_version="product-delivery-v1",
         allowed_scopes=(RequestedScope.WORKSPACE,),
-        allowed_intents=(AgentIntent.DELIVERY_BRIEF,),
+        allowed_intents=(
+            AgentIntent.DELIVERY_BRIEF,
+            AgentIntent.DELIVERY_PROPOSE_REMINDER,
+            AgentIntent.DELIVERY_PROPOSE_MEETING,
+        ),
         allowed_tools=(
             "get_delivery_tasks",
             "search_delivery_messages",
@@ -72,7 +76,12 @@ _PROFILE_REGISTRY = {
         profile=AgentProfile.QUALITY_ASSURANCE,
         prompt_version="quality-assurance-v1",
         allowed_scopes=(RequestedScope.WORKSPACE,),
-        allowed_intents=(AgentIntent.QUALITY_READINESS, AgentIntent.QUALITY_BRIEF),
+        allowed_intents=(
+            AgentIntent.QUALITY_READINESS,
+            AgentIntent.QUALITY_BRIEF,
+            AgentIntent.QUALITY_PROPOSE_REMINDER,
+            AgentIntent.QUALITY_PROPOSE_MEETING,
+        ),
         allowed_tools=(
             "get_quality_work_items",
             "search_quality_messages",
@@ -87,7 +96,7 @@ _PROFILE_REGISTRY = {
         profile=AgentProfile.EXECUTIVE,
         prompt_version="executive-v1",
         allowed_scopes=(RequestedScope.AGGREGATE,),
-        allowed_intents=(AgentIntent.EXECUTIVE_BRIEF,),
+        allowed_intents=(AgentIntent.EXECUTIVE_BRIEF, AgentIntent.EXECUTIVE_PROPOSE_MEETING),
         allowed_tools=(
             "get_workspace_briefs",
             "get_cross_workspace_dependencies",

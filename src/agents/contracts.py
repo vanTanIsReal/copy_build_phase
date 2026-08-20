@@ -40,6 +40,15 @@ class AgentIntent(StrEnum):
     QUALITY_READINESS = "quality_readiness"
     QUALITY_BRIEF = "quality_brief"
     EXECUTIVE_BRIEF = "executive_brief"
+    # Additive (Sprint 3 HITL hookup) - propose_*_reminder/propose_*_meeting were already in each
+    # profile's tool allowlist (registry.py) since Sprint 1, but had no intent of their own and so
+    # were unreachable from any real request. Adding these does not change the shape of any of the
+    # 7 locked contract classes above, only widens this enum.
+    DELIVERY_PROPOSE_REMINDER = "delivery_propose_reminder"
+    DELIVERY_PROPOSE_MEETING = "delivery_propose_meeting"
+    QUALITY_PROPOSE_REMINDER = "quality_propose_reminder"
+    QUALITY_PROPOSE_MEETING = "quality_propose_meeting"
+    EXECUTIVE_PROPOSE_MEETING = "executive_propose_meeting"
 
 
 class PolicyDecision(StrEnum):
@@ -58,6 +67,12 @@ class PolicyReason(StrEnum):
     INVALID_SCOPE = "DENY_INVALID_SCOPE"
     RESOURCE_NOT_ALLOWED = "DENY_RESOURCE_NOT_ALLOWED"
     CONSENT_CHANGED = "DENY_CONSENT_CHANGED"
+    # Additive (Sprint 3 consent-gap fix) - distinct from CONSENT_CHANGED above, which is the G2
+    # tool-boundary re-check that a workspace's linked-conversation AI-enable set hasn't shifted
+    # since the AgentContext was built. This is G1: the member's own opt-in to let a specialist
+    # agent operate in THIS Agent Workspace on their behalf, independent of membership.status
+    # (see AgentWorkspaceMembership.consent_status in src/db/models.py).
+    WORKSPACE_CONSENT_REVOKED = "DENY_WORKSPACE_CONSENT_REVOKED"
     SENSITIVE_DATA = "MASK_SENSITIVE"
     APPROVAL_REQUIRED = "REQUIRE_APPROVAL"
 

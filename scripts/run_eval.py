@@ -38,12 +38,21 @@ trusting the numbers:
    inside one passing-looking aggregate.
 
 3. `expected.policy_reason` uses some reason codes (`DENY_REVOKED_OR_INACTIVE`,
-   `MASK_STALE_OR_PARTIAL`) that do not exist in the locked `PolicyReason` enum in
-   src/agents/contracts.py (checked directly, not assumed) - this dataset was written for a
-   richer reason-code taxonomy than what ended up in the contract that got locked for this repo.
-   Per the task's explicit instruction not to modify locked core interfaces, PolicyReason is left
-   untouched; reason-code match is reported as its own, separate number, so a mismatch there
-   doesn't silently drag down the decision-level accuracy number that actually matters most.
+   `MASK_STALE_OR_PARTIAL`) that do not exist verbatim in `PolicyReason` (src/agents/contracts.py).
+   `PolicyReason`/`AgentIntent` are enums used BY the 7 locked envelope contracts, not envelope
+   shapes themselves - Sprint 3 added `PolicyReason.WORKSPACE_CONSENT_REVOKED` (value
+   "DENY_WORKSPACE_CONSENT_REVOKED", close but not byte-identical to the dataset's
+   "DENY_REVOKED_OR_INACTIVE") purely additively, to make the consent-revoke DECISION correct - see
+   caveat 4 below. `MASK_STALE_OR_PARTIAL` still has no equivalent (see caveat 2: no MASK decision
+   exists at G1 yet). Reason-code match stays its own, separate, informational number so a naming
+   mismatch never silently drags down the decision-level accuracy number that actually matters most.
+
+4. Sprint 3 fix (no longer a caveat once you read this): `membership_consent_revoke` cases where
+   membership_state=="active" but consent_state != "active" now correctly DENY, via a new
+   `AgentWorkspaceMembership.consent_status` column checked in
+   src/agents/policies/scope_resolver.py, independent of membership status itself - the same idea
+   as this app's existing per-conversation `AIPermission.granted` for the Personal Agent, applied
+   to Agent Workspace membership. See the "Consent-revoke handling" line this script prints below.
 """
 
 from __future__ import annotations
@@ -137,9 +146,23 @@ _WORKSPACE_ROLE_MAP = {"owner": "owner", "admin": "admin", "member": "member", "
 # crash, not silently misclassify).
 _STATE_TO_STATUS = {"active": "active", "revoked": "revoked", "suspended": "suspended", "archived": "revoked", "inactive": "suspended"}
 
+# Dataset consent_state -> AgentWorkspaceMembership.consent_status (CHECK constraint only accepts
+# 'active'|'revoked'). "missing" (no consent ever recorded) is bucketed with "revoked": both mean
+# the agent is not authorized to act on this member's behalf, the DB column has no third state for
+# "never asked". Sprint 3 consent-gap fix - see scope_resolver.py's WORKSPACE_CONSENT_REVOKED reason.
+_CONSENT_STATE_TO_STATUS = {"active": "active", "revoked": "revoked", "missing": "revoked", "disabled": "revoked", "changed": "revoked"}
+
 
 async def _set_membership_state(
-    db, *, user_id: str, org_id: str, agent_workspace_ids: list[str], workspace_role: str, business_role: str, membership_state: str
+    db,
+    *,
+    user_id: str,
+    org_id: str,
+    agent_workspace_ids: list[str],
+    workspace_role: str,
+    business_role: str,
+    membership_state: str,
+    consent_state: str = "active",
 ) -> None:
     """Re-applies this case's membership state fresh - cases reuse the same user_id across
     different states/roles, so this must be idempotent and authoritative each call, not additive."""
@@ -172,11 +195,17 @@ async def _set_membership_state(
                 await db.delete(existing)
             continue
         status = _STATE_TO_STATUS.get(membership_state, "active")
+        consent_status = _CONSENT_STATE_TO_STATUS.get(consent_state, "active")
         if existing is None:
-            db.add(AgentWorkspaceMembership(agent_workspace_id=ws_id, user_id=user_id, business_role=aw_role, status=status))
+            db.add(
+                AgentWorkspaceMembership(
+                    agent_workspace_id=ws_id, user_id=user_id, business_role=aw_role, status=status, consent_status=consent_status
+                )
+            )
         else:
             existing.status = status
             existing.business_role = aw_role
+            existing.consent_status = consent_status
     await db.flush()
 
 
@@ -201,6 +230,7 @@ async def _seed_and_route(case: dict) -> tuple[PolicyDecision, str, str]:
             workspace_role=actor.get("workspace_role", "member"),
             business_role=actor.get("business_role", "member"),
             membership_state=case["context"]["membership_state"],
+            consent_state=case["context"].get("consent_state", "active"),
         )
         await db.commit()
 
@@ -340,12 +370,11 @@ async def main() -> int:
         if actual_decision.value == expected_decision:
             bucket["decision_ok"] += 1
         else:
-            # membership_state=active but consent_state!=active and we still (wrongly, per the
-            # dataset) ALLOW: a real architecture gap, not a harness bug - resolve_agent_scope's
-            # WORKSPACE branch has no per-user "consent to be an agent workspace member" concept
-            # distinct from membership itself (unlike the Personal agent's per-conversation
-            # AIPermission.contribution_allowed). Flagged by name, not silently absorbed into the
-            # aggregate miss count.
+            # membership_state=active but consent_state!=active should now DENY via
+            # AgentWorkspaceMembership.consent_status (Sprint 3 fix, scope_resolver.py's
+            # WORKSPACE_CONSENT_REVOKED reason) - a case landing here would be a regression, not
+            # the previously-known gap this list used to track. Kept as a named safety net rather
+            # than silently absorbed into the aggregate miss count.
             if case["context"]["membership_state"] == "active" and case["context"].get("consent_state") not in (None, "active"):
                 consent_only_failures.append(case["case_id"])
         if actual_reason == expected["policy_reason"]:
@@ -388,11 +417,14 @@ async def main() -> int:
 
     if consent_only_failures:
         print()
-        print(f"REAL ARCHITECTURE GAP found (not a harness bug): {len(consent_only_failures)} case(s) "
+        print(f"REGRESSION in consent-revoke handling: {len(consent_only_failures)} case(s) "
               f"{consent_only_failures} expect DENY from a REVOKED/MISSING/DISABLED/CHANGED consent_state")
-        print("even though membership_state is active. resolve_agent_scope's WORKSPACE branch has no")
-        print("per-user consent concept independent of membership - it currently ALLOWs these. This is a")
-        print("genuine follow-up item, not swept into the aggregate 'reason mismatch' count above.")
+        print("even though membership_state is active, but did not get it. AgentWorkspaceMembership.consent_status")
+        print("(Sprint 3 fix) should cover this - see scope_resolver.py's WORKSPACE_CONSENT_REVOKED reason.")
+    else:
+        print()
+        print("Consent-revoke handling: 0 regressions (membership_state=active + non-active consent_state")
+        print("correctly DENYs via AgentWorkspaceMembership.consent_status).")
 
     print()
     print("=" * 78)

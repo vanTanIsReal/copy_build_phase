@@ -107,6 +107,15 @@ async def get_workspace_briefs(db: AsyncSession, context: AgentContext) -> ToolR
             continue
         if brief.is_stale():
             data_gaps.append(f"Latest brief for workspace '{workspace.name}' expired at {brief.expires_at.isoformat()}.")
+            from src.services import agent_audit_service
+
+            await agent_audit_service.alert_brief_stale(
+                db,
+                agent_workspace_id=workspace.id,
+                agent_workspace_name=workspace.name,
+                brief_type=brief_type,
+                organization_workspace_id=context.actor.organization_workspace_id,
+            )
         briefs.append(brief.model_dump(mode="json"))
         sources.append(_source(brief.brief_id, "workspace_brief", workspace.id))
 

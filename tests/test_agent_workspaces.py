@@ -141,3 +141,77 @@ async def test_mine_true_excludes_revoked_membership(client, auth_headers):
 async def test_mine_false_or_missing_is_rejected(client, auth_headers):
     resp = await client.get("/api/v1/agent-workspaces", headers=auth_headers)
     assert resp.status_code == 400
+
+
+# ---- my-consent (Sprint 3 consent-gap fix) ----
+
+
+@pytest.mark.asyncio
+async def test_revoking_consent_denies_my_membership_even_though_status_stays_active(client, auth_headers):
+    """The whole point of consent_status being independent of membership.status: revoking consent
+    must deny access without ever touching (or requiring an admin to touch) the membership row's
+    own status - Alice stays an active member, just with the agent opted out."""
+    agent_workspace_id = await _make_org_and_agent_workspace()
+    alice_id = await _user_id("alice@example.com")
+    async with db_session.async_session_maker() as db:
+        agent_workspace = await db.get(AgentWorkspace, agent_workspace_id)
+        db.add(WorkspaceMembership(workspace_id=agent_workspace.organization_workspace_id, user_id=alice_id, role="member"))
+        db.add(AgentWorkspaceMembership(agent_workspace_id=agent_workspace_id, user_id=alice_id, business_role="lead"))
+        await db.commit()
+
+    revoke_resp = await client.put(
+        f"/api/v1/agent-workspaces/{agent_workspace_id}/my-consent", json={"granted": False}, headers=auth_headers
+    )
+    assert revoke_resp.status_code == 200
+    assert revoke_resp.json() == {"agent_workspace_id": agent_workspace_id, "consent_status": "revoked"}
+
+    membership_resp = await client.get(f"/api/v1/agent-workspaces/{agent_workspace_id}/my-membership", headers=auth_headers)
+    assert membership_resp.status_code == 403
+
+    async with db_session.async_session_maker() as db:
+        row = (
+            await db.execute(
+                select(AgentWorkspaceMembership).where(
+                    AgentWorkspaceMembership.agent_workspace_id == agent_workspace_id,
+                    AgentWorkspaceMembership.user_id == alice_id,
+                )
+            )
+        ).scalar_one()
+        assert row.status == "active"  # membership itself untouched by the consent toggle
+
+
+@pytest.mark.asyncio
+async def test_regranting_consent_restores_access(client, auth_headers):
+    agent_workspace_id = await _make_org_and_agent_workspace()
+    alice_id = await _user_id("alice@example.com")
+    async with db_session.async_session_maker() as db:
+        agent_workspace = await db.get(AgentWorkspace, agent_workspace_id)
+        db.add(WorkspaceMembership(workspace_id=agent_workspace.organization_workspace_id, user_id=alice_id, role="member"))
+        db.add(
+            AgentWorkspaceMembership(
+                agent_workspace_id=agent_workspace_id, user_id=alice_id, business_role="member", consent_status="revoked"
+            )
+        )
+        await db.commit()
+
+    assert (await client.get(f"/api/v1/agent-workspaces/{agent_workspace_id}/my-membership", headers=auth_headers)).status_code == 403
+
+    grant_resp = await client.put(
+        f"/api/v1/agent-workspaces/{agent_workspace_id}/my-consent", json={"granted": True}, headers=auth_headers
+    )
+    assert grant_resp.status_code == 200
+    assert grant_resp.json()["consent_status"] == "active"
+
+    membership_resp = await client.get(f"/api/v1/agent-workspaces/{agent_workspace_id}/my-membership", headers=auth_headers)
+    assert membership_resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_my_consent_requires_active_membership(client, auth_headers):
+    """Not a member at all (or only revoked) - toggling consent for a workspace you don't belong
+    to must not silently create a membership row."""
+    agent_workspace_id = await _make_org_and_agent_workspace()
+    resp = await client.put(
+        f"/api/v1/agent-workspaces/{agent_workspace_id}/my-consent", json={"granted": False}, headers=auth_headers
+    )
+    assert resp.status_code == 404

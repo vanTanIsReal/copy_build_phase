@@ -12,6 +12,8 @@ from src.models.agent_workspace_schemas import (
     AgentWorkspaceMemberCreate,
     AgentWorkspaceMemberOut,
     AgentWorkspaceOut,
+    MyAgentWorkspaceConsentIn,
+    MyAgentWorkspaceConsentOut,
     MyAgentWorkspaceMembershipOut,
 )
 from src.services.agent_workspace_service import (
@@ -24,6 +26,7 @@ from src.services.agent_workspace_service import (
     list_my_agent_workspaces_out,
     resolve_my_agent_workspace_membership,
     revoke_agent_workspace_member,
+    set_my_agent_workspace_consent,
     unlink_agent_workspace_conversation,
 )
 from src.services.audit_service import record_audit_event
@@ -297,6 +300,32 @@ async def get_my_agent_workspace_membership(
         agent_workspace_id=agent_workspace_id,
         business_role=result.business_role.value,
     )
+
+
+@my_router.put("/{agent_workspace_id}/my-consent", response_model=MyAgentWorkspaceConsentOut)
+async def set_my_agent_workspace_consent_route(
+    agent_workspace_id: str,
+    request: MyAgentWorkspaceConsentIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MyAgentWorkspaceConsentOut:
+    """Self-service Grant/Revoke for this Agent Workspace's AI consent - same idea as the existing
+    per-conversation AI permission toggle, applied to specialist agent workspaces (Sprint 3
+    consent-gap fix). Revoking does not remove membership; it only stops a specialist agent from
+    reading/acting on this member's behalf here on the caller's very next request."""
+    membership = await set_my_agent_workspace_consent(
+        db, user_id=current_user.id, agent_workspace_id=agent_workspace_id, granted=request.granted
+    )
+    await record_audit_event(
+        db,
+        actor=current_user,
+        action="agent_workspace.consent_changed",
+        target_type="agent_workspace_membership",
+        target_id=membership.id,
+        metadata={"agent_workspace_id": agent_workspace_id, "consent_status": membership.consent_status},
+    )
+    await db.commit()
+    return MyAgentWorkspaceConsentOut(agent_workspace_id=agent_workspace_id, consent_status=membership.consent_status)
 
 
 @my_router.get("", response_model=list[AgentWorkspaceOut])

@@ -149,6 +149,23 @@ async def resolve_agent_scope(
         )
         if not allowed:
             return _denied(PolicyReason.NOT_MEMBER)
+        # `allowed` only proves active *membership* (status=="active"); a member can still have
+        # opted their own AI access out separately (consent_status) without leaving the workspace.
+        # If the executive_viewer has consented in at least one, aggregate over those; a total
+        # revoke across every executive_viewer membership is reported distinctly from NOT_MEMBER.
+        consented_ids = (
+            await db.execute(
+                select(AgentWorkspaceMembership.agent_workspace_id).where(
+                    AgentWorkspaceMembership.agent_workspace_id.in_([w.id for w in allowed]),
+                    AgentWorkspaceMembership.user_id == user_id,
+                    AgentWorkspaceMembership.status == "active",
+                    AgentWorkspaceMembership.consent_status == "active",
+                )
+            )
+        ).scalars().all()
+        if not consented_ids:
+            return _denied(PolicyReason.WORKSPACE_CONSENT_REVOKED)
+        allowed = tuple(w for w in allowed if w.id in set(consented_ids))
         return ResolvedAgentScope(
             decision=PolicyDecision.ALLOW,
             reason=PolicyReason.ALLOWED,
@@ -183,6 +200,8 @@ async def resolve_agent_scope(
     ).scalar_one_or_none()
     if membership is None:
         return _denied(PolicyReason.NOT_MEMBER)
+    if membership.consent_status != "active":
+        return _denied(PolicyReason.WORKSPACE_CONSENT_REVOKED)
     role = BusinessRole.LEAD if membership.business_role == "lead" else BusinessRole.MEMBER
     allowed_resource_ids, consent_scope_hash = await _resolve_conversation_resources(
         db,

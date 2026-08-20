@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -10,32 +11,78 @@ from src.agents import graph as agent_graph
 from src.agents import router as agent_router
 from src.agents.context_builder import AgentRunRecorder, build_agent_context
 from src.agents.contracts import (
+    ActionProposal,
+    AgentContext,
     AgentIntent,
     AgentInvocationRequest,
     AgentProfile,
     PolicyDecision,
     PolicyReason,
     RequestedScope,
+    ToolResult,
     ToolResultStatus,
 )
+from src.agents.hitl_executor import ActionProposalRejectedError, execute_action_proposal
 from src.agents.tools import delivery_tool, executive_tool, quality_tool
 from src.api.rate_limit import crud_rate_limit, limiter
 from src.auth.dependencies import get_current_user
 from src.config import get_settings
 from src.db.models import AgentWorkspace, User, Workspace, WorkspaceMembership
 from src.db.session import get_db
-from src.models.schemas import ChatMessage, ChatRequest, ChatResponse, InterruptPayload, ResumeRequest
+from src.models.schemas import (
+    ChatMessage,
+    ChatRequest,
+    ChatResponse,
+    InterruptPayload,
+    ResumeRequest,
+    SpecialistActionRequest,
+)
 from src.models.usage_schemas import UsageStatusOut
-from src.services import assistant_thread_service, chat_service, quick_action_service, usage_service
+from src.services import (
+    assistant_thread_service,
+    calendar_service,
+    chat_service,
+    quick_action_service,
+    reminder_service,
+    usage_service,
+)
+from src.services.google_credentials import CalendarNotConnected
 
 # Ngày 6-7 hookup (MULTI_AGENT_IMPLEMENTATION_PLAN.md): which specialist tool builds the read-only
-# brief for a resolved route.profile. Only the brief-producing intents are reachable from /chat -
-# propose_*_reminder/propose_*_meeting stay reachable only from tests/scripts/run_eval.py (see
-# _run_specialist_chat's docstring for why).
+# brief for a resolved route.profile.
 _SPECIALIST_BRIEF_TOOL = {
     AgentProfile.PRODUCT_DELIVERY: delivery_tool.build_delivery_brief,
     AgentProfile.QUALITY_ASSURANCE: quality_tool.build_quality_brief,
     AgentProfile.EXECUTIVE: executive_tool.build_executive_brief,
+}
+
+# (profile, SpecialistActionRequest.kind) -> the intent route_agent_request/registry.py must
+# resolve for that (profile, action) pair to be allowed - see registry.py's allowed_intents.
+_SPECIALIST_ACTION_INTENT = {
+    (AgentProfile.PRODUCT_DELIVERY, "propose_reminder"): AgentIntent.DELIVERY_PROPOSE_REMINDER,
+    (AgentProfile.PRODUCT_DELIVERY, "propose_meeting"): AgentIntent.DELIVERY_PROPOSE_MEETING,
+    (AgentProfile.QUALITY_ASSURANCE, "propose_reminder"): AgentIntent.QUALITY_PROPOSE_REMINDER,
+    (AgentProfile.QUALITY_ASSURANCE, "propose_meeting"): AgentIntent.QUALITY_PROPOSE_MEETING,
+    (AgentProfile.EXECUTIVE, "propose_meeting"): AgentIntent.EXECUTIVE_PROPOSE_MEETING,
+}
+
+# proposal.action (set by delivery_tool.py/quality_tool.py/executive_tool.py's propose_* functions)
+# -> the InterruptPayload.type the frontend receives - stable, short names distinct from the
+# Personal agent's own calendar_event/reminder types so a future UI can tell them apart.
+_INTERRUPT_TYPE_BY_PROPOSAL_ACTION = {
+    "preview_delivery_reminder": "delivery_reminder",
+    "preview_delivery_meeting": "delivery_meeting",
+    "preview_quality_reminder": "quality_reminder",
+    "preview_quality_meeting": "quality_meeting",
+    "preview_executive_meeting": "executive_meeting",
+}
+
+_DEFAULT_MEETING_DURATION = timedelta(minutes=30)
+
+_PROFILE_ENABLED_FLAG = {
+    AgentProfile.PRODUCT_DELIVERY: "product_delivery_agent_enabled",
+    AgentProfile.QUALITY_ASSURANCE: "quality_assurance_agent_enabled",
+    AgentProfile.EXECUTIVE: "executive_agent_enabled",
 }
 
 _SPECIALIST_DENY_TEXT = {
@@ -46,6 +93,7 @@ _SPECIALIST_DENY_TEXT = {
     PolicyReason.RESOURCE_NOT_ALLOWED: "Bạn không có quyền truy cập dữ liệu này.",
     PolicyReason.CONSENT_CHANGED: "Quyền chia sẻ dữ liệu đã thay đổi, vui lòng thử lại.",
     PolicyReason.FEATURE_DISABLED: "Tính năng này hiện chưa được bật.",
+    PolicyReason.WORKSPACE_CONSENT_REVOKED: "Bạn đã tắt quyền AI cho agent workspace này - bật lại trong cài đặt workspace để tiếp tục.",
 }
 
 router = APIRouter()
@@ -54,6 +102,14 @@ router = APIRouter()
 # user's interrupted (unconfirmed calendar/reminder) run; doesn't need to survive a restart
 # since thread_ids are random UUIDs nobody else can guess anyway.
 _thread_owners: dict[str, str] = {}
+
+# thread_id -> the ActionProposal a specialist propose_* tool drafted, awaiting confirm/reject via
+# POST /chat/resume (src.agents.hitl_executor.execute_action_proposal does the actual binding/
+# expiry/idempotency checks at confirm time - this dict is only "where do we find the proposal
+# again", the LangGraph checkpointer's equivalent role for the Personal agent's own interrupt()).
+# In-memory only, same caveat as _thread_owners above - bounded by ActionProposal's own 15-minute
+# expires_at, so losing this on a restart just means "ask the agent again", not silent data loss.
+_pending_specialist_proposals: dict[str, ActionProposal] = {}
 
 
 def _check_thread_owner(thread_id: str, current_user: User) -> None:
@@ -90,20 +146,30 @@ async def _user_organization_workspace_ids(db: AsyncSession, user_id: str) -> tu
     return tuple(rows)
 
 
-async def _resolve_specialist_intent(
+_BRIEF_INTENT_BY_PROFILE = {
+    AgentProfile.PRODUCT_DELIVERY: AgentIntent.DELIVERY_BRIEF,
+    AgentProfile.QUALITY_ASSURANCE: AgentIntent.QUALITY_BRIEF,
+    AgentProfile.EXECUTIVE: AgentIntent.EXECUTIVE_BRIEF,
+}
+
+
+async def _guess_target_profile(
     db: AsyncSession, requested_scope: RequestedScope, target_agent_workspace_id: str | None
-) -> AgentIntent:
+) -> AgentProfile:
+    """Which profile intent to ask for BEFORE calling route_agent_request - intent alone doesn't
+    determine profile (route_agent_request derives profile from the real AgentWorkspace.
+    agent_profile column, never from the client), but route_agent_request also requires the intent
+    it's given to already be valid for whatever profile it resolves, so the caller must guess
+    right. A wrong guess here is still safe: when target_agent_workspace_id doesn't resolve to a
+    real, same-org, active workspace, route_agent_request's own lookup denies WRONG_WORKSPACE
+    before it ever reaches the intent check, regardless of this guess."""
     if requested_scope == RequestedScope.AGGREGATE:
-        return AgentIntent.EXECUTIVE_BRIEF
+        return AgentProfile.EXECUTIVE
     if target_agent_workspace_id:
         workspace = await db.get(AgentWorkspace, target_agent_workspace_id)
         if workspace is not None and workspace.agent_profile == AgentProfile.QUALITY_ASSURANCE.value:
-            return AgentIntent.QUALITY_BRIEF
-    # Fallback when the target can't be resolved (missing workspace, wrong org, ...) - safe because
-    # agent_router.route_agent_request checks the workspace's existence/org BEFORE it ever checks
-    # whether this intent is allowed for the resolved profile, so an unresolved target still ends up
-    # denied with the correct WRONG_WORKSPACE reason regardless of this placeholder.
-    return AgentIntent.DELIVERY_BRIEF
+            return AgentProfile.QUALITY_ASSURANCE
+    return AgentProfile.PRODUCT_DELIVERY
 
 
 def _format_workspace_brief_text(brief: dict) -> str:
@@ -137,18 +203,29 @@ async def _run_specialist_chat(body: ChatRequest, current_user: User, db: AsyncS
     into the real /chat endpoint - only for requested_scope WORKSPACE/AGGREGATE, entirely separate
     from the LangGraph Personal-agent path above (that path is untouched by this function).
 
-    Scope of this hookup is deliberately read-only: only the brief-producing intents
-    (build_delivery_brief/build_quality_brief/build_executive_brief) are reachable here.
-    propose_*_reminder/propose_*_meeting stay reachable only from tests/scripts/run_eval.py - they
-    already return an ActionProposal preview, but nothing here turns that into a real
-    interrupt()/resume flow yet. Wiring a brand-new approval UI in the same pass risked the
-    project's human-in-the-loop guarantee (CLAUDE.md's hard constraint), so it is left as an
-    explicit, separate follow-up instead of done half-way.
+    Two shapes: body.specialist_action is None -> read-only brief (build_delivery_brief/
+    build_quality_brief/build_executive_brief), same as before. body.specialist_action set ->
+    dispatch to the matching propose_*_reminder/propose_*_meeting tool instead, returning
+    status="interrupted" for the caller to confirm/reject via POST /chat/resume - the real HITL
+    loop (_pending_specialist_proposals + hitl_executor.execute_action_proposal), not just a
+    preview nobody could ever confirm.
 
     A real user has zero AgentWorkspace/organization membership today (see Workspace's own
     docstring in src/db/models.py) - this function never fabricates one; no membership resolves to
     a real DENY_NOT_MEMBER below, exactly like any other authorization failure.
+
+    Gated by MULTI_AGENT_ENABLED (checked here, before any DB work) and then by the resolved
+    profile's own PRODUCT_DELIVERY_AGENT_ENABLED/QUALITY_ASSURANCE_AGENT_ENABLED/
+    EXECUTIVE_AGENT_ENABLED flag once route_agent_request resolves it - MULTI_AGENT_IMPLEMENTATION_
+    PLAN.md G6 "Có flag cho từng profile và MULTI_AGENT_ENABLED làm master kill switch". Both
+    default False.
     """
+    settings = get_settings()
+    if not settings.multi_agent_enabled:
+        return ChatResponse(
+            response=_SPECIALIST_DENY_TEXT[PolicyReason.FEATURE_DISABLED], thread_id=thread_id, status="error"
+        )
+
     if body.requested_scope == RequestedScope.WORKSPACE and body.target_agent_workspace_id:
         target_workspace = await db.get(AgentWorkspace, body.target_agent_workspace_id)
         organization_workspace_id = target_workspace.organization_workspace_id if target_workspace else None
@@ -172,7 +249,15 @@ async def _run_specialist_chat(body: ChatRequest, current_user: User, db: AsyncS
             status="error",
         )
 
-    intent = await _resolve_specialist_intent(db, body.requested_scope, body.target_agent_workspace_id)
+    profile_guess = await _guess_target_profile(db, body.requested_scope, body.target_agent_workspace_id)
+    if body.specialist_action is None:
+        intent = _BRIEF_INTENT_BY_PROFILE[profile_guess]
+    else:
+        intent = _SPECIALIST_ACTION_INTENT.get((profile_guess, body.specialist_action.kind))
+        if intent is None:
+            return ChatResponse(
+                response="Agent workspace này không hỗ trợ hành động được yêu cầu.", thread_id=thread_id, status="error"
+            )
     invocation = AgentInvocationRequest(
         message=body.message,
         conversation_id=body.conversation_id,
@@ -188,6 +273,11 @@ async def _run_specialist_chat(body: ChatRequest, current_user: User, db: AsyncS
             response=_SPECIALIST_DENY_TEXT.get(exc.reason, "Yêu cầu không được chấp nhận."),
             thread_id=thread_id,
             status="error",
+        )
+
+    if not getattr(settings, _PROFILE_ENABLED_FLAG[route.profile]):
+        return ChatResponse(
+            response=_SPECIALIST_DENY_TEXT[PolicyReason.FEATURE_DISABLED], thread_id=thread_id, status="error"
         )
 
     context = await build_agent_context(
@@ -210,12 +300,27 @@ async def _run_specialist_chat(body: ChatRequest, current_user: User, db: AsyncS
                 thread_id=thread_id,
                 status="error",
             )
-        tool = _SPECIALIST_BRIEF_TOOL[route.profile]
-        result = await tool(db, context)
+        if body.specialist_action is None:
+            tool = _SPECIALIST_BRIEF_TOOL[route.profile]
+            result = await tool(db, context)
+        else:
+            result = await _propose_specialist_action(db, context, route.profile, body.specialist_action)
 
     if result.status == ToolResultStatus.ERROR:
         return ChatResponse(
             response=result.error_message or "Không lấy được dữ liệu.", thread_id=thread_id, status="error"
+        )
+
+    if body.specialist_action is not None:
+        proposal = ActionProposal.model_validate(result.payload["proposal"])
+        _pending_specialist_proposals[thread_id] = proposal
+        _thread_owners.setdefault(thread_id, current_user.id)
+        interrupt_type = _INTERRUPT_TYPE_BY_PROPOSAL_ACTION[proposal.action]
+        return ChatResponse(
+            response="Vui lòng xác nhận hành động được đề xuất.",
+            thread_id=thread_id,
+            status="interrupted",
+            interrupt=InterruptPayload(type=interrupt_type, draft=proposal.payload),
         )
 
     if route.profile == AgentProfile.EXECUTIVE:
@@ -223,6 +328,35 @@ async def _run_specialist_chat(body: ChatRequest, current_user: User, db: AsyncS
     else:
         text = _format_workspace_brief_text(result.payload["workspace_brief"])
     return ChatResponse(response=text, thread_id=thread_id, status="completed")
+
+
+_REMINDER_TOOL_BY_PROFILE = {
+    AgentProfile.PRODUCT_DELIVERY: delivery_tool.propose_delivery_reminder,
+    AgentProfile.QUALITY_ASSURANCE: quality_tool.propose_quality_reminder,
+}
+_MEETING_TOOL_BY_PROFILE = {
+    AgentProfile.PRODUCT_DELIVERY: delivery_tool.propose_delivery_meeting,
+    AgentProfile.QUALITY_ASSURANCE: quality_tool.propose_quality_meeting,
+    AgentProfile.EXECUTIVE: executive_tool.propose_executive_meeting,
+}
+
+
+async def _propose_specialist_action(
+    db: AsyncSession, context: AgentContext, profile: AgentProfile, action: SpecialistActionRequest
+) -> ToolResult:
+    """Calls the one propose_* tool matching (profile, action.kind) - the tool itself only ever
+    drafts an ActionProposal preview (G5), never runs the real side effect (that happens in
+    resume_chat -> _resume_specialist_action, only after a human confirms). action.due_at/
+    starts_at are guaranteed present for their respective kind by SpecialistActionRequest's own
+    validator - _run_specialist_chat already resolved (profile, action.kind) into a valid intent
+    before this is ever called, so profile is guaranteed to be a key in the matching dict below."""
+    if action.kind == "propose_reminder":
+        due_at = datetime.fromisoformat(action.due_at)
+        return await _REMINDER_TOOL_BY_PROFILE[profile](db, context, title=action.title, due_at=due_at, message=action.message)
+    starts_at = datetime.fromisoformat(action.starts_at)
+    return await _MEETING_TOOL_BY_PROFILE[profile](
+        db, context, title=action.title, starts_at=starts_at, attendee_ids=tuple(action.attendee_ids)
+    )
 
 
 def _build_chat_response(result: dict, thread_id: str) -> ChatResponse:
@@ -348,6 +482,96 @@ async def chat(
     return response
 
 
+def _build_specialist_action_fn(db: AsyncSession, proposal: ActionProposal, confirming_user_id: str):
+    """The real side effect for a confirmed specialist ActionProposal - reuses the exact same
+    already-shipped, already-tested services the Personal agent's own calendar/reminder tools call
+    (reminder_service.schedule_reminder / calendar_service.create_event), never a parallel
+    implementation. Always acts as the CONFIRMING user (their own Reminder, their own connected
+    Google Calendar) - a specialist "reminder"/"meeting" proposal has no separate concept of
+    creating something in someone else's account."""
+    payload = proposal.payload
+    if proposal.action in ("preview_delivery_reminder", "preview_quality_reminder"):
+
+        async def _create_reminder() -> dict:
+            reminder = await reminder_service.schedule_reminder(
+                owner_id=confirming_user_id,
+                title=payload["title"],
+                due_at_iso=payload["due_at"],
+                message=payload.get("message", ""),
+                source="agent",  # matches Reminder.source's documented "manual" | "agent" | "proactive"
+            )
+            return {"reminder_id": reminder.id, "title": reminder.title, "due_at": reminder.due_at.isoformat()}
+
+        return _create_reminder
+
+    async def _create_meeting() -> dict:
+        attendee_ids = payload.get("attendee_ids") or []
+        emails: list[str] = []
+        if attendee_ids:
+            emails = list(
+                (await db.execute(select(User.email).where(User.id.in_(attendee_ids)))).scalars()
+            )
+        start_dt = datetime.fromisoformat(payload["starts_at"])
+        end_dt = start_dt + _DEFAULT_MEETING_DURATION
+        event = await calendar_service.create_event(
+            confirming_user_id, payload["title"], start_dt.isoformat(), end_dt.isoformat(), attendees=emails
+        )
+        return {"event_id": event.get("id"), "title": payload["title"], "starts_at": payload["starts_at"]}
+
+    return _create_meeting
+
+
+def _format_specialist_action_result(proposal: ActionProposal, result_payload: dict) -> str:
+    if proposal.action in ("preview_delivery_reminder", "preview_quality_reminder"):
+        return f"Đã tạo nhắc nhở: \"{result_payload['title']}\" (hạn {result_payload['due_at']})."
+    return f"Đã tạo lịch họp: \"{result_payload['title']}\" lúc {result_payload['starts_at']}."
+
+
+async def _resume_specialist_action(request: ResumeRequest, current_user: User, db: AsyncSession) -> ChatResponse:
+    """Confirms/rejects a specialist propose_*_reminder/meeting - the real HITL completion for
+    _run_specialist_chat's status="interrupted" responses. Same shape as resume_chat's LangGraph
+    branch (thread ownership, approve/reject, one final ChatResponse) but for a proposal tracked in
+    _pending_specialist_proposals instead of a checkpointer thread.
+
+    Deliberately does NOT pop the proposal on a successful approve (only on reject, or once
+    hitl_executor itself says the proposal is unusable) - execute_action_proposal's own
+    idempotency_key check already makes a second "confirm" on the same thread_id safe (it returns
+    the same stored result instead of creating a second reminder/meeting), so a double-click just
+    replays the same success message instead of hitting a 500 from falling through to the
+    LangGraph branch below with a thread_id that was never a real checkpointer thread."""
+    proposal = _pending_specialist_proposals.get(request.thread_id)
+    if proposal is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This proposal was already resolved or has expired")
+    if proposal.actor_user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your conversation")
+
+    if not request.approved:
+        del _pending_specialist_proposals[request.thread_id]
+        return ChatResponse(response="Đã huỷ đề xuất.", thread_id=request.thread_id, status="completed")
+
+    action_fn = _build_specialist_action_fn(db, proposal, current_user.id)
+    try:
+        result = await execute_action_proposal(db, proposal=proposal, confirming_user_id=current_user.id, action_fn=action_fn)
+    except ActionProposalRejectedError as exc:
+        _pending_specialist_proposals.pop(request.thread_id, None)  # unusable - nothing left to be idempotent about
+        return ChatResponse(response=str(exc), thread_id=request.thread_id, status="error")
+    except CalendarNotConnected:
+        return ChatResponse(
+            response="Bạn chưa kết nối Google Calendar - vào trang Calendar để kết nối trước khi tạo lịch họp.",
+            thread_id=request.thread_id,
+            status="error",
+        )
+
+    if result.status == ToolResultStatus.ERROR:
+        return ChatResponse(
+            response=result.error_message or "Không thực hiện được hành động.", thread_id=request.thread_id, status="error"
+        )
+
+    return ChatResponse(
+        response=_format_specialist_action_result(proposal, result.payload), thread_id=request.thread_id, status="completed"
+    )
+
+
 @router.post("/chat/resume", response_model=ChatResponse)
 @limiter.exempt
 async def resume_chat(
@@ -362,6 +586,11 @@ async def resume_chat(
     action tied to a thread_id the user already owns, not a fresh request. Limiting it risks
     leaving an interrupt() permanently stuck with no way to complete or cancel.
     """
+    if request.thread_id in _pending_specialist_proposals:
+        # A specialist propose_*_reminder/meeting confirmation - not a LangGraph checkpointer
+        # thread at all, see _pending_specialist_proposals's own docstring.
+        return await _resume_specialist_action(request, current_user, db)
+
     _check_thread_owner(request.thread_id, current_user)
     config = {"configurable": {"thread_id": request.thread_id}}
     try:

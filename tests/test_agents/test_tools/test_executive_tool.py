@@ -117,6 +117,57 @@ async def test_executive_brief_aggregates_real_published_delivery_and_quality_br
 
 
 @pytest.mark.asyncio
+async def test_get_workspace_briefs_alerts_admins_when_a_brief_is_stale(client, auth_headers, other_auth_headers, admin_auth_headers, monkeypatch):
+    """Sprint 3 G6 fix: get_workspace_briefs must both report the staleness as a data_gap (already
+    covered elsewhere) AND page admins via agent_audit_service.alert_brief_stale - proving the
+    real call site is wired, not just the alert function in isolation
+    (tests/test_services/test_agent_audit_service.py already covers that function alone)."""
+    from datetime import UTC, datetime, timedelta
+    from unittest.mock import AsyncMock
+    from uuid import uuid4
+
+    from src.agents.contracts import BriefType, WorkspaceBrief
+    from src.services import agent_audit_service, workspace_brief_service
+
+    alice = await _user("alice@example.com")
+    bob = await _user("bob@example.com")
+    org_id, delivery_id, _quality_id = await _make_org_with_delivery_and_quality(alice.id, bob.id)
+
+    generated_at = datetime.now(UTC) - timedelta(hours=48)
+    stale_brief = WorkspaceBrief(
+        brief_id=f"delivery-brief-{uuid4()}",
+        trace_id="trace-stale",
+        organization_workspace_id=org_id,
+        agent_workspace_id=delivery_id,
+        brief_type=BriefType.DELIVERY,
+        producer_profile=AgentProfile.PRODUCT_DELIVERY,
+        period_start=generated_at - timedelta(days=7),
+        period_end=generated_at,
+        generated_at=generated_at,
+        expires_at=generated_at + timedelta(hours=24),  # 24h ago - already stale
+        headline="Old brief",
+    )
+    async with db_session.async_session_maker() as db:
+        await workspace_brief_service.save_brief(db, stale_brief)
+
+    broadcast = AsyncMock()
+    monkeypatch.setattr(agent_audit_service.manager, "broadcast_to_users", broadcast)
+
+    executive_context = await _executive_context(bob, org_id)
+    async with db_session.async_session_maker() as db:
+        result = await executive_tool.get_workspace_briefs(db, executive_context)
+
+    assert any("expired" in gap for gap in result.data_gaps)
+    broadcast.assert_awaited_once()
+    admin_ids, payload = broadcast.call_args.args
+    admin_me = await client.get("/api/v1/auth/me", headers=admin_auth_headers)
+    assert admin_me.json()["id"] in admin_ids
+    assert payload["type"] == "workspace_brief_stale"
+    assert payload["agent_workspace_id"] == delivery_id
+    assert payload["brief_type"] == "delivery"
+
+
+@pytest.mark.asyncio
 async def test_get_cross_workspace_dependencies_matches_by_shared_release_target(auth_headers, other_auth_headers):
     alice = await _user("alice@example.com")
     bob = await _user("bob@example.com")

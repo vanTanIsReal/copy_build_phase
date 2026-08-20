@@ -35,6 +35,18 @@ _ORG_ID = "sec-test-org"
 _WORKSPACE_ID = "sec-test-agent-ws-delivery"
 
 
+def _enable_delivery_agent_flags(monkeypatch) -> None:
+    """MULTI_AGENT_ENABLED + PRODUCT_DELIVERY_AGENT_ENABLED default False (Sprint 3 kill switch) -
+    every test in this file exercises the WORKSPACE-scoped /chat path on purpose, so it must flip
+    both on, exactly the way an operator would via .env, to reach the code under test at all."""
+    from src.api import routes
+
+    settings = routes.get_settings().model_copy(
+        update={"multi_agent_enabled": True, "product_delivery_agent_enabled": True}
+    )
+    monkeypatch.setattr(routes, "get_settings", lambda: settings)
+
+
 async def _seed_delivery_workspace() -> None:
     """One org, one product_delivery AgentWorkspace, alice@example.com as an active lead member -
     the minimum resolve_agent_scope needs to ALLOW a delivery_brief request (see
@@ -65,7 +77,8 @@ async def _seed_delivery_workspace() -> None:
 
 
 @pytest.mark.asyncio
-async def test_injected_message_text_never_changes_the_specialist_brief(client, auth_headers):
+async def test_injected_message_text_never_changes_the_specialist_brief(client, auth_headers, monkeypatch):
+    _enable_delivery_agent_flags(monkeypatch)
     await _seed_delivery_workspace()
 
     malicious_body = {
@@ -96,6 +109,46 @@ async def test_injected_message_text_never_changes_the_specialist_brief(client, 
     assert malicious_data["response"] == benign_data["response"]
     for leaked in ("system prompt", "Ignore all previous instructions", "secret data"):
         assert leaked not in malicious_data["response"]
+
+
+@pytest.mark.asyncio
+async def test_specialist_chat_denied_when_multi_agent_disabled_by_default(client, auth_headers):
+    """MULTI_AGENT_ENABLED defaults False (Sprint 3 kill switch) - a WORKSPACE-scoped /chat request
+    must be denied before any DB work, not 500 or silently fall through to the Personal agent."""
+    await _seed_delivery_workspace()
+
+    response = await client.post(
+        "/api/v1/chat",
+        json={"message": "Tóm tắt trạng thái release", "requested_scope": "workspace", "target_agent_workspace_id": _WORKSPACE_ID},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "error"
+    assert "chưa được bật" in data["response"]
+
+
+@pytest.mark.asyncio
+async def test_specialist_chat_denied_when_profile_flag_disabled(client, auth_headers, monkeypatch):
+    """Master flag on but PRODUCT_DELIVERY_AGENT_ENABLED off - the per-profile kill switch alone
+    must still deny, proving the two flags are independently enforced, not just the master one."""
+    from src.api import routes
+
+    settings = routes.get_settings().model_copy(
+        update={"multi_agent_enabled": True, "product_delivery_agent_enabled": False}
+    )
+    monkeypatch.setattr(routes, "get_settings", lambda: settings)
+    await _seed_delivery_workspace()
+
+    response = await client.post(
+        "/api/v1/chat",
+        json={"message": "Tóm tắt trạng thái release", "requested_scope": "workspace", "target_agent_workspace_id": _WORKSPACE_ID},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "error"
+    assert "chưa được bật" in data["response"]
 
 
 @pytest.mark.asyncio

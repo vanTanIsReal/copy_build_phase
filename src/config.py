@@ -94,6 +94,20 @@ class Settings(BaseSettings):
     rate_limit_chat: str = "15/minute"  # POST /chat (fresh turns only, not /chat/resume) - per user
     rate_limit_crud: str = "60/minute"  # everything else authenticated - per user, generous safety net
 
+    # Multi-agent workspace (Product Delivery / Quality Assurance / Executive) kill switches -
+    # MULTI_AGENT_IMPLEMENTATION_PLAN.md G6 "Có flag cho từng profile và MULTI_AGENT_ENABLED làm
+    # master kill switch". All default False: the WORKSPACE/AGGREGATE branch of POST /chat
+    # (src.api.routes._run_specialist_chat) checks the master flag first, then the profile-specific
+    # flag once the target profile is resolved - a denial here returns the same
+    # ChatResponse(status="error") shape as any other specialist-path denial, never a 500. Flipping
+    # any of these back to False takes effect on the very next request (no cache, no restart needed
+    # beyond the process picking up the new .env - see get_settings()'s @lru_cache note in
+    # scripts/run_dev.py for why a running process must still be restarted to see a changed .env).
+    multi_agent_enabled: bool = False
+    product_delivery_agent_enabled: bool = False
+    quality_assurance_agent_enabled: bool = False
+    executive_agent_enabled: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:

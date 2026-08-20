@@ -75,3 +75,12 @@ class MyAgentWorkspaceMembershipOut(BaseModel):
 
     agent_workspace_id: str
     business_role: Literal["member", "lead", "executive_viewer"]
+
+
+class MyAgentWorkspaceConsentIn(BaseModel):
+    granted: bool
+
+
+class MyAgentWorkspaceConsentOut(BaseModel):
+    agent_workspace_id: str
+    consent_status: Literal["active", "revoked"]
