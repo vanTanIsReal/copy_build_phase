@@ -13,7 +13,9 @@ from src.agents.profiles.quality_assurance import (
     evaluate_release_readiness,
 )
 from src.agents.schemas.quality import (
+    QualityReadinessAssessment,
     QualityReadinessReason,
+    QualityTestProgress,
     QualityWorkItem,
     QualityWorkItemType,
 )
@@ -114,6 +116,23 @@ def test_ready_is_impossible_without_declared_required_release_checks():
     assert QualityReadinessReason.NO_REQUIRED_RELEASE_CHECKS_DECLARED in assessment.reasons
 
 
+def test_ready_assessment_rejects_any_reported_data_gap():
+    with pytest.raises(ValidationError, match="READY cannot be emitted"):
+        QualityReadinessAssessment(
+            release_readiness=ReleaseReadiness.READY,
+            test_progress=QualityTestProgress(
+                total=0,
+                open=0,
+                testing=0,
+                passed=0,
+                failed=0,
+                blocked=0,
+            ),
+            reasons=(QualityReadinessReason.ALL_REQUIRED_CHECKS_PASSED,),
+            data_gaps=("Required regression evidence is unavailable",),
+        )
+
+
 def test_required_release_check_id_cannot_point_to_a_bug():
     with pytest.raises(ValueError, match="must refer to release_check"):
         evaluate_release_readiness(
@@ -158,5 +177,5 @@ def test_quality_profile_skeleton_matches_frozen_registry_and_guardrails():
     assert "source_ids" in QUALITY_ASSURANCE_SYSTEM_PROMPT
 
 
-def test_quality_day_one_contract_document_exists():
-    assert (ROOT / "docs" / "QUALITY_ASSURANCE_DAY1.md").is_file()
+def test_quality_seven_day_report_document_exists():
+    assert (ROOT / "docs" / "ROLE_C_QUALITY_ASSURANCE_7_DAY_PLAN.md").is_file()
