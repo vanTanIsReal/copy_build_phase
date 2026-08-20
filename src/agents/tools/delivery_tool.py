@@ -189,7 +189,9 @@ async def build_delivery_brief(db: AsyncSession, context: AgentContext) -> ToolR
         decisions_needed=[_task_dict(task) for task in needs_clarification],
     )
 
-    contributing_ids = list(dict.fromkeys([task.id for task in blocked] + [task.id for task in needs_clarification] + [task.id for task in release_linked]))
+    # Every open task is now a fact (see the WorkspaceBrief construction below) - sources cover
+    # the same set, so every fact has a matching provenance entry (G4).
+    contributing_ids = list(dict.fromkeys(task.id for task in tasks))
     sources = tuple(_source(task_id, "delivery_fact", workspace_id) for task_id in contributing_ids)
 
     now = datetime.now(UTC)
@@ -205,7 +207,12 @@ async def build_delivery_brief(db: AsyncSession, context: AgentContext) -> ToolR
         generated_at=now,
         expires_at=now + timedelta(hours=24),
         headline=payload.headline,
-        facts=tuple(payload.blocked_items) + tuple(payload.decisions_needed),
+        # Every currently-open task, not only blocked/needs-clarification ones - a due-soon or
+        # in-progress task with no problem flag is still a real fact about this workspace's state
+        # (MULTI_AGENT_IMPLEMENTATION_PLAN.md #6.1: "Tổng hợp milestone, overdue, due soon,
+        # blocked..."). Deduplicated so a task that's both blocked and needs_clarification isn't
+        # listed twice.
+        facts=tuple({task["id"]: task for task in ([_task_dict(t) for t in tasks])}.values()),
         dependencies=tuple(payload.dependencies),
         decisions_needed=tuple(payload.decisions_needed),
         data_gaps=tuple(data_gaps),

@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from src.agents.contracts import RequestedScope
+
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant", "system"] = "user"
@@ -53,6 +55,20 @@ class ChatRequest(BaseModel):
             "from the DB according to this scope instead of trusting the client-supplied "
             "`messages` array - takes priority over `messages` when both are present."
         ),
+    )
+    requested_scope: RequestedScope = Field(
+        default=RequestedScope.PERSONAL,
+        description=(
+            "PERSONAL (default) keeps the existing LangGraph Personal-agent flow untouched. "
+            "WORKSPACE/AGGREGATE instead route through the deterministic Router to the "
+            "product_delivery/quality_assurance/executive agent profiles (read-only brief only "
+            "today - see src.api.routes._run_specialist_chat). A REQUEST, never a grant: real "
+            "entitlement is still resolved server-side against the caller's own membership."
+        ),
+    )
+    target_agent_workspace_id: str | None = Field(
+        default=None,
+        description="Required when requested_scope=WORKSPACE; must be omitted otherwise.",
     )
 
 

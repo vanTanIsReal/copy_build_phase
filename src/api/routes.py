@@ -3,17 +3,50 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Command
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents import graph as agent_graph
+from src.agents import router as agent_router
+from src.agents.context_builder import AgentRunRecorder, build_agent_context
+from src.agents.contracts import (
+    AgentIntent,
+    AgentInvocationRequest,
+    AgentProfile,
+    PolicyDecision,
+    PolicyReason,
+    RequestedScope,
+    ToolResultStatus,
+)
+from src.agents.tools import delivery_tool, executive_tool, quality_tool
 from src.api.rate_limit import crud_rate_limit, limiter
 from src.auth.dependencies import get_current_user
 from src.config import get_settings
-from src.db.models import User
+from src.db.models import AgentWorkspace, User, Workspace, WorkspaceMembership
 from src.db.session import get_db
 from src.models.schemas import ChatMessage, ChatRequest, ChatResponse, InterruptPayload, ResumeRequest
 from src.models.usage_schemas import UsageStatusOut
 from src.services import assistant_thread_service, chat_service, quick_action_service, usage_service
+
+# Ngày 6-7 hookup (MULTI_AGENT_IMPLEMENTATION_PLAN.md): which specialist tool builds the read-only
+# brief for a resolved route.profile. Only the brief-producing intents are reachable from /chat -
+# propose_*_reminder/propose_*_meeting stay reachable only from tests/scripts/run_eval.py (see
+# _run_specialist_chat's docstring for why).
+_SPECIALIST_BRIEF_TOOL = {
+    AgentProfile.PRODUCT_DELIVERY: delivery_tool.build_delivery_brief,
+    AgentProfile.QUALITY_ASSURANCE: quality_tool.build_quality_brief,
+    AgentProfile.EXECUTIVE: executive_tool.build_executive_brief,
+}
+
+_SPECIALIST_DENY_TEXT = {
+    PolicyReason.NOT_MEMBER: "Bạn chưa là thành viên của agent workspace này.",
+    PolicyReason.WRONG_WORKSPACE: "Không tìm thấy agent workspace này trong tổ chức của bạn.",
+    PolicyReason.PROFILE_MISMATCH: "Agent workspace này không khớp với loại yêu cầu.",
+    PolicyReason.INVALID_SCOPE: "Yêu cầu không hợp lệ cho phạm vi này.",
+    PolicyReason.RESOURCE_NOT_ALLOWED: "Bạn không có quyền truy cập dữ liệu này.",
+    PolicyReason.CONSENT_CHANGED: "Quyền chia sẻ dữ liệu đã thay đổi, vui lòng thử lại.",
+    PolicyReason.FEATURE_DISABLED: "Tính năng này hiện chưa được bật.",
+}
 
 router = APIRouter()
 
@@ -36,6 +69,160 @@ def _format_messages(messages: list[ChatMessage]) -> str:
         who = f"{m.sender or m.role}" + (f" [{ts}]" if ts else "")
         lines.append(f"{who}: {m.content}")
     return "\n".join(lines)
+
+
+async def _user_organization_workspace_ids(db: AsyncSession, user_id: str) -> tuple[str, ...]:
+    """Real (if today mostly empty - see Workspace's own docstring in src/db/models.py) active
+    organization memberships for this user. Never fabricated: a user with no row here simply gets
+    denied below, same as any other real authorization failure."""
+    rows = (
+        await db.execute(
+            select(WorkspaceMembership.workspace_id)
+            .join(Workspace, Workspace.id == WorkspaceMembership.workspace_id)
+            .where(
+                WorkspaceMembership.user_id == user_id,
+                WorkspaceMembership.status == "active",
+                Workspace.type == "organization",
+                Workspace.status == "active",
+            )
+        )
+    ).scalars().all()
+    return tuple(rows)
+
+
+async def _resolve_specialist_intent(
+    db: AsyncSession, requested_scope: RequestedScope, target_agent_workspace_id: str | None
+) -> AgentIntent:
+    if requested_scope == RequestedScope.AGGREGATE:
+        return AgentIntent.EXECUTIVE_BRIEF
+    if target_agent_workspace_id:
+        workspace = await db.get(AgentWorkspace, target_agent_workspace_id)
+        if workspace is not None and workspace.agent_profile == AgentProfile.QUALITY_ASSURANCE.value:
+            return AgentIntent.QUALITY_BRIEF
+    # Fallback when the target can't be resolved (missing workspace, wrong org, ...) - safe because
+    # agent_router.route_agent_request checks the workspace's existence/org BEFORE it ever checks
+    # whether this intent is allowed for the resolved profile, so an unresolved target still ends up
+    # denied with the correct WRONG_WORKSPACE reason regardless of this placeholder.
+    return AgentIntent.DELIVERY_BRIEF
+
+
+def _format_workspace_brief_text(brief: dict) -> str:
+    lines = [brief["headline"]]
+    if brief.get("release_readiness"):
+        lines.append(f"Release readiness: {brief['release_readiness']}")
+    if brief.get("risks"):
+        lines.append(f"Rủi ro ({len(brief['risks'])}):")
+        lines.extend(f"- {risk.get('text', risk)}" for risk in brief["risks"][:5])
+    if brief.get("dependencies"):
+        lines.append(f"Liên quan release chung với workspace khác: {len(brief['dependencies'])} mục.")
+    if brief.get("data_gaps"):
+        lines.append("Thiếu dữ liệu: " + "; ".join(brief["data_gaps"]))
+    return "\n".join(lines)
+
+
+def _format_executive_brief_text(brief: dict) -> str:
+    lines = [brief["headline"]]
+    if brief.get("risks"):
+        lines.append(f"Rủi ro ({len(brief['risks'])}):")
+        lines.extend(f"- {risk.get('text', risk)}" for risk in brief["risks"][:5])
+    if brief.get("cross_workspace_dependencies"):
+        lines.append(f"Phụ thuộc chéo workspace: {len(brief['cross_workspace_dependencies'])} mục.")
+    if brief.get("data_gaps"):
+        lines.append("Thiếu dữ liệu: " + "; ".join(brief["data_gaps"]))
+    return "\n".join(lines)
+
+
+async def _run_specialist_chat(body: ChatRequest, current_user: User, db: AsyncSession, thread_id: str) -> ChatResponse:
+    """Ngày 6-7 hookup (MULTI_AGENT_IMPLEMENTATION_PLAN.md) of the deterministic Router (G0-G2)
+    into the real /chat endpoint - only for requested_scope WORKSPACE/AGGREGATE, entirely separate
+    from the LangGraph Personal-agent path above (that path is untouched by this function).
+
+    Scope of this hookup is deliberately read-only: only the brief-producing intents
+    (build_delivery_brief/build_quality_brief/build_executive_brief) are reachable here.
+    propose_*_reminder/propose_*_meeting stay reachable only from tests/scripts/run_eval.py - they
+    already return an ActionProposal preview, but nothing here turns that into a real
+    interrupt()/resume flow yet. Wiring a brand-new approval UI in the same pass risked the
+    project's human-in-the-loop guarantee (CLAUDE.md's hard constraint), so it is left as an
+    explicit, separate follow-up instead of done half-way.
+
+    A real user has zero AgentWorkspace/organization membership today (see Workspace's own
+    docstring in src/db/models.py) - this function never fabricates one; no membership resolves to
+    a real DENY_NOT_MEMBER below, exactly like any other authorization failure.
+    """
+    if body.requested_scope == RequestedScope.WORKSPACE and body.target_agent_workspace_id:
+        target_workspace = await db.get(AgentWorkspace, body.target_agent_workspace_id)
+        organization_workspace_id = target_workspace.organization_workspace_id if target_workspace else None
+    else:
+        org_ids = await _user_organization_workspace_ids(db, current_user.id)
+        if len(org_ids) == 1:
+            organization_workspace_id = org_ids[0]
+        elif not org_ids:
+            organization_workspace_id = None
+        else:
+            return ChatResponse(
+                response="Bạn thuộc nhiều tổ chức - vui lòng chọn một agent workspace cụ thể thay vì executive brief tổng hợp.",
+                thread_id=thread_id,
+                status="error",
+            )
+
+    if organization_workspace_id is None:
+        return ChatResponse(
+            response=_SPECIALIST_DENY_TEXT[PolicyReason.NOT_MEMBER],
+            thread_id=thread_id,
+            status="error",
+        )
+
+    intent = await _resolve_specialist_intent(db, body.requested_scope, body.target_agent_workspace_id)
+    invocation = AgentInvocationRequest(
+        message=body.message,
+        conversation_id=body.conversation_id,
+        requested_scope=body.requested_scope,
+        target_agent_workspace_id=body.target_agent_workspace_id,
+    )
+    try:
+        route = await agent_router.route_agent_request(
+            db, organization_workspace_id=organization_workspace_id, invocation=invocation, intent=intent
+        )
+    except agent_router.AgentRouteDeniedError as exc:
+        return ChatResponse(
+            response=_SPECIALIST_DENY_TEXT.get(exc.reason, "Yêu cầu không được chấp nhận."),
+            thread_id=thread_id,
+            status="error",
+        )
+
+    context = await build_agent_context(
+        db,
+        user=current_user,
+        organization_workspace_id=organization_workspace_id,
+        invocation=invocation,
+        intent=route.intent,
+        agent_profile=route.profile,
+    )
+
+    # AgentRunRecorder (G6 audit) always writes one agent_runs row on exit, ALLOW or DENY alike,
+    # with a real measured latency_ms - see context_builder.AgentRunRecorder. token_usage is
+    # honestly left at 0: this path calls zero LLMs (release_readiness/risks are computed by code,
+    # not a model), so there is no token cost to record here yet.
+    async with AgentRunRecorder(db, context):
+        if context.authorization.decision != PolicyDecision.ALLOW:
+            return ChatResponse(
+                response=_SPECIALIST_DENY_TEXT.get(context.authorization.reason, "Yêu cầu bị từ chối."),
+                thread_id=thread_id,
+                status="error",
+            )
+        tool = _SPECIALIST_BRIEF_TOOL[route.profile]
+        result = await tool(db, context)
+
+    if result.status == ToolResultStatus.ERROR:
+        return ChatResponse(
+            response=result.error_message or "Không lấy được dữ liệu.", thread_id=thread_id, status="error"
+        )
+
+    if route.profile == AgentProfile.EXECUTIVE:
+        text = _format_executive_brief_text(result.payload["executive_brief"])
+    else:
+        text = _format_workspace_brief_text(result.payload["workspace_brief"])
+    return ChatResponse(response=text, thread_id=thread_id, status="completed")
 
 
 def _build_chat_response(result: dict, thread_id: str) -> ChatResponse:
@@ -106,6 +293,11 @@ async def chat(
             thread_id=thread_id,
             status="error",
         )
+
+    if body.requested_scope != RequestedScope.PERSONAL:
+        # Deterministic Router path (product_delivery/quality_assurance/executive) - separate from
+        # the LangGraph Personal-agent flow below; see _run_specialist_chat's docstring for scope.
+        return await _run_specialist_chat(body, current_user, db, thread_id)
 
     _thread_owners.setdefault(thread_id, current_user.id)
     config = {"configurable": {"thread_id": thread_id}}

@@ -183,9 +183,11 @@ async def build_quality_brief(db: AsyncSession, context: AgentContext) -> ToolRe
         blocked_tests=[_work_item_dict(item) for item in blocked_tests],
     )
 
-    contributing_ids = list(dict.fromkeys(
-        [item.id for item in critical_defects] + [item.id for item in blocked_tests] + [item.id for item in release_linked]
-    ))
+    # Every work item is a fact (see the WorkspaceBrief construction below), not only critical
+    # bugs/blocked tests - a high-severity-but-not-critical bug or a failed (not blocked) test is
+    # still real, reportable information; only release_readiness itself stays governed strictly by
+    # the critical-bug rule (compute_release_readiness above, untouched).
+    contributing_ids = list(dict.fromkeys(item.id for item in items))
     sources = tuple(_source(item_id, "quality_fact", workspace_id) for item_id in contributing_ids)
 
     now = datetime.now(UTC)
@@ -201,7 +203,7 @@ async def build_quality_brief(db: AsyncSession, context: AgentContext) -> ToolRe
         generated_at=now,
         expires_at=now + timedelta(hours=24),
         headline=payload.headline,
-        facts=tuple(payload.critical_defects) + tuple(payload.blocked_tests),
+        facts=tuple(_work_item_dict(item) for item in items),
         dependencies=tuple(_work_item_dict(item) for item in release_linked),
         sources=sources,
         release_readiness=ReleaseReadiness(readiness),
