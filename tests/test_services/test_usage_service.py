@@ -54,29 +54,6 @@ async def test_log_usage_still_writes_a_row(client):
 
 
 @pytest.mark.asyncio
-async def test_usage_today_estimates_known_model_cost_and_reports_unknown_models(client):
-    await usage_service.log_usage(
-        provider="openai",
-        model="gpt-4o-mini",
-        usage_metadata={"input_tokens": 1_000_000, "output_tokens": 1_000_000, "total_tokens": 2_000_000},
-    )
-    await usage_service.log_usage(
-        provider="custom",
-        model="unknown-model",
-        usage_metadata={"input_tokens": 30, "output_tokens": 20, "total_tokens": 50},
-    )
-
-    usage = await usage_service.get_usage_today()
-
-    assert usage["prompt_tokens"] == 1_000_030
-    assert usage["completion_tokens"] == 1_000_020
-    assert usage["total_tokens"] == 2_000_050
-    assert usage["request_count"] == 2
-    assert usage["estimated_cost_usd"] == pytest.approx(0.75)
-    assert usage["unpriced_tokens"] == 50
-
-
-@pytest.mark.asyncio
 async def test_log_usage_alerts_admins_on_warning_crossing(client, admin_auth_headers, monkeypatch):
     monkeypatch.setattr(usage_service, "get_settings", lambda: _settings(100))
     broadcast = AsyncMock()

@@ -3,6 +3,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
+from src.agents.nodes.compact_node import compact_thread_node
 from src.agents.nodes.planner_node import planner_node
 from src.agents.state import AgentState
 from src.agents.tools import ALL_TOOLS
@@ -37,30 +38,33 @@ def build_graph(checkpointer):
 
     graph.add_node("planner", planner_node)
     graph.add_node("tools", ToolNode(ALL_TOOLS))
+    graph.add_node("compact_thread", compact_thread_node)
 
     graph.set_entry_point("planner")
-    graph.add_conditional_edges("planner", route_after_planner, {"tools": "tools", END: END})
-    graph.add_conditional_edges("tools", route_after_tools, {"planner": "planner", END: END})
+    graph.add_conditional_edges("planner", route_after_planner, {"tools": "tools", END: "compact_thread"})
+    graph.add_conditional_edges("tools", route_after_tools, {"planner": "planner", END: "compact_thread"})
+    graph.add_edge("compact_thread", END)
 
     return graph.compile(checkpointer=checkpointer)
 
 
 _settings = get_settings()
+_use_postgres = _settings.database_url.startswith(("postgresql://", "postgresql+asyncpg://", "postgres://"))
 
-# Unit tests deliberately use an isolated in-memory saver. Every real runtime is validated to use
-# PostgreSQL and initializes AsyncPostgresSaver during application startup.
-if _settings.app_env == "test":
+# PostgreSQL is initialized during application startup. Lightweight development and tests use
+# MemorySaver so importing the graph never requires a running event loop or external database.
+if _use_postgres:
+    checkpointer, checkpointer_pool, agent = None, None, None
+else:
     checkpointer, checkpointer_pool = MemorySaver(), None
     agent = build_graph(checkpointer)
-else:
-    checkpointer, checkpointer_pool, agent = None, None, None
 
 
 async def init_checkpointer() -> None:
     """Build the Postgres checkpointer/pool and compile `agent` with it. Must be awaited once,
     inside the event loop that will go on to serve requests, before any /chat call."""
     global checkpointer, checkpointer_pool, agent
-    if _settings.app_env == "test":
+    if not _use_postgres:
         return
 
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver

@@ -54,5 +54,6 @@ async def summarize_conversation(
         model=settings.model_name,
         usage_metadata=result.usage_metadata,
         user_id=(state or {}).get("user_id"),
+        workspace_id=(state or {}).get("workspace_id"),
     )
     return result.content

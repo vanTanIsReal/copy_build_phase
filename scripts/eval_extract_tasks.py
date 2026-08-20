@@ -15,6 +15,7 @@ Scores two separate things, because they fail independently:
 Usage:
     python scripts/eval_extract_tasks.py
 """
+
 import asyncio
 import json
 import sys
@@ -89,7 +90,9 @@ DATASET: list[EvalCase] = [
                 keywords=("địa điểm", "phòng", "venue", "offsite"),
                 expected_date=lambda today: _next_weekday(today, 4),
             ),
-            ExpectedTask(keywords=("khách", "catering", "ăn uống"), expected_date=lambda today: _next_weekday(today, 4)),
+            ExpectedTask(
+                keywords=("khách", "catering", "ăn uống"), expected_date=lambda today: _next_weekday(today, 4)
+            ),
         ],
     ),
     EvalCase(
@@ -126,6 +129,39 @@ DATASET: list[EvalCase] = [
         name="question_is_not_a_task",
         conversation="Bob: What time does the meeting usually start on Mondays?",
         expected=[],
+    ),
+    EvalCase(
+        name="negated_request_is_not_a_task",
+        conversation="Alice: Đừng gửi bản nháp hôm nay nhé, mình đã tự xử lý xong rồi.",
+        expected=[],
+    ),
+    EvalCase(
+        name="next_week_vietnamese",
+        conversation="Nam: Thứ Hai tuần sau gửi mình kế hoạch sprint nhé.",
+        expected=[ExpectedTask(keywords=("kế hoạch", "sprint"))],
+    ),
+    EvalCase(
+        name="code_switched_deadline",
+        conversation="Mai: Please chốt danh sách khách trước 5pm tomorrow giúp mình.",
+        expected=[
+            ExpectedTask(
+                keywords=("danh sách", "khách"),
+                expected_date=lambda today: today + timedelta(days=1),
+                expected_hour_range=(16, 18),
+            )
+        ],
+    ),
+    EvalCase(
+        name="completed_then_new_follow_up",
+        conversation=(
+            "An: Báo cáo tháng trước mình gửi xong rồi.\nBình: Tốt, vậy mai gửi thêm bản tóm tắt một trang nhé."
+        ),
+        expected=[ExpectedTask(keywords=("tóm tắt",), expected_date=lambda today: today + timedelta(days=1))],
+    ),
+    EvalCase(
+        name="two_speakers_two_tasks",
+        conversation=("Lan: Minh review PR trước thứ Sáu nhé.\nMinh: Ok, Lan nhớ đặt phòng họp cho buổi demo nữa."),
+        expected=[ExpectedTask(keywords=("PR",)), ExpectedTask(keywords=("phòng", "demo"))],
     ),
 ]
 
@@ -193,7 +229,9 @@ async def main() -> None:
 
     total_tp = total_fp = total_fn = 0
     total_date_correct = total_date_checked = 0
-    print(f"Running task-extraction accuracy eval on {len(DATASET)} cases (today = {today}, {settings.calendar_timezone})...\n")
+    print(
+        f"Running task-extraction accuracy eval on {len(DATASET)} cases (today = {today}, {settings.calendar_timezone})...\n"
+    )
 
     for case in DATASET:
         raw = await extract_tasks.coroutine(state={"context": case.conversation})

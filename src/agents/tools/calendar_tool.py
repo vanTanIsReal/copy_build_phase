@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
@@ -6,12 +6,15 @@ from langgraph.types import interrupt
 
 from src.agents.state import AgentState
 from src.services import calendar_service
-from src.services.google_credentials import CalendarNotConnected
+from src.services.google_credentials import CalendarNotConnectedError
 
-_NOT_CONNECTED_MSG = (
-    "This account hasn't connected Google Calendar yet - tell them to go to the Calendar page and "
-    "click 'Connect Google Calendar' first."
-)
+
+def _agent_identity(state: AgentState | None) -> tuple[str, str]:
+    user_id = (state or {}).get("user_id")
+    workspace_id = (state or {}).get("workspace_id")
+    if not user_id or not workspace_id:
+        raise ValueError("Authenticated user and workspace context are required")
+    return user_id, workspace_id
 
 
 @tool
@@ -33,6 +36,12 @@ async def create_calendar_event(
         description: Optional event details.
         attendees: Optional list of attendee email addresses.
     """
+    user_id, _workspace_id = _agent_identity(state)
+    try:
+        conflicts = await calendar_service.find_conflicts(user_id, start_iso, end_iso)
+    except CalendarNotConnectedError:
+        return "Connect Google Calendar from the Calendar page before creating an event."
+
     draft = {
         "summary": summary,
         "start": start_iso,
@@ -40,23 +49,29 @@ async def create_calendar_event(
         "description": description,
         "attendees": attendees or [],
     }
+    if conflicts:
+        # Propose & Verify: surface what it clashes with plus up to 2 free alternatives in the
+        # same confirmation step, instead of silently double-booking or blocking outright - the
+        # user still decides (pick an alternative, keep the original time anyway, or cancel).
+        draft["conflicts"] = [calendar_service.to_out_dict(e) for e in conflicts]
+        draft["alternatives"] = await calendar_service.suggest_alternative_slots(user_id, start_iso, end_iso)
+
     decision = interrupt({"type": "calendar_event", "draft": draft})
     if not decision or not decision.get("approved"):
         return "Calendar event was not created (user declined)."
 
-    user_id = (state or {}).get("user_id")
     draft.update(decision.get("edits") or {})
     try:
         created = await calendar_service.create_event(
             user_id,
-            summary=draft["summary"],
-            start_iso=draft["start"],
-            end_iso=draft["end"],
-            description=draft["description"],
-            attendees=draft["attendees"],
+            draft["summary"],
+            draft["start"],
+            draft["end"],
+            draft["description"],
+            draft["attendees"],
         )
-    except CalendarNotConnected:
-        return _NOT_CONNECTED_MSG
+    except CalendarNotConnectedError:
+        return "Connect Google Calendar from the Calendar page before creating an event."
     await calendar_service.broadcast_change(
         user_id, "calendar_event_created", {"event": calendar_service.to_out_dict(created)}
     )
@@ -65,28 +80,35 @@ async def create_calendar_event(
 
 @tool
 async def list_calendar_events(
-    time_min_iso: str,
-    time_max_iso: str,
+    scope: Literal["today", "this_week", "next_7_days", "next_30_days"] | None = None,
+    time_min_iso: str | None = None,
+    time_max_iso: str | None = None,
     max_results: int = 10,
     state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
 ) -> str:
     """List existing calendar events in a time range. Read-only, no confirmation needed.
 
     Args:
-        time_min_iso: Start of the range as an ISO 8601 datetime string.
-        time_max_iso: End of the range as an ISO 8601 datetime string.
+        scope: A deterministic common relative range: today, this_week, next_7_days,
+            or next_30_days. Prefer this over calculating ISO boundaries yourself.
+        time_min_iso: Start of a specific range as an ISO 8601 datetime string.
+        time_max_iso: End of a specific range as an ISO 8601 datetime string.
         max_results: Maximum number of events to return.
     """
-    user_id = (state or {}).get("user_id")
+    if scope:
+        time_min_iso, time_max_iso = calendar_service.resolve_scope(scope)
+    elif not time_min_iso or not time_max_iso:
+        return "Cần cung cấp khoảng thời gian bằng scope hoặc đầy đủ time_min_iso và time_max_iso."
+
+    user_id, _workspace_id = _agent_identity(state)
     try:
         items = await calendar_service.list_events(user_id, time_min_iso, time_max_iso, max_results)
-    except CalendarNotConnected:
-        return _NOT_CONNECTED_MSG
+    except CalendarNotConnectedError:
+        return "Connect Google Calendar from the Calendar page before listing events."
     if not items:
         return "No events found in that range."
     return "\n".join(
-        f"- {e.get('summary')} (id={e.get('id')}, {e['start'].get('dateTime', e['start'].get('date'))})"
-        for e in items
+        f"- {e.get('summary')} (id={e.get('id')}, {e['start'].get('dateTime', e['start'].get('date'))})" for e in items
     )
 
 
@@ -115,19 +137,19 @@ async def update_calendar_event(
     if not decision or not decision.get("approved"):
         return "Calendar event was not updated (user declined)."
 
-    user_id = (state or {}).get("user_id")
     draft.update(decision.get("edits") or {})
+    user_id, workspace_id = _agent_identity(state)
     try:
         updated = await calendar_service.update_event(
             user_id,
-            event_id=draft["event_id"],
-            summary=draft["summary"],
-            start_iso=draft["start"],
-            end_iso=draft["end"],
-            description=draft["description"],
+            draft["event_id"],
+            draft["summary"],
+            draft["start"],
+            draft["end"],
+            draft["description"],
         )
-    except CalendarNotConnected:
-        return _NOT_CONNECTED_MSG
+    except CalendarNotConnectedError:
+        return "Connect Google Calendar from the Calendar page before updating an event."
     await calendar_service.broadcast_change(
         user_id, "calendar_event_updated", {"event": calendar_service.to_out_dict(updated)}
     )
@@ -136,7 +158,8 @@ async def update_calendar_event(
 
 @tool
 async def delete_calendar_event(
-    event_id: str, state: Annotated[AgentState, InjectedState] = None  # type: ignore[assignment]
+    event_id: str,
+    state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
 ) -> str:
     """Draft the deletion of an existing Google Calendar event (found via list_calendar_events).
     Requires the user's explicit confirmation before it is actually deleted.
@@ -148,10 +171,10 @@ async def delete_calendar_event(
     if not decision or not decision.get("approved"):
         return "Calendar event was not deleted (user declined)."
 
-    user_id = (state or {}).get("user_id")
+    user_id, workspace_id = _agent_identity(state)
     try:
         await calendar_service.delete_event(user_id, event_id)
-    except CalendarNotConnected:
-        return _NOT_CONNECTED_MSG
+    except CalendarNotConnectedError:
+        return "Connect Google Calendar from the Calendar page before deleting an event."
     await calendar_service.broadcast_change(user_id, "calendar_event_deleted", {"event_id": event_id})
     return "Event deleted."

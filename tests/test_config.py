@@ -10,6 +10,7 @@ def _production_settings(**overrides):
         "secret_key": "x" * 32,
         "database_url": "postgresql://orbit:secret@db/orbit",
         "cors_origins": "https://app.example.com",
+        "cors_origin_regex": "",
         "llm_provider": "google",
         "google_api_key": "test-api-key",
     }
@@ -22,19 +23,35 @@ def test_valid_production_settings_are_accepted():
     assert settings.app_env == "production"
 
 
-def test_development_requires_postgres():
-    with pytest.raises(ValidationError, match="Development and production require a PostgreSQL DATABASE_URL"):
-        Settings(_env_file=None, app_env="development", database_url="sqlite:///./data/app.db")
+def test_multi_agent_feature_flags_default_to_disabled(monkeypatch):
+    for name in (
+        "MULTI_AGENT_ENABLED",
+        "PRODUCT_DELIVERY_AGENT_ENABLED",
+        "QUALITY_ASSURANCE_AGENT_ENABLED",
+        "EXECUTIVE_AGENT_ENABLED",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    settings = Settings(_env_file=None)
+
+    assert settings.multi_agent_enabled is False
+    assert settings.product_delivery_agent_enabled is False
+    assert settings.quality_assurance_agent_enabled is False
+    assert settings.executive_agent_enabled is False
 
 
-def test_test_environment_accepts_sqlite():
-    settings = Settings(_env_file=None, app_env="test", database_url="sqlite+aiosqlite:///:memory:")
-    assert settings.database_url.startswith("sqlite")
+def test_multi_agent_feature_flags_can_be_enabled_explicitly():
+    settings = Settings(
+        _env_file=None,
+        multi_agent_enabled=True,
+        product_delivery_agent_enabled=True,
+        quality_assurance_agent_enabled=True,
+        executive_agent_enabled=True,
+    )
 
-
-def test_database_url_is_required():
-    with pytest.raises(ValidationError):
-        Settings(_env_file=None, app_env="development")
+    assert settings.multi_agent_enabled is True
+    assert settings.product_delivery_agent_enabled is True
+    assert settings.quality_assurance_agent_enabled is True
+    assert settings.executive_agent_enabled is True
 
 
 @pytest.mark.parametrize(

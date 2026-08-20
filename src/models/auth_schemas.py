@@ -9,12 +9,6 @@ class RegisterRequest(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=80)
 
 
-class AdminRegisterRequest(RegisterRequest):
-    """Request used only by the dedicated first-admin bootstrap screen."""
-
-    bootstrap_key: str = Field(..., min_length=1)
-
-
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
@@ -28,6 +22,7 @@ class UserPublic(BaseModel):
     id: str
     email: str
     display_name: str
+    role: str
     platform_role: Literal["user", "platform_admin"]
     job_title: str = ""
     timezone: str = "Asia/Ho_Chi_Minh"

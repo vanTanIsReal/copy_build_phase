@@ -8,11 +8,12 @@ from src.agents.state import AgentState
 from src.services import reminder_service
 
 
-def _agent_identity(state: AgentState | None) -> str:
+def _agent_identity(state: AgentState | None) -> tuple[str, str]:
     user_id = (state or {}).get("user_id")
-    if not user_id:
-        raise ValueError("Authenticated user context is required")
-    return user_id
+    workspace_id = (state or {}).get("workspace_id")
+    if not user_id or not workspace_id:
+        raise ValueError("Authenticated user and workspace context are required")
+    return user_id, workspace_id
 
 
 @tool
@@ -38,8 +39,9 @@ async def create_reminder(
         return "Reminder was not scheduled (user declined)."
 
     draft.update(decision.get("edits") or {})
-    user_id = _agent_identity(state)
+    user_id, workspace_id = _agent_identity(state)
     reminder = await reminder_service.schedule_reminder(
+        workspace_id=workspace_id,
         owner_id=user_id,
         title=draft["title"],
         due_at_iso=draft["due_at"],
@@ -55,8 +57,8 @@ async def list_reminders(
     state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
 ) -> str:
     """List currently scheduled reminders. Read-only, no confirmation needed."""
-    user_id = _agent_identity(state)
-    reminders = await reminder_service.list_reminders(owner_id=user_id)
+    user_id, workspace_id = _agent_identity(state)
+    reminders = await reminder_service.list_reminders(owner_id=user_id, workspace_id=workspace_id)
     if not reminders:
         return "No reminders scheduled."
     return "\n".join(f"- {r.title} ({r.status}, due {r.due_at.isoformat()})" for r in reminders)

@@ -1,7 +1,6 @@
 """Add Google sign-in identities and per-user conversation AI consent."""
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision = "20260806_06"

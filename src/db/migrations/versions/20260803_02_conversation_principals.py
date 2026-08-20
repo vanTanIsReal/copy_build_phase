@@ -3,7 +3,6 @@
 from uuid import uuid4
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision = "20260803_02"
@@ -143,8 +142,6 @@ def _replace_participant_table(connection) -> None:
 
 def upgrade() -> None:
     connection = op.get_bind()
-    if "workspaces" not in _table_names(connection):
-        return
     if "external_contacts" not in _table_names(connection):
         op.create_table(
             "external_contacts",

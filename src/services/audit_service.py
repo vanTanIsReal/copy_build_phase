@@ -13,6 +13,7 @@ async def record_audit_event(
     action: str,
     target_type: str,
     target_id: str | None,
+    workspace_id: str | None,
     metadata: dict[str, Any] | None = None,
     ip_address: str | None = None,
 ) -> AuditLog:
@@ -23,6 +24,7 @@ async def record_audit_event(
     if actor is not None:
         actor_type = "platform_admin" if actor.platform_role == "platform_admin" else "user"
     record = AuditLog(
+        workspace_id=workspace_id,
         actor_user_id=actor.id if actor is not None else None,
         actor_type=actor_type,
         action=action,

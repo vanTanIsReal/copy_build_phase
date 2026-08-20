@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 async def schedule_reminder(
     *,
+    workspace_id: str,
     owner_id: str,
     title: str,
     due_at_iso: str | datetime,
@@ -22,8 +23,8 @@ async def schedule_reminder(
     message: str = "",
     source: str = "manual",
 ) -> Reminder:
-    if not owner_id:
-        raise ValueError("Reminder owner is required")
+    if not workspace_id or not owner_id:
+        raise ValueError("Reminder workspace and owner are required")
     due_at = due_at_iso if isinstance(due_at_iso, datetime) else datetime.fromisoformat(due_at_iso)
     if due_at.tzinfo is None:
         # The agent/LLM sometimes emits a date/time with no UTC offset - treat it as Hanoi
@@ -38,6 +39,7 @@ async def schedule_reminder(
 
     async with db_session.async_session_maker() as db:
         reminder = Reminder(
+            workspace_id=workspace_id,
             owner_id=owner_id,
             title=title,
             message=message,
@@ -61,8 +63,9 @@ async def _fire_reminder_job(reminder_id: str) -> None:
             return
         reminder.status = "fired"
         await db.commit()
-        owner_id, title, message = (
+        owner_id, workspace_id, title, message = (
             reminder.owner_id,
+            reminder.workspace_id,
             reminder.title,
             reminder.message,
         )
@@ -73,8 +76,10 @@ async def _fire_reminder_job(reminder_id: str) -> None:
             [owner_id],
             {
                 "type": "reminder_fired",
+                "workspace_id": workspace_id,
                 "reminder": {
                     "id": reminder_id,
+                    "workspace_id": workspace_id,
                     "title": title,
                     "message": message,
                 },
@@ -84,13 +89,14 @@ async def _fire_reminder_job(reminder_id: str) -> None:
 
 async def list_reminders(
     owner_id: str,
+    workspace_id: str,
     limit: int = 200,
     offset: int = 0,
 ) -> list[Reminder]:
     async with db_session.async_session_maker() as db:
         result = await db.execute(
             select(Reminder)
-            .where(Reminder.owner_id == owner_id)
+            .where(Reminder.owner_id == owner_id, Reminder.workspace_id == workspace_id)
             .order_by(Reminder.fire_at)
             .offset(max(0, offset))
             .limit(max(1, min(limit, 500)))
@@ -105,13 +111,14 @@ def remove_scheduler_job(reminder_id: str) -> None:
         pass
 
 
-async def cancel_reminder(reminder_id: str, owner_id: str) -> bool:
+async def cancel_reminder(reminder_id: str, owner_id: str, workspace_id: str) -> bool:
     async with db_session.async_session_maker() as db:
         reminder = (
             await db.execute(
                 select(Reminder).where(
                     Reminder.id == reminder_id,
                     Reminder.owner_id == owner_id,
+                    Reminder.workspace_id == workspace_id,
                 )
             )
         ).scalar_one_or_none()

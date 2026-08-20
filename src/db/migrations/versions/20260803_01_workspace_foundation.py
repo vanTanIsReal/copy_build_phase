@@ -5,8 +5,8 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import sqlalchemy as sa
-
 from alembic import op
+
 from src.db import models  # noqa: F401
 from src.db.base import Base
 
@@ -209,18 +209,6 @@ def _backfill(connection, owner_user_id: str | None) -> None:
         sa.text("SELECT id FROM migration_states WHERE migration_key = 'workspace_foundation_v1'")
     ).scalar_one_or_none()
     if state_exists is None:
-        migration_state_columns = _column_names(connection, "migration_states")
-        if "migration_version" in migration_state_columns:
-            connection.execute(
-                sa.text(
-                    "INSERT INTO migration_states "
-                    "(id, migration_key, migration_version, status, error_code, started_at, completed_at) "
-                    "VALUES (:id, 'workspace_foundation_v1', 'workspace_foundation_v1', "
-                    "'completed', NULL, :started_at, :completed_at)"
-                ),
-                {"id": _uuid(), "started_at": now, "completed_at": now},
-            )
-            return
         connection.execute(
             sa.text(
                 "INSERT INTO migration_states "
@@ -268,11 +256,6 @@ def _finalize_conversations(connection) -> None:
 def upgrade() -> None:
     connection = op.get_bind()
     _create_schema(connection)
-    # A fresh installation is created directly from the current (workspace-free) metadata.
-    # Legacy revisions remain in the chain only to upgrade databases that actually contain the
-    # former workspace schema.
-    if "workspaces" not in _table_names(connection):
-        return
     conversation_count = connection.execute(sa.text("SELECT COUNT(*) FROM conversations")).scalar_one()
     owner_user_id = _resolve_owner(connection) if conversation_count else None
     _backfill(connection, owner_user_id)

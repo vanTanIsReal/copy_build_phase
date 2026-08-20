@@ -3,7 +3,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
-from src.db.models import Conversation, ConversationParticipant, Message, User
+from src.db.models import Conversation, ConversationParticipant, Message, User, WorkspaceMembership
 from src.db.session import get_db
 from src.models.auth_schemas import UserPublic
 from src.models.chat_schemas import (
@@ -12,13 +12,14 @@ from src.models.chat_schemas import (
     ConversationCreateRequest,
     ConversationListResponse,
     ConversationSummary,
+    GroupAIPolicyUpdateRequest,
     MessageListResponse,
     MessageOut,
     SendMessageRequest,
 )
-from src.services import chat_service, proactive_service
-from src.services.audit_service import record_audit_event
+from src.services import chat_service, event_extraction_service, proactive_service
 from src.services.authorization_service import require_conversation_access
+from src.services.workspace_service import resolve_workspace_for_user
 from src.websocket.manager import manager
 
 router = APIRouter()
@@ -27,10 +28,31 @@ router = APIRouter()
 @router.get("/users", response_model=list[UserPublic])
 async def list_users(
     search: str | None = Query(default=None),
+    workspace_id: str | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[UserPublic]:
-    stmt = select(User).where(User.id != current_user.id, User.is_active.is_(True))
+    workspace = await resolve_workspace_for_user(db, current_user.id, workspace_id)
+    # Directory visibility is workspace-scoped; guests do not receive a global user list.
+    if workspace.type == "personal":
+        return []
+
+    current_membership = (
+        await db.execute(
+            select(WorkspaceMembership).where(
+                WorkspaceMembership.workspace_id == workspace.id,
+                WorkspaceMembership.user_id == current_user.id,
+                WorkspaceMembership.status == "active",
+            )
+        )
+    ).scalar_one_or_none()
+    if current_membership is None or current_membership.role == "guest":
+        return []
+    member_ids = select(WorkspaceMembership.user_id).where(
+        WorkspaceMembership.workspace_id == workspace.id,
+        WorkspaceMembership.status == "active",
+    )
+    stmt = select(User).where(User.id != current_user.id, User.id.in_(member_ids), User.is_active.is_(True))
     if search:
         pattern = f"%{search}%"
         stmt = stmt.where(or_(User.display_name.ilike(pattern), User.email.ilike(pattern)))
@@ -40,6 +62,7 @@ async def list_users(
             id=u.id,
             email=u.email,
             display_name=u.display_name,
+            role=u.role,
             platform_role=u.platform_role,
         )
         for u in users
@@ -48,16 +71,25 @@ async def list_users(
 
 @router.get("/conversations", response_model=ConversationListResponse)
 async def list_conversations(
+    workspace_id: str | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ConversationListResponse:
+    workspace = await resolve_workspace_for_user(db, current_user.id, workspace_id)
     conversation_ids = (
         (
             await db.execute(
                 select(ConversationParticipant.conversation_id)
+                .join(
+                    WorkspaceMembership,
+                    (WorkspaceMembership.workspace_id == workspace.id)
+                    & (WorkspaceMembership.user_id == current_user.id),
+                )
                 .where(
                     ConversationParticipant.user_id == current_user.id,
                     ConversationParticipant.revoked_at.is_(None),
+                    ConversationParticipant.hidden_at.is_(None),
+                    WorkspaceMembership.status == "active",
                 )
             )
         )
@@ -68,7 +100,7 @@ async def list_conversations(
         (
             await db.execute(
                 select(Conversation)
-                .where(Conversation.id.in_(conversation_ids))
+                .where(Conversation.id.in_(conversation_ids), Conversation.workspace_id == workspace.id)
                 .order_by(Conversation.updated_at.desc())
             )
         )
@@ -92,13 +124,13 @@ async def create_conversation(
                 detail="Direct conversations need exactly one other participant",
             )
         conversation = await chat_service.get_or_create_direct_conversation(
-            db, current_user.id, request.participant_ids[0]
+            db, current_user.id, request.participant_ids[0], request.workspace_id
         )
     else:
         if not request.name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Group conversations require a name")
         conversation = await chat_service.create_group_conversation(
-            db, current_user.id, request.participant_ids, request.name
+            db, current_user.id, request.participant_ids, request.name, request.workspace_id
         )
     return await chat_service.build_conversation_summary(db, conversation, current_user.id)
 
@@ -126,7 +158,15 @@ async def get_messages(
     has_more = len(rows) > limit
     rows = rows[:limit]
     messages = [chat_service.serialize_message(m, u) for m, u in reversed(rows)]
-    return MessageListResponse(messages=messages, has_more=has_more)
+
+    # Only worth computing on the initial page (no `before`) - that's the "just opened this
+    # conversation" moment the frontend's jump-to-unread button anchors on; paginating further
+    # back into history doesn't need it recomputed every time.
+    first_unread_message_id = None
+    if not before:
+        first_unread_message_id = await chat_service.get_first_unread_message_id(db, conversation_id, current_user.id)
+
+    return MessageListResponse(messages=messages, has_more=has_more, first_unread_message_id=first_unread_message_id)
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=MessageOut)
@@ -148,6 +188,12 @@ async def send_message(
         conversation_id=conversation_id,
         sender_id=current_user.id,
         content=request.content,
+        message_id=message.id,
+    )
+    background_tasks.add_task(
+        event_extraction_service.maybe_extract_event_candidate,
+        conversation_id=conversation_id,
+        message_id=message.id,
     )
     return message_out
 
@@ -158,12 +204,34 @@ async def get_conversation_ai_permission(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AIPermissionOut:
-    await chat_service.assert_participant(db, conversation_id, current_user.id)
+    participant = await chat_service.assert_participant(db, conversation_id, current_user.id)
+    conversation = await db.get(Conversation, conversation_id)
+    if conversation is not None and conversation.type == "group":
+        return AIPermissionOut(
+            conversation_id=conversation_id,
+            granted=conversation.ai_enabled,
+            contribution_allowed=conversation.ai_enabled,
+            updated_at=conversation.ai_enabled_at.isoformat() if conversation.ai_enabled_at else None,
+            mode="group_managed",
+            can_manage=participant.resource_role == "manager",
+        )
     permission = await chat_service.get_ai_permission(db, conversation_id, current_user.id)
     if permission is None:
-        return AIPermissionOut(conversation_id=conversation_id, granted=False, updated_at=None)
+        return AIPermissionOut(
+            conversation_id=conversation_id,
+            granted=False,
+            contribution_allowed=False,
+            updated_at=None,
+            mode="individual",
+            can_manage=False,
+        )
     return AIPermissionOut(
-        conversation_id=conversation_id, granted=permission.granted, updated_at=permission.updated_at.isoformat()
+        conversation_id=conversation_id,
+        granted=permission.granted,
+        contribution_allowed=permission.contribution_allowed,
+        updated_at=permission.updated_at.isoformat(),
+        mode="individual",
+        can_manage=False,
     )
 
 
@@ -175,18 +243,50 @@ async def update_conversation_ai_permission(
     db: AsyncSession = Depends(get_db),
 ) -> AIPermissionOut:
     await chat_service.assert_participant(db, conversation_id, current_user.id)
-    permission = await chat_service.set_ai_permission(db, conversation_id, current_user.id, request.granted)
-    await record_audit_event(
+    permission = await chat_service.set_ai_permission(
         db,
-        actor=current_user,
-        action="ai.permission_changed",
-        target_type="conversation",
-        target_id=conversation_id,
-        metadata={"granted": request.granted},
+        conversation_id,
+        current_user.id,
+        granted=request.granted,
+        contribution_allowed=request.contribution_allowed,
     )
-    await db.commit()
     return AIPermissionOut(
-        conversation_id=conversation_id, granted=permission.granted, updated_at=permission.updated_at.isoformat()
+        conversation_id=conversation_id,
+        granted=permission.granted,
+        contribution_allowed=permission.contribution_allowed,
+        updated_at=permission.updated_at.isoformat(),
+        mode="individual",
+        can_manage=False,
+    )
+
+
+@router.put("/conversations/{conversation_id}/ai-policy", response_model=AIPermissionOut)
+async def update_group_ai_policy(
+    conversation_id: str,
+    request: GroupAIPolicyUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AIPermissionOut:
+    conversation = await chat_service.set_group_ai_policy(
+        db, conversation_id, current_user, request.enabled
+    )
+    participant_ids = await chat_service.get_participant_ids(db, conversation_id)
+    await manager.broadcast_to_users(
+        participant_ids,
+        {
+            "type": "group_ai_policy_changed",
+            "conversation_id": conversation.id,
+            "enabled": conversation.ai_enabled,
+            "policy_version": conversation.ai_policy_version,
+        },
+    )
+    return AIPermissionOut(
+        conversation_id=conversation.id,
+        granted=conversation.ai_enabled,
+        contribution_allowed=conversation.ai_enabled,
+        updated_at=conversation.ai_enabled_at.isoformat() if conversation.ai_enabled_at else None,
+        mode="group_managed",
+        can_manage=True,
     )
 
 
@@ -198,3 +298,33 @@ async def mark_conversation_read(
 ):
     await chat_service.mark_read(db, conversation_id, current_user.id)
     return {"status": "ok"}
+
+
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def hide_conversation(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await chat_service.hide_conversation(db, conversation_id, current_user.id)
+
+
+@router.post("/conversations/{conversation_id}/leave")
+async def leave_conversation(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    remaining_user_ids, deleted = await chat_service.leave_group_conversation(
+        db, conversation_id, current_user
+    )
+    if remaining_user_ids:
+        await manager.broadcast_to_users(
+            remaining_user_ids,
+            {
+                "type": "conversation_member_left",
+                "conversation_id": conversation_id,
+                "user_id": current_user.id,
+            },
+        )
+    return {"status": "left", "conversation_deleted": deleted}

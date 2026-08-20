@@ -1,7 +1,10 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
+
+from src.api.routes import _build_chat_response
 
 
 @pytest.fixture(autouse=True)
@@ -11,6 +14,23 @@ def _no_live_llm(monkeypatch, fake_llm_factory):
     llm = fake_llm_factory([reply])
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
     return llm
+
+
+async def _team_workspace(client, owner_headers, member: dict) -> dict:
+    workspace_response = await client.post(
+        "/api/v1/workspaces",
+        json={"name": "Agent route test team"},
+        headers=owner_headers,
+    )
+    assert workspace_response.status_code == 201
+    workspace = workspace_response.json()
+    member_response = await client.post(
+        f"/api/v1/workspaces/{workspace['id']}/members",
+        json={"email": member["email"], "role": "member"},
+        headers=owner_headers,
+    )
+    assert member_response.status_code == 201
+    return workspace
 
 
 @pytest.mark.asyncio
@@ -49,9 +69,10 @@ async def test_chat_rejects_conversation_id_caller_is_not_a_participant_of(
     third_headers = {"Authorization": f"Bearer {third.json()['access_token']}"}
     other_me = await client.get("/api/v1/auth/me", headers=other_auth_headers)
     other = other_me.json()
+    workspace = await _team_workspace(client, third_headers, other)
     conv = await client.post(
         "/api/v1/conversations",
-        json={"type": "direct", "participant_ids": [other["id"]]},
+        json={"type": "direct", "participant_ids": [other["id"]], "workspace_id": workspace["id"]},
         headers=third_headers,
     )
     conversation_id = conv.json()["id"]
@@ -70,9 +91,10 @@ async def test_chat_rejects_conversation_id_caller_is_not_a_participant_of(
 async def test_chat_rejects_conversation_id_when_ai_permission_not_granted(client, auth_headers, other_auth_headers):
     other_me = await client.get("/api/v1/auth/me", headers=other_auth_headers)
     other = other_me.json()
+    workspace = await _team_workspace(client, auth_headers, other)
     conv = await client.post(
         "/api/v1/conversations",
-        json={"type": "direct", "participant_ids": [other["id"]]},
+        json={"type": "direct", "participant_ids": [other["id"]], "workspace_id": workspace["id"]},
         headers=auth_headers,
     )
     conversation_id = conv.json()["id"]
@@ -90,9 +112,10 @@ async def test_chat_rejects_conversation_id_when_ai_permission_not_granted(clien
 async def test_chat_allows_conversation_id_caller_is_a_participant_of(client, auth_headers, other_auth_headers):
     other_me = await client.get("/api/v1/auth/me", headers=other_auth_headers)
     other = other_me.json()
+    workspace = await _team_workspace(client, auth_headers, other)
     conv = await client.post(
         "/api/v1/conversations",
-        json={"type": "direct", "participant_ids": [other["id"]]},
+        json={"type": "direct", "participant_ids": [other["id"]], "workspace_id": workspace["id"]},
         headers=auth_headers,
     )
     conversation_id = conv.json()["id"]
@@ -109,52 +132,44 @@ async def test_chat_allows_conversation_id_caller_is_a_participant_of(client, au
 
 
 @pytest.mark.asyncio
-async def test_chat_with_scope_queries_db_instead_of_trusting_client_messages(
+async def test_conversation_context_excludes_messages_from_nonconsenting_authors(
     client, auth_headers, other_auth_headers, monkeypatch, fake_llm_factory
 ):
-    """`scope` (AIPanel's "Permission scope") makes the server re-derive messages from the DB -
-    proven here by sending NO `messages` at all and backdating one message outside the "today"
-    scope: only the in-scope one may reach the LLM, and its timestamp must be included too."""
-    from datetime import UTC, datetime, timedelta
-
-    from src.db import session as db_session
-    from src.db.models import Message
-
-    other_me = await client.get("/api/v1/auth/me", headers=other_auth_headers)
-    other_id = other_me.json()["id"]
+    owner = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()
+    other = (await client.get("/api/v1/auth/me", headers=other_auth_headers)).json()
+    workspace = await _team_workspace(client, auth_headers, other)
     conv = await client.post(
         "/api/v1/conversations",
-        json={"type": "direct", "participant_ids": [other_id]},
+        json={
+            "type": "direct",
+            "participant_ids": [other["id"]],
+            "workspace_id": workspace["id"],
+        },
         headers=auth_headers,
     )
     conversation_id = conv.json()["id"]
-    await client.put(
-        f"/api/v1/conversations/{conversation_id}/ai-permission", json={"granted": True}, headers=auth_headers
+    await client.post(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        json={"content": "OWNER-CONTENT-ALLOWED"},
+        headers=auth_headers,
     )
-    me = await client.get("/api/v1/auth/me", headers=auth_headers)
-    alice_id = me.json()["id"]
-
-    now = datetime.now(UTC)
-    async with db_session.async_session_maker() as db:
-        db.add(
-            Message(
-                conversation_id=conversation_id,
-                sender_id=alice_id,
-                content="two days ago, excluded",
-                created_at=now - timedelta(days=2),
-            )
-        )
-        db.add(
-            Message(conversation_id=conversation_id, sender_id=alice_id, content="today, included", created_at=now)
-        )
-        await db.commit()
+    await client.post(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        json={"content": "OTHER-SECRET-MUST-NOT-REACH-MODEL"},
+        headers=other_auth_headers,
+    )
+    await client.put(
+        f"/api/v1/conversations/{conversation_id}/ai-permission",
+        json={"granted": True, "contribution_allowed": True},
+        headers=auth_headers,
+    )
 
     captured = {}
-    reply = AIMessage(content="ok")
+    reply = AIMessage(content="Consent-filtered answer")
     llm = fake_llm_factory([reply])
 
     async def ainvoke(messages):
-        captured["messages"] = messages
+        captured["text"] = "\n".join(str(message.content) for message in messages)
         return reply
 
     llm.ainvoke = ainvoke
@@ -162,14 +177,19 @@ async def test_chat_with_scope_queries_db_instead_of_trusting_client_messages(
 
     response = await client.post(
         "/api/v1/chat",
-        json={"message": "What happened today?", "conversation_id": conversation_id, "scope": {"kind": "today"}},
+        json={"message": "Summarize this", "conversation_id": conversation_id},
         headers=auth_headers,
     )
+
     assert response.status_code == 200
-    system_prompt = captured["messages"][0].content
-    assert "today, included" in system_prompt
-    assert "two days ago, excluded" not in system_prompt
-    assert "[" in system_prompt and "]" in system_prompt  # the timestamp annotation is present
+    assert "OWNER-CONTENT-ALLOWED" in captured["text"]
+    assert "OTHER-SECRET-MUST-NOT-REACH-MODEL" not in captured["text"]
+    scope = response.json()["context_scope"]
+    assert scope["included_message_count"] == 1
+    assert scope["window_message_count"] == 2
+    assert scope["coverage"] == 0.5
+    assert owner["display_name"] in scope["included_participants"]
+    assert other["display_name"] in scope["excluded_participants"]
 
 
 @pytest.mark.asyncio
@@ -180,6 +200,17 @@ async def test_chat_completed_response(client, auth_headers):
     assert data["status"] == "completed"
     assert data["response"] == "Mocked agent reply."
     assert data["thread_id"]
+
+
+def test_build_chat_response_replaces_empty_agent_output():
+    response = _build_chat_response(
+        {"messages": [AIMessage(content="")]},
+        "empty-output-thread",
+    )
+
+    assert response.status == "completed"
+    assert response.response
+    assert "thử diễn đạt lại" in response.response
 
 
 @pytest.mark.asyncio
@@ -229,7 +260,9 @@ async def test_chat_interrupts_and_resume_completes(client, auth_headers, monkey
 
     fake_service = MagicMock()
     fake_service.events.return_value.insert.return_value.execute.return_value = {"id": "evt-1"}
-    monkeypatch.setattr(calendar_service, "_service", AsyncMock(return_value=fake_service))
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
+    monkeypatch.setattr(calendar_service, "authorize_calendar_access", AsyncMock())
+    monkeypatch.setattr(calendar_service, "broadcast_change", AsyncMock())
 
     def _final_message(state):
         last = state["messages"][-1]
@@ -310,7 +343,9 @@ async def test_chat_resume_not_blocked_by_budget(client, auth_headers, monkeypat
 
     fake_service = MagicMock()
     fake_service.events.return_value.insert.return_value.execute.return_value = {"id": "evt-1"}
-    monkeypatch.setattr(calendar_service, "_service", AsyncMock(return_value=fake_service))
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
+    monkeypatch.setattr(calendar_service, "authorize_calendar_access", AsyncMock())
+    monkeypatch.setattr(calendar_service, "broadcast_change", AsyncMock())
 
     def _final_message(state):
         last = state["messages"][-1]
@@ -362,6 +397,105 @@ async def test_chat_resume_not_blocked_by_budget(client, auth_headers, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_chat_resume_rejects_stale_consent_snapshot(
+    client, auth_headers, other_auth_headers, monkeypatch
+):
+    from src.agents import graph as agent_graph
+    from src.db import session as db_session
+    from src.db.models import AgentThread
+    from src.services.thread_memory_service import checkpoint_thread_id
+
+    owner = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()
+    other = (await client.get("/api/v1/auth/me", headers=other_auth_headers)).json()
+    workspace = await _team_workspace(client, auth_headers, other)
+    conversation = (
+        await client.post(
+            "/api/v1/conversations",
+            json={
+                "type": "direct",
+                "participant_ids": [other["id"]],
+                "workspace_id": workspace["id"],
+            },
+            headers=auth_headers,
+        )
+    ).json()
+    await client.put(
+        f"/api/v1/conversations/{conversation['id']}/ai-permission",
+        json={"granted": True, "contribution_allowed": True},
+        headers=auth_headers,
+    )
+
+    thread_id = "stale-consent-thread"
+    async with db_session.async_session_maker() as db:
+        from datetime import UTC, datetime, timedelta
+
+        db.add(
+            AgentThread(
+                id=checkpoint_thread_id(owner["id"], thread_id),
+                owner_id=owner["id"],
+                workspace_id=workspace["id"],
+                expires_at=datetime.now(UTC) + timedelta(days=1),
+            )
+        )
+        await db.commit()
+    monkeypatch.setattr(
+        agent_graph.agent,
+        "aget_state",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                values={
+                    "conversation_id": conversation["id"],
+                    "consent_scope_hash": "outdated-snapshot",
+                }
+            )
+        ),
+    )
+    must_not_resume = AsyncMock(side_effect=AssertionError("stale action must not execute"))
+    monkeypatch.setattr(agent_graph.agent, "ainvoke", must_not_resume)
+
+    response = await client.post(
+        "/api/v1/chat/resume",
+        json={"thread_id": thread_id, "approved": True},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "error"
+    assert "thay đổi" in response.json()["response"]
+    must_not_resume.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_agent_status(client):
     response = await client.get("/api/v1/status")
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_usage_status_requires_auth(client):
+    response = await client.get("/api/v1/usage/status")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_usage_status_accessible_to_regular_user_without_cost_or_model_fields(client, auth_headers):
+    """Sidebar.jsx's widget, not the admin-only /admin/stats - a regular (non-admin) user must be
+    able to call this, and the response must never leak estimated_cost_usd or per-model data."""
+    response = await client.get("/api/v1/usage/status", headers=auth_headers)
+    assert response.status_code == 200
+    assert set(response.json().keys()) == {"tokens_used_today", "daily_token_budget", "used_pct"}
+
+
+@pytest.mark.asyncio
+async def test_usage_status_zero_budget_reports_zero_pct(client, auth_headers, monkeypatch):
+    from src.services import usage_service
+
+    async def _zero_budget():
+        return 0
+
+    monkeypatch.setattr(usage_service, "get_daily_token_budget", _zero_budget)
+
+    response = await client.get("/api/v1/usage/status", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json()["used_pct"] == 0.0
+    assert response.json()["daily_token_budget"] == 0

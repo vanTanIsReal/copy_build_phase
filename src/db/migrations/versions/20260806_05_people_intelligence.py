@@ -1,7 +1,6 @@
 """Add sparse private preferences for the people-intelligence layer."""
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision = "20260806_05"
@@ -11,8 +10,6 @@ depends_on = None
 
 
 def upgrade() -> None:
-    if "workspaces" not in set(sa.inspect(op.get_bind()).get_table_names()):
-        return
     connection = op.get_bind()
     if "people_preferences" not in sa.inspect(connection).get_table_names():
         op.create_table(

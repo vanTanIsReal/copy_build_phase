@@ -1,24 +1,39 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import src.db.session as db_session
 from src.agents.graph import close_checkpointer, init_checkpointer
 from src.api.admin_routes import router as admin_router
+from src.api.agent_workspace_routes import router as agent_workspace_router
+from src.api.assistant_routes import router as assistant_router
 from src.api.auth_routes import router as auth_router
 from src.api.calendar_routes import public_router as calendar_public_router
 from src.api.calendar_routes import router as calendar_router
 from src.api.chat_routes import router as chat_router
 from src.api.memory_routes import router as memory_router
 from src.api.platform_routes import router as platform_router
+from src.api.rate_limit import RateLimitMiddleware
+from src.api.relationship_routes import router as relationship_router
 from src.api.reminder_routes import router as reminder_router
 from src.api.routes import router
 from src.api.task_routes import router as task_router
+from src.api.timeline_routes import router as timeline_router
+from src.api.workspace_routes import router as workspace_router
 from src.config import get_settings
 from src.db.session import init_db
-from src.services import ai_config_service, calendar_service
+from src.services import calendar_service, thread_memory_service
+from src.services.ai_config_service import load_saved_ai_configuration
+from src.services.company_service import get_or_create_company_workspace
 from src.services.scheduler import scheduler
 from src.websocket.routes import router as ws_router
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 
 @asynccontextmanager
@@ -27,9 +42,20 @@ async def lifespan(app: FastAPI):
     print(f"Starting {settings.app_name} in {settings.app_env} mode")
     if settings.app_env != "production":
         await init_db()
-    await ai_config_service.load_saved_ai_configuration()
+    async with db_session.async_session_maker() as db:
+        await get_or_create_company_workspace(db)
+        await db.commit()
+    await load_saved_ai_configuration()
     await init_checkpointer()
+    await thread_memory_service.cleanup_expired_threads()
     scheduler.start()
+    scheduler.add_job(
+        thread_memory_service.cleanup_expired_threads,
+        "interval",
+        hours=1,
+        id="agent_thread_cleanup",
+        replace_existing=True,
+    )
     scheduler.add_job(
         calendar_service.poll_calendar_changes,
         "interval",
@@ -51,9 +77,11 @@ app = FastAPI(
 )
 
 settings = get_settings()
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()],
+    allow_origin_regex=settings.cors_origin_regex or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -65,11 +93,16 @@ app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
 app.include_router(ws_router, prefix="/api/v1", tags=["ws"])
 app.include_router(admin_router, prefix="/api/v1/admin", tags=["admin"])
 app.include_router(platform_router, prefix="/api/v1/platform", tags=["platform"])
+app.include_router(workspace_router, prefix="/api/v1/workspaces", tags=["workspaces"])
+app.include_router(agent_workspace_router, prefix="/api/v1/workspaces", tags=["agent-workspaces"])
+app.include_router(relationship_router, prefix="/api/v1/workspaces", tags=["relationships"])
 app.include_router(task_router, prefix="/api/v1", tags=["tasks"])
+app.include_router(timeline_router, prefix="/api/v1", tags=["timeline"])
 app.include_router(calendar_router, prefix="/api/v1", tags=["calendar"])
 app.include_router(calendar_public_router, prefix="/api/v1", tags=["calendar"])
 app.include_router(reminder_router, prefix="/api/v1", tags=["reminders"])
 app.include_router(memory_router, prefix="/api/v1", tags=["memory"])
+app.include_router(assistant_router, prefix="/api/v1", tags=["assistant"])
 
 
 @app.get("/health")

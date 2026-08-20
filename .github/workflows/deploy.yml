@@ -1,9 +1,5 @@
-name: Deploy
+name: Deploy backend
 
-# Runs after CI succeeds on main (workflow_run), or manually via workflow_dispatch (e.g. to
-# re-deploy after only changing an env var on Render, with no new commit). workflow_run only fires
-# once this file exists on the default branch - the PR that first adds it won't trigger a deploy;
-# use workflow_dispatch for that first run instead.
 on:
   workflow_run:
     workflows: ["CI"]
@@ -15,22 +11,16 @@ permissions:
   contents: read
 
 jobs:
-  deploy-backend:
-    runs-on: ubuntu-latest
+  deploy:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
     steps:
       - name: Trigger Render deploy
-        run: curl -sf -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
-
-      - name: Wait for backend to become healthy
+        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+      - name: Wait for health check
         run: |
-          for i in $(seq 1 30); do
-            if curl -sf "${{ vars.RENDER_URL }}/health"; then
-              echo "Backend healthy"
-              exit 0
-            fi
-            echo "Attempt $i: not ready yet, retrying in 10s..."
+          for attempt in $(seq 1 30); do
+            if curl -fsS "${{ vars.RENDER_URL }}/health"; then exit 0; fi
             sleep 10
           done
-          echo "Backend did not become healthy within 5 minutes"
           exit 1

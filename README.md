@@ -22,13 +22,13 @@ platform admin không có đường API đọc nội dung tin nhắn gốc.
 - **Cảnh báo + tự chặn khi vượt hạn mức token/chi phí**: khi lượng dùng vượt ngưỡng cấu hình, platform admin đang online nhận cảnh báo realtime; các lượt gọi LLM mới bị chặn khi hết ngân sách nhưng lượt xác nhận đang chờ vẫn được hoàn tất.
 - **Tóm tắt hội thoại theo yêu cầu**: trong trang Chat, bấm icon AI trên header → **Summarize** — AI đọc tin nhắn thật (theo scope 20/50 tin gần nhất đang chọn) và trả về bản tóm tắt.
 - **Trích xuất Task từ hội thoại**: cùng panel AI → **Extract tasks** — AI tìm việc cần làm/lịch hẹn trong hội thoại, lưu vào trang `/tasks` mục "AI suggestions"; người dùng bấm **Accept**/**Dismiss** để xác nhận. Panel AI còn có **Find schedule**, **Deadlines**, **Suggest reminder** (hiện nút Xác nhận/Huỷ ngay trong panel vì tạo reminder cần human-in-the-loop), cùng ô **Ask Orbit** để hỏi tự do về hội thoại đang xem.
-- **Task Inbox ưu tiên** (`/tasks/inbox`): view tách riêng khỏi danh sách task thường, nhóm việc cần chú ý ngay thành 4 mức — cần quyết định (gợi ý AI chưa Accept/Dismiss), quá hạn, sắp đến hạn trong 48h, và priority cao — thay vì phải tự lọc trong danh sách đầy đủ.
-- **Lịch cá nhân (Google Calendar thật, per-user, đồng bộ 2 chiều, realtime)**: trang `/calendar` — mỗi người tự bấm **Connect Google Calendar** (OAuth Client riêng, xem mục "Cách chạy web" bước 2) để nối đúng Google Calendar của chính họ; chưa Connect thì trang chỉ hiện nút mời kết nối, không có sự kiện nào. Sau khi kết nối, xem/tạo/sửa/xoá sự kiện thật trên calendar của người đó. Agent cũng dùng chung API này (`list/create/update/delete_calendar_event` tool, tự biết đang thao tác trên calendar của ai đang chat) nên có thể quản lý lịch qua chat, không chỉ qua UI. Mọi thay đổi (từ UI, từ chat, hoặc tạo/sửa/xoá trực tiếp trong chính Google Calendar) đều đẩy qua WebSocket — chỉ tới đúng người sở hữu calendar đó, không phải mọi người đang mở `/calendar`. Thay đổi từ phía Google được bắt bằng cách polling định kỳ cho từng user **đang online** đã kết nối (`CALENDAR_POLL_INTERVAL_SECONDS`, mặc định 20s) chứ chưa dùng webhook thật của Google (cần domain public HTTPS mà project chưa deploy).
+- **Task Inbox ưu tiên** (`/tasks/inbox`): gom gợi ý AI cần quyết định, task quá hạn, sắp đến hạn và task ưu tiên cao thành các nhóm dễ xử lý.
+- **Google Calendar riêng theo người dùng, đồng bộ 2 chiều, realtime**: mỗi người kết nối tài khoản Google của mình bằng OAuth; refresh token được mã hóa trong database. Sự kiện WebSocket chỉ gửi cho chủ lịch. Candidate rút ra từ chat nhóm vẫn cần manager xác nhận, rồi được ghi vào lịch của chính manager đó. Thay đổi từ Google được bắt bằng incremental sync token và polling (`CALENDAR_POLL_INTERVAL_SECONDS`).
 - **Nhắc nhở bền vững + realtime**: trang `/reminders` tạo nhắc nhở thật, lưu DB, sống sót qua restart server (APScheduler + `SQLAlchemyJobStore`); khi đến giờ, đẩy thông báo realtime qua WebSocket dù đang ở trang nào.
 - **Hồ sơ cá nhân** (`/profile`): sửa tên/chức danh/timezone/tuỳ chọn thông báo và đổi mật khẩu — lưu thật vào database, không còn là dữ liệu mẫu.
 - **Memory có phạm vi rõ ràng** (`/memory`): thêm/sửa/xoá "điều Orbit nên nhớ về bạn". Agent chỉ tìm kiếm memory và task thuộc đúng user của lượt chat hiện tại.
 - **Agent chủ động (proactive), realtime**: mỗi tin nhắn mới trong Chat được rà tự động (pre-filter rẻ + LLM xác nhận) — nếu chứa cam kết/lịch hẹn/hạn chót, Orbit tự tạo gợi ý và đẩy thẳng vào `/tasks` mục "AI suggestions" qua WebSocket (không cần refresh) kèm toast, không cần người dùng chủ động yêu cầu. Toàn bộ thao tác Task (accept/dismiss/complete/xoá) cũng đồng bộ realtime giữa các tab/thiết bị.
-- **Múi giờ thống nhất Asia/Ho_Chi_Minh (Hà Nội)**: mọi nơi hiển thị ngày giờ (Chat, Task, Calendar, Reminder, Memory, Admin) đều quy về giờ Hà Nội bất kể múi giờ máy người xem, qua `Frontend/src/utils/datetime.js`. Backend cũng cố định giờ Hà Nội cho scheduler (reminder fire đúng giờ dù server chạy múi giờ khác) và mốc "hôm nay" của thống kê token.
+- **Múi giờ thống nhất Asia/Ho_Chi_Minh (Hà Nội)**: mọi nơi hiển thị ngày giờ đều quy về giờ Hà Nội qua utility riêng của `Frontend/user` và `Frontend/admin`. Backend cũng cố định giờ Hà Nội cho scheduler và mốc "hôm nay" của thống kê token.
 
 ### Công cụ đánh giá (dev, không phải tính năng người dùng)
 
@@ -53,7 +53,7 @@ platform admin không có đường API đọc nội dung tin nhắn gốc.
 │   ├── websocket/          # Kênh real-time cho chat
 │   └── main.py             # Điểm khởi tạo FastAPI app
 ├── tests/                 # pytest cho backend
-└── Frontend/               # Frontend — React + Vite
+└── Frontend/               # npm workspace: user app (5173) + admin app (5174)
     └── src/
         ├── api/            # Gọi REST API + WebSocket client
         ├── context/         # AuthContext (JWT, user hiện tại)
@@ -65,7 +65,7 @@ platform admin không có đường API đọc nội dung tin nhắn gốc.
 
 ## Cách chạy web (local development)
 
-Cần chạy **song song 3 server** — backend (cổng 8000), User frontend (cổng 5173) và Admin frontend (cổng 5174). Chỉ cần chạy frontend tương ứng với phần bạn muốn sử dụng.
+Cần chạy backend (cổng 8000) và ít nhất một frontend. User app chạy ở cổng 5173; Admin app độc lập chạy ở cổng 5174.
 
 ### 1. Chuẩn bị
 
@@ -102,9 +102,9 @@ cp .env.example .env
 # Muốn bật nút "Đăng nhập bằng Google": tạo 1 OAuth Client ID loại "Web application" tại
 #   https://console.cloud.google.com/apis/credentials, Authorized JavaScript origins:
 #   http://localhost:5173. Điền Client ID vào GOOGLE_OAUTH_CLIENT_ID ở đây, và giá trị y hệt vào
-#   VITE_GOOGLE_CLIENT_ID trong Frontend/user/.env.local (bước 3) — không điền thì nút Google chỉ ẩn/không hoạt
+#   VITE_GOOGLE_CLIENT_ID trong Frontend/user/.env (bước 3) — không điền thì nút Google bị vô hiệu
 #   động, các tính năng khác không ảnh hưởng.
-# Muốn bật nút "Connect Google Calendar" (mỗi user tự nối Calendar riêng của họ, xem docs/PER_USER_CALENDAR.md):
+# Muốn bật nút "Connect Google Calendar" (mỗi user tự nối Calendar riêng của họ):
 #   1. Bật "Google Calendar API" tại https://console.cloud.google.com — APIs & Services → Library.
 #   2. OAuth consent screen: thêm scope https://www.googleapis.com/auth/calendar, thêm email từng
 #      người sẽ test vào "Test users" (scope nhạy cảm nên app ở chế độ Testing, tối đa 100 test
@@ -135,60 +135,19 @@ Nếu có `make` (macOS/Linux, hoặc cài Make trên Windows), có thể dùng 
 
 Kiểm tra backend đã chạy: mở `http://localhost:8000/health` phải trả về `{"status":"ok",...}`. Swagger UI (danh sách toàn bộ API) ở `http://localhost:8000/docs`.
 
-Giữ backend chạy trong một terminal riêng, sau đó mở thêm hai terminal để chạy User frontend và Admin frontend.
-
-### 3. Chạy Frontend
+### 3. Chạy hai Frontend
 
 Frontend đã tách thành hai app độc lập:
 
-| App | Thư mục | URL | Chức năng |
-| --- | --- | --- | --- |
-| User | `Frontend/user` | `http://localhost:5173` | Chat, AI Assistant, Tasks, Calendar, Reminders, Memory, Profile |
-| Admin | `Frontend/admin` | `http://localhost:5174` | Đăng nhập admin, Dashboard, Users, Conversations, User data |
-
-#### User frontend
-
-Mở terminal khác từ thư mục gốc repo:
-
-```powershell
-cd Frontend\user
-npm.cmd install
-npm.cmd run dev
+```bash
+cd Frontend
+npm install
+npm run dev:user
+# Terminal khác, nếu cần giao diện quản trị:
+npm run dev:admin
 ```
 
-Mở `http://localhost:5173`. Nếu muốn bật đăng nhập Google, tạo `Frontend/user/.env.local`:
-
-```env
-VITE_APP_KIND=user
-VITE_API_URL=http://127.0.0.1:8000/api/v1
-VITE_WS_URL=ws://127.0.0.1:8000/api/v1/ws
-VITE_GOOGLE_CLIENT_ID=your-google-client-id
-```
-
-#### Admin frontend
-
-Mở terminal thứ ba từ thư mục gốc repo:
-
-```powershell
-cd Frontend\admin
-npm.cmd install
-npm.cmd run dev
-```
-
-Mở `http://localhost:5174`. Admin có màn hình đăng nhập và layout quản trị riêng, không nhúng giao diện User. Tạo `Frontend/admin/.env.local` nếu cần đổi URL backend:
-
-```env
-VITE_API_URL=http://127.0.0.1:8000/api/v1
-VITE_WS_URL=ws://127.0.0.1:8000/api/v1/ws
-```
-
-Trong root `.env`, bảo đảm CORS có cả hai origin:
-
-```env
-CORS_ORIGINS=http://localhost:5173,http://localhost:5174
-```
-
-Sau khi đổi `.env`, restart backend.
+Mở `http://localhost:5173` cho ứng dụng người dùng và `http://localhost:5174` cho Admin. Cấu hình local nằm riêng trong `Frontend/user/.env` và `Frontend/admin/.env`, tạo từ file `.env.example` tương ứng.
 
 ### 4. Dùng thử
 
@@ -196,7 +155,7 @@ Sau khi đổi `.env`, restart backend.
 2. Mở thêm một trình duyệt/tab ẩn danh khác, tạo tài khoản thứ hai.
 3. Từ tài khoản thứ nhất, vào trang **Chats**, bấm nút bút (soạn tin nhắn) để chọn người và bắt đầu chat 1-1 hoặc chọn nhiều người để tạo nhóm.
 4. Gửi tin nhắn — tài khoản còn lại sẽ nhận tin nhắn theo thời gian thực nếu đang mở cùng cuộc trò chuyện, hoặc thấy số tin nhắn chưa đọc.
-5. Muốn thử trang **Admin**: đặt `ADMIN_BOOTSTRAP_KEY` trong `.env`, mở `http://localhost:5174/register` để tạo admin đầu tiên, sau đó đăng nhập tại `http://localhost:5174/login`. Admin frontend không dùng route `/admin` của User frontend.
+5. Muốn thử **Admin**: đăng ký tài khoản có email trùng `INITIAL_ADMIN_EMAIL`, sau đó đăng nhập ứng dụng Admin tại `http://localhost:5174/login`. Backend vẫn là lớp bắt buộc kiểm tra `platform_role`.
 6. Muốn thử **AI Summarize / Extract tasks / Find schedule / Deadlines / Ask Orbit**: cần điền `GOOGLE_API_KEY` (hoặc Groq, xem bước 2) thật trong `.env`. Trong 1 cuộc trò chuyện có vài tin nhắn, bấm icon AI trên header (⭐) rồi thử từng quick action, hoặc gõ câu hỏi tự do vào ô "Ask Orbit".
 7. Muốn thử **AI Assistant cá nhân** (`/assistant`): vào trang này và chat trực tiếp — nếu bạn yêu cầu tạo lịch/nhắc việc, agent sẽ hỏi lại xác nhận ngay trong khung chat trước khi tạo thật.
 8. Muốn xem **theo dõi token AI**: vào `/admin` (cần tài khoản admin, xem bước 5) — 2 stat card "AI tokens used today"/"AI requests today" và banner cảnh báo khi dùng ≥80% ngân sách `DAILY_TOKEN_BUDGET`. Hạ tạm `DAILY_TOKEN_BUDGET` (ví dụ `=50`) trong `.env` rồi restart backend nếu muốn thấy toast cảnh báo realtime (`usage_budget_alert` qua WebSocket) xuất hiện ngay khi đang ở bất kỳ trang nào, không cần mở `/admin` — và xác nhận `/chat` bị chặn hẳn (không chỉ cảnh báo) một khi đã vượt hẳn ngân sách.
@@ -287,21 +246,21 @@ Docker Compose hiện chỉ chạy backend tại cổng `8000`; frontend chạy 
 | Test | pytest, pytest-asyncio, httpx |
 | Lint | ruff |
 
-## Tài liệu thiết kế (deliverable "Chốt bài toán + thiết kế")
+## Tài liệu thiết kế Multi-Agent
 
-- [docs/BRIEF.md](docs/BRIEF.md) — 1-page brief: vấn đề, người dùng, giải pháp, phạm vi, chỉ số thành công, rủi ro.
-- [docs/PRD.md](docs/PRD.md) — PRD: user stories + acceptance criteria, yêu cầu phi chức năng, ERD, API surface, luồng agent.
-- [docs/UI_FLOW.md](docs/UI_FLOW.md) — sitemap, luồng người dùng (tóm tắt/trích task, human-in-the-loop, proactive), mô tả từng màn hình.
-- [docs/wireframes.html](docs/wireframes.html) — wireframe các màn hình chính (mở bằng trình duyệt).
-- [docs/AI_LOG.md](docs/AI_LOG.md) — setup & bằng chứng hệ thống ghi log sử dụng AI trong repo.
+- [docs/README.md](docs/README.md) — mục lục và quy tắc single source of truth cho cả team.
+- [docs/BRIEF.md](docs/BRIEF.md) — ý tưởng, giá trị và phạm vi sản phẩm.
+- [docs/PRD.md](docs/PRD.md) — nghiệp vụ, yêu cầu và acceptance criteria.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — kiến trúc, data boundary, router, agent runtime và security.
+- [docs/ENTERPRISE_WORKSPACE_FOUNDATION.md](docs/ENTERPRISE_WORKSPACE_FOUNDATION.md) — Company Root, Workspace, role và membership.
+- [docs/MULTI_AGENT_IMPLEMENTATION_PLAN.md](docs/MULTI_AGENT_IMPLEMENTATION_PLAN.md) — phân công, dependency và release gate.
 
 ## Tài liệu khác
 
 - [CLAUDE.md](CLAUDE.md) — hướng dẫn chi tiết cho AI coding assistant làm việc trong repo này (quy ước code, lệnh chạy đầy đủ).
 - [Frontend/README.md](Frontend/README.md) — hướng dẫn riêng cho frontend (cấu trúc, xử lý lỗi thường gặp khi chạy npm trên Windows).
 - [Frontend/detai.md](Frontend/detai.md) — đề bài / yêu cầu gốc của dự án.
-- [ARCHITECTURE.md](ARCHITECTURE.md) — kiến trúc hệ thống hiện tại và các quyết định công nghệ.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — con trỏ tương thích đến kiến trúc canonical trong `docs/`.
 - [ROADMAP.md](ROADMAP.md) — bảng đối chiếu từng yêu cầu đề bài với trạng thái thật hiện tại + việc còn lại theo độ ưu tiên.
 - [docs/deploy.md](docs/deploy.md) — hướng dẫn deploy production (Render + Supabase + Vercel + CD qua GitHub Actions), từng bước dashboard theo đúng thứ tự + checklist verify end-to-end.
 - [WORKLOG.md](WORKLOG.md) — nhật ký công việc theo ngày của cả nhóm.
-- [docs/guide/](docs/guide/) — tài liệu khóa học AI20K (setup, LangGraph, FastAPI, testing, deploy).

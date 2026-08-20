@@ -12,7 +12,6 @@ from src.config import get_settings
 from src.db.models import GoogleIdentity, User
 from src.db.session import get_db
 from src.models.auth_schemas import (
-    AdminRegisterRequest,
     AuthResponse,
     ChangePasswordRequest,
     GoogleAuthRequest,
@@ -21,7 +20,7 @@ from src.models.auth_schemas import (
     UpdateProfileRequest,
     UserPublic,
 )
-from src.services.audit_service import record_audit_event
+from src.services.workspace_service import create_personal_workspace
 
 router = APIRouter()
 
@@ -31,6 +30,7 @@ def _to_public(user: User) -> UserPublic:
         id=user.id,
         email=user.email,
         display_name=user.display_name,
+        role=user.role,
         platform_role=user.platform_role,
         job_title=user.job_title,
         timezone=user.timezone,
@@ -38,87 +38,35 @@ def _to_public(user: User) -> UserPublic:
     )
 
 
-@router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
+def _initial_role_for(email: str) -> str:
+    """The first account registered with INITIAL_ADMIN_EMAIL (any auth method) bootstraps as
+    admin - shared by /register and /google so the rule isn't duplicated/drifting between them."""
+    initial_admin_email = get_settings().initial_admin_email.strip().lower()
+    return "admin" if initial_admin_email and email.lower() == initial_admin_email else "user"
+
+
+@router.post("/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
+async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db)) -> UserPublic:
     normalized_email = str(request.email).lower()
     existing = (await db.execute(select(User).where(User.email == normalized_email))).scalar_one_or_none()
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
+    role = _initial_role_for(normalized_email)
     user = User(
         email=normalized_email,
         password_hash=hash_password(request.password),
         display_name=request.display_name,
-        platform_role="user",
+        role=role,
+        platform_role="platform_admin" if role == "admin" else "user",
     )
     db.add(user)
     await db.flush()
-    await record_audit_event(
-        db,
-        actor=user,
-        action="auth.account_registered",
-        target_type="user",
-        target_id=user.id,
-        metadata={"method": "password"},
-    )
+    await create_personal_workspace(db, user)
     await db.commit()
     await db.refresh(user)
 
-    token = create_access_token(user.id)
-    return AuthResponse(access_token=token, user=_to_public(user))
-
-
-@router.post("/admin/register", response_model=AuthResponse)
-async def register_admin(request: AdminRegisterRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
-    """Create the first administrator from the separate Admin frontend.
-
-    The endpoint is intentionally protected by a deployment secret and is one-time only. After
-    the first admin exists, additional admins are managed from the Admin Users screen.
-    """
-    bootstrap_key = get_settings().admin_bootstrap_key
-    if not bootstrap_key:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Admin bootstrap is not configured",
-        )
-    if not secrets.compare_digest(request.bootstrap_key, bootstrap_key):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid admin bootstrap key")
-
-    admin_exists = (
-        await db.execute(select(User.id).where(User.platform_role == "platform_admin").limit(1))
-    ).scalar_one_or_none()
-    if admin_exists is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="An admin account already exists. Ask an existing admin to promote another account.",
-        )
-
-    normalized_email = str(request.email).lower()
-    existing = (await db.execute(select(User).where(User.email == normalized_email))).scalar_one_or_none()
-    if existing is not None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
-
-    user = User(
-        email=normalized_email,
-        password_hash=hash_password(request.password),
-        display_name=request.display_name,
-        platform_role="platform_admin",
-    )
-    db.add(user)
-    await db.flush()
-    await record_audit_event(
-        db,
-        actor=user,
-        action="auth.admin_account_registered",
-        target_type="user",
-        target_id=user.id,
-        metadata={"method": "password"},
-    )
-    await db.commit()
-    await db.refresh(user)
-
-    token = create_access_token(user.id)
-    return AuthResponse(access_token=token, user=_to_public(user))
+    return _to_public(user)
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -129,39 +77,6 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)) -> Au
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has been disabled")
 
-    await record_audit_event(
-        db,
-        actor=user,
-        action="auth.login_succeeded",
-        target_type="session",
-        target_id=None,
-        metadata={"method": "password"},
-    )
-    await db.commit()
-    token = create_access_token(user.id)
-    return AuthResponse(access_token=token, user=_to_public(user))
-
-
-@router.post("/admin/login", response_model=AuthResponse)
-async def admin_login(request: LoginRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
-    """Authenticate only platform administrators for the dedicated Admin frontend."""
-    user = (await db.execute(select(User).where(User.email == request.email))).scalar_one_or_none()
-    if user is None or not verify_password(request.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
-    if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has been disabled")
-    if user.platform_role != "platform_admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
-
-    await record_audit_event(
-        db,
-        actor=user,
-        action="auth.admin_login_succeeded",
-        target_type="session",
-        target_id=None,
-        metadata={"method": "password"},
-    )
-    await db.commit()
     token = create_access_token(user.id)
     return AuthResponse(access_token=token, user=_to_public(user))
 
@@ -198,6 +113,7 @@ async def google_auth(request: GoogleAuthRequest, db: AsyncSession = Depends(get
                 detail="Email not verified by Google; sign in with your password instead",
             )
         if user is None:
+            role = _initial_role_for(email)
             user = User(
                 email=email,
                 # Unusable, never-shared password - password_hash stays NOT NULL without adding a
@@ -205,10 +121,12 @@ async def google_auth(request: GoogleAuthRequest, db: AsyncSession = Depends(get
                 # (correct: nobody ever set a password for it) until/unless they set one later.
                 password_hash=hash_password(secrets.token_urlsafe(32)),
                 display_name=claims.get("name") or email.split("@")[0],
-                platform_role="user",
+                role=role,
+                platform_role="platform_admin" if role == "admin" else "user",
             )
             db.add(user)
             await db.flush()
+            await create_personal_workspace(db, user)
         db.add(GoogleIdentity(user_id=user.id, google_sub=google_sub, email=email))
         await db.commit()
         await db.refresh(user)
@@ -216,15 +134,6 @@ async def google_auth(request: GoogleAuthRequest, db: AsyncSession = Depends(get
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has been disabled")
 
-    await record_audit_event(
-        db,
-        actor=user,
-        action="auth.login_succeeded",
-        target_type="session",
-        target_id=None,
-        metadata={"method": "google"},
-    )
-    await db.commit()
     token = create_access_token(user.id)
     return AuthResponse(access_token=token, user=_to_public(user))
 
@@ -243,14 +152,6 @@ async def update_me(
     updates = request.model_dump(exclude_unset=True)
     for field, value in updates.items():
         setattr(current_user, field, value)
-    await record_audit_event(
-        db,
-        actor=current_user,
-        action="profile.updated",
-        target_type="user",
-        target_id=current_user.id,
-        metadata={"fields": sorted(updates)},
-    )
     await db.commit()
     await db.refresh(current_user)
     return _to_public(current_user)
@@ -265,11 +166,4 @@ async def change_password(
     if not verify_password(request.current_password, current_user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
     current_user.password_hash = hash_password(request.new_password)
-    await record_audit_event(
-        db,
-        actor=current_user,
-        action="auth.password_changed",
-        target_type="user",
-        target_id=current_user.id,
-    )
     await db.commit()

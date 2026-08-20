@@ -1,7 +1,6 @@
 """Add private workspace relationship records."""
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision = "20260804_03"
@@ -11,8 +10,6 @@ depends_on = None
 
 
 def upgrade() -> None:
-    if "workspaces" not in set(sa.inspect(op.get_bind()).get_table_names()):
-        return
     connection = op.get_bind()
     if "contact_relationships" in set(sa.inspect(connection).get_table_names()):
         return

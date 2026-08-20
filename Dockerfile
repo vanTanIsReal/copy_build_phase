@@ -9,14 +9,17 @@ RUN pip install --no-cache-dir --user -r requirements.txt
 # ---- Stage 2: Production ----
 FROM python:3.11-slim
 
-WORKDIR /app
+ENV PYTHONUNBUFFERED=1
 
-# Copy installed packages from builder
-COPY --from=builder /root/.local /root/.local
-ENV PATH=/root/.local/bin:$PATH
+WORKDIR /app
 
 # Security: run as non-root user
 RUN useradd -m appuser
+
+# Copy installed packages into the runtime user's home so it can execute
+# Alembic/Uvicorn without needing access to /root.
+COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
+ENV PATH=/home/appuser/.local/bin:$PATH
 
 # Copy application code
 COPY . .
@@ -31,7 +34,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-8000}/health')" || exit 1
 
-# Shell form (not exec-form JSON array) so $PORT is expanded at container start - platforms like
-# Render inject a PORT env var and require the app to bind to it; a hardcoded exec-form CMD would
-# ignore it. ${PORT:-8000} falls back to 8000 when PORT isn't set (e.g. local docker-compose).
-CMD uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn src.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"]

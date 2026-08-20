@@ -24,7 +24,7 @@ async def test_google_auth_new_user_creates_account(client, monkeypatch):
     body = resp.json()
     assert body["user"]["email"] == "newgoogle@example.com"
     assert body["user"]["display_name"] == "New Googler"
-    assert body["user"]["platform_role"] == "user"
+    assert body["user"]["role"] == "user"
 
     async with db_session.async_session_maker() as db:
         identity = (
@@ -52,7 +52,7 @@ async def test_google_auth_links_existing_verified_email(client, monkeypatch):
         "/api/v1/auth/register",
         json={"email": "linkme@example.com", "password": "password123", "display_name": "Link Me"},
     )
-    original_user_id = register_resp.json()["user"]["id"]
+    original_user_id = register_resp.json()["id"]
 
     monkeypatch.setattr(
         google_oauth,
@@ -107,11 +107,11 @@ async def test_google_auth_invalid_token_returns_401(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_google_auth_signup_is_always_a_user(client, monkeypatch):
+async def test_google_auth_first_signup_matching_initial_admin_email_becomes_admin(client, monkeypatch):
     monkeypatch.setattr(
         auth_routes,
         "get_settings",
-        lambda: types.SimpleNamespace(admin_bootstrap_key="test-bootstrap-key"),
+        lambda: types.SimpleNamespace(initial_admin_email="admin-via-google@example.com"),
     )
     monkeypatch.setattr(
         google_oauth,
@@ -121,7 +121,7 @@ async def test_google_auth_signup_is_always_a_user(client, monkeypatch):
 
     resp = await client.post("/api/v1/auth/google", json={"id_token": "fake"})
     assert resp.status_code == 200
-    assert resp.json()["user"]["platform_role"] == "user"
+    assert resp.json()["user"]["role"] == "admin"
 
 
 @pytest.mark.asyncio

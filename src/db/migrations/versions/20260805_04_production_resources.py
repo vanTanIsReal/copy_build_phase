@@ -3,8 +3,8 @@
 from datetime import UTC, datetime
 
 import sqlalchemy as sa
-
 from alembic import op
+
 from src.db import models  # noqa: F401
 from src.db.base import Base
 
@@ -37,7 +37,7 @@ def _foreign_key_targets(connection, table: str) -> set[tuple[str, str]]:
 
 
 def _create_missing_tables(connection) -> None:
-    for table_name in ("tasks", "usage_logs", "memories", "reminders"):
+    for table_name in ("tasks", "usage_logs", "memories", "calendar_sync_state", "reminders"):
         Base.metadata.tables[table_name].create(bind=connection, checkfirst=True)
 
 
@@ -154,8 +154,6 @@ def _harden_constraints(connection) -> None:
 
 def upgrade() -> None:
     connection = op.get_bind()
-    if "workspaces" not in _tables(connection):
-        return
     _add_user_profile_columns(connection)
     _create_missing_tables(connection)
 
