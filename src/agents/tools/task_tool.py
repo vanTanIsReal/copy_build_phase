@@ -22,13 +22,15 @@ class _ExtractedTask(BaseModel):
 _EXTRACTED_TASKS = TypeAdapter(list[_ExtractedTask])
 
 
-@tool
-async def extract_tasks(
-    state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
+async def generate_tasks_json(
+    text: str, *, user_id: str | None = None, workspace_id: str | None = None
 ) -> str:
-    """Extract action items, tasks, and appointments mentioned in the conversation the user is
-    currently asking about, as a JSON array."""
-    text = (state or {}).get("context", "")
+    """Build the prompt, call the LLM once, log usage, and return the extracted tasks as a JSON
+    array string. This is the real logic - `extract_tasks` below is a thin @tool wrapper around it
+    for the LangGraph path (planner decides to call it); `quick_action_service` calls this
+    directly for AIPanel's Extract tasks button (routes.py bypasses the planner entirely there,
+    see ROADMAP.md "batch LLM call") - one place building the prompt/logging usage for this LLM
+    call, not one per caller."""
     if not text.strip():
         return "[]"
 
@@ -49,13 +51,12 @@ async def extract_tasks(
         f"<conversation_data>\n{text}\n</conversation_data>"
     )
     result = await llm.ainvoke(prompt)
-    settings = get_settings()
     await usage_service.log_usage(
         provider=settings.llm_provider,
         model=settings.model_name,
         usage_metadata=result.usage_metadata,
-        user_id=(state or {}).get("user_id"),
-        workspace_id=(state or {}).get("workspace_id"),
+        user_id=user_id,
+        workspace_id=workspace_id,
     )
     cleaned = result.content.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     try:
@@ -67,4 +68,17 @@ async def extract_tasks(
         [task.model_dump(mode="json") for task in tasks],
         ensure_ascii=False,
         separators=(",", ":"),
+    )
+
+
+@tool
+async def extract_tasks(
+    state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
+) -> str:
+    """Extract action items, tasks, and appointments mentioned in the conversation the user is
+    currently asking about, as a JSON array."""
+    return await generate_tasks_json(
+        (state or {}).get("context", ""),
+        user_id=(state or {}).get("user_id"),
+        workspace_id=(state or {}).get("workspace_id"),
     )

@@ -33,7 +33,11 @@ export function AuthProvider({ children }) {
   }
 
   const register = async (email, password, display_name) => {
-    const data = await authApi.register({ email, password, display_name })
+    // POST /auth/register only creates the account (201, no token - see src/api/auth_routes.py)
+    // so the new account can't skip the same credential check every other sign-in goes through;
+    // log in right after with the same credentials to get a session, same as a returning user.
+    await authApi.register({ email, password, display_name })
+    const data = await authApi.login({ email, password })
     localStorage.setItem(TOKEN_KEY, data.access_token)
     setUser(data.user)
     setToken(data.access_token)

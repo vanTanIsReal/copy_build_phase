@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from src.agents.contracts import RequestedScope
+
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant", "system"] = "user"
@@ -27,6 +29,27 @@ class MessageScope(BaseModel):
         return self
 
 
+class SpecialistActionRequest(BaseModel):
+    """Which side-effecting specialist tool to propose, and its draft payload. `kind` picks the
+    tool deterministically (never inferred by an LLM - MULTI_AGENT_IMPLEMENTATION_PLAN.md G3 "LLM
+    chỉ phân loại intent và tổng hợp trong scope; router/policy không giao cho LLM quyết định")."""
+
+    kind: Literal["propose_reminder", "propose_meeting"]
+    title: str = Field(min_length=1, max_length=200)
+    due_at: str | None = Field(default=None, description="ISO datetime - required for kind=propose_reminder")
+    message: str = Field(default="", max_length=2000)
+    starts_at: str | None = Field(default=None, description="ISO datetime - required for kind=propose_meeting")
+    attendee_ids: list[str] = Field(default_factory=list, description="Internal user ids - kind=propose_meeting only")
+
+    @model_validator(mode="after")
+    def required_field_matches_kind(self) -> "SpecialistActionRequest":
+        if self.kind == "propose_reminder" and not self.due_at:
+            raise ValueError("due_at is required when kind=propose_reminder")
+        if self.kind == "propose_meeting" and not self.starts_at:
+            raise ValueError("starts_at is required when kind=propose_meeting")
+        return self
+
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=5000, description="Tin nhắn từ user")
     thread_id: str | None = Field(default=None, description="Conversation thread id; generated if omitted")
@@ -45,10 +68,45 @@ class ChatRequest(BaseModel):
             "rather than trusting whatever `messages` the client attached."
         ),
     )
+    requested_scope: RequestedScope = Field(
+        default=RequestedScope.PERSONAL,
+        description=(
+            "PERSONAL (default) keeps the existing LangGraph Personal-agent flow untouched. "
+            "WORKSPACE/AGGREGATE instead route through the deterministic Router to the "
+            "product_delivery/quality_assurance/executive agent profiles (read-only brief, or a "
+            "propose_* action when specialist_action is set - see src.api.routes._run_specialist_chat). "
+            "A REQUEST, never a grant: real entitlement is still resolved server-side against the "
+            "caller's own membership."
+        ),
+    )
+    target_agent_workspace_id: str | None = Field(
+        default=None,
+        description="Required when requested_scope=WORKSPACE; must be omitted otherwise.",
+    )
+    specialist_action: SpecialistActionRequest | None = Field(
+        default=None,
+        description=(
+            "Only meaningful together with requested_scope WORKSPACE/AGGREGATE. Omitted (default) "
+            "-> read-only brief, same as before. Set -> route to the matching propose_*_reminder/"
+            "propose_*_meeting tool instead, which returns status=interrupted for the caller to "
+            "confirm/reject via POST /chat/resume, exactly like the Personal agent's existing "
+            "calendar/reminder HITL flow (src.api.routes._run_specialist_chat)."
+        ),
+    )
 
 
 class InterruptPayload(BaseModel):
-    type: Literal["calendar_event", "calendar_event_update", "calendar_event_delete", "reminder"]
+    type: Literal[
+        "calendar_event",
+        "calendar_event_update",
+        "calendar_event_delete",
+        "reminder",
+        "delivery_reminder",
+        "delivery_meeting",
+        "quality_reminder",
+        "quality_meeting",
+        "executive_meeting",
+    ]
     draft: dict
 
 

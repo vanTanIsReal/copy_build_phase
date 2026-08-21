@@ -154,6 +154,10 @@ class AgentWorkspaceMembership(Base):
             "status IN ('active', 'invited', 'suspended', 'revoked')",
             name="ck_agent_workspace_membership_status",
         ),
+        CheckConstraint(
+            "consent_status IN ('active', 'revoked')",
+            name="ck_agent_workspace_membership_consent_status",
+        ),
         Index(
             "ix_agent_workspace_memberships_user_status",
             "user_id",
@@ -173,6 +177,12 @@ class AgentWorkspaceMembership(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     business_role: Mapped[str]
     status: Mapped[str] = mapped_column(default="active")
+    # The member's own opt-in for a specialist agent to operate in THIS Agent Workspace on their
+    # behalf - independent of `status` above (membership itself). A member can revoke this without
+    # leaving the workspace, same idea as the existing per-conversation `AIPermission.granted` for
+    # the Personal Agent. Checked by resolve_agent_scope in addition to status=="active"; revoking
+    # it takes effect on the very next request (no cache - see src/agents/policies/scope_resolver.py).
+    consent_status: Mapped[str] = mapped_column(default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
@@ -504,7 +514,7 @@ class Task(Base):
     __table_args__ = (
         CheckConstraint("priority IN ('High', 'Medium', 'Low')", name="ck_task_priority"),
         CheckConstraint(
-            "status IN ('suggested', 'pending', 'in_progress', 'completed', 'dismissed', 'invalidated')",
+            "status IN ('suggested', 'pending', 'in_progress', 'blocked', 'completed', 'dismissed', 'invalidated')",
             name="ck_task_status",
         ),
         CheckConstraint("source IN ('manual', 'ai_extracted', 'proactive')", name="ck_task_source"),
@@ -532,8 +542,34 @@ class Task(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
+    # --- Agent Workspace fields (MULTI_AGENT_IMPLEMENTATION_PLAN.md #7.2) ---
+    # NULL for every personal Task (proactive/manual) - existing personal-task behaviour is
+    # unaffected. Set only when a work item belongs to a Product Delivery Agent Workspace, per
+    # src/agents/tools/delivery_tool.py. Deliberately reuses Task instead of a parallel work-item
+    # table.
+    agent_workspace_id: Mapped[str | None] = mapped_column(ForeignKey("agent_workspaces.id"), default=None, index=True)
+    confidence: Mapped[float | None] = mapped_column(default=None)
+    needs_clarification: Mapped[bool] = mapped_column(default=False)
+    # Quality Assurance work-item metadata - only ever set when agent_workspace_id points at a
+    # quality_assurance workspace. The real quality_assurance vertical slice lives on its own
+    # (repository-based) design in src/services/quality_workspace_service.py and does not read
+    # these columns; they exist so a Task can still stand in as a synthetic QA work item for
+    # exercising executive_tool's cross-workspace aggregation (see
+    # tests/test_agents/test_tools/test_executive_tool.py::_publish_quality_brief).
+    work_item_type: Mapped[str | None] = mapped_column(default=None)  # "bug" | "test_case" | "release_check"
+    severity: Mapped[str | None] = mapped_column(default=None)  # "low" | "medium" | "high" | "critical"
+    quality_status: Mapped[str | None] = mapped_column(default=None)
+    # "open" | "testing" | "passed" | "failed" | "blocked"
+    # Free-text release/milestone tag (MULTI_AGENT_IMPLEMENTATION_PLAN.md Ngày 4 "cross-workspace
+    # scenario") - a Delivery task and a Quality work item that share the same release_target are
+    # the cross-workspace dependency executive_tool.get_cross_workspace_dependencies resolves.
+    # Deliberately a plain string, not a foreign key to a Milestone table - there is no Milestone
+    # model.
+    release_target: Mapped[str | None] = mapped_column(default=None, index=True)
+
     owner: Mapped["User"] = relationship(foreign_keys=[owner_id])
     conversation: Mapped["Conversation | None"] = relationship()
+    agent_workspace: Mapped["AgentWorkspace | None"] = relationship()
 
 
 class EventCandidate(Base):
@@ -733,3 +769,85 @@ class Reminder(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     owner: Mapped["User"] = relationship()
+
+
+class WorkspaceBriefRecord(Base):
+    """Persisted copy of a published src.agents.contracts.WorkspaceBrief (named *Record* to avoid
+    a same-name clash with that Pydantic contract). One row per generated Delivery/Quality brief -
+    lets the Executive Agent (and the UI) list/replay past briefs instead of only ever seeing the
+    single most-recent one held in memory. brief_json stores the full validated contract payload
+    (already schema-versioned/source-checked by WorkspaceBrief itself); the flat columns below exist
+    only so common queries (latest non-stale brief per workspace, per type) don't need to unpack
+    JSON."""
+
+    __tablename__ = "workspace_briefs"
+    __table_args__ = (
+        CheckConstraint("brief_type IN ('delivery', 'quality')", name="ck_workspace_brief_type"),
+        Index("ix_workspace_briefs_workspace_type_generated", "agent_workspace_id", "brief_type", "generated_at"),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
+    organization_workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    agent_workspace_id: Mapped[str] = mapped_column(ForeignKey("agent_workspaces.id"), index=True)
+    brief_type: Mapped[str]
+    trace_id: Mapped[str] = mapped_column(index=True)
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    headline: Mapped[str]
+    brief_json: Mapped[dict] = mapped_column(JSON)
+
+
+class AgentRun(Base):
+    """One row per agent invocation - the trace/audit record MULTI_AGENT_IMPLEMENTATION_PLAN.md #7.1
+    and #13 (Versioning và eval) require: agent_profile, prompt_version, model, policy_decision,
+    latency, token usage and outcome for every run, with no raw message/PII content (G6). Deliberately
+    separate from AuditLog (admin-triggered actions only, no workspace/profile/latency/token concept)
+    and UsageLog (token totals only, no per-run trace/policy outcome) - neither fits this shape."""
+
+    __tablename__ = "agent_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "policy_decision IN ('ALLOW', 'DENY', 'MASK', 'REQUIRE_APPROVAL')",
+            name="ck_agent_run_policy_decision",
+        ),
+        CheckConstraint("status IN ('success', 'partial', 'error', 'denied')", name="ck_agent_run_status"),
+        Index("ix_agent_runs_actor_created", "actor_user_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
+    trace_id: Mapped[str] = mapped_column(index=True)
+    actor_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    organization_workspace_id: Mapped[str | None] = mapped_column(ForeignKey("workspaces.id"), default=None)
+    agent_workspace_id: Mapped[str | None] = mapped_column(ForeignKey("agent_workspaces.id"), default=None)
+    agent_profile: Mapped[str]
+    intent: Mapped[str]
+    requested_scope: Mapped[str]
+    policy_decision: Mapped[str]
+    policy_reason: Mapped[str]
+    prompt_version: Mapped[str]
+    model: Mapped[str] = mapped_column(default="")
+    status: Mapped[str]
+    latency_ms: Mapped[int] = mapped_column(default=0)
+    token_usage: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+
+
+class AgentActionExecution(Base):
+    """Idempotency ledger for the shared HITL executor (src/agents/hitl_executor.py). One row per
+    ActionProposal.idempotency_key that has actually been executed - a resume/confirm replayed with
+    the same key (double-click, retry after a dropped response) short-circuits to the stored result
+    instead of re-running a non-idempotent side effect twice. Deliberately keyed on idempotency_key
+    alone (not proposal_id) since that's the field ActionProposal itself defines as the replay key."""
+
+    __tablename__ = "agent_action_executions"
+
+    idempotency_key: Mapped[str] = mapped_column(primary_key=True)
+    proposal_id: Mapped[str] = mapped_column(index=True)
+    trace_id: Mapped[str] = mapped_column(index=True)
+    actor_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    action: Mapped[str]
+    status: Mapped[str]  # "success" | "error"
+    result_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

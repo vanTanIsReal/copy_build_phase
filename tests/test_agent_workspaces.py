@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import select
 
 import src.db.session as db_session
-from src.agents.context_builder import AgentScopeDeniedError, build_agent_context
+from src.agents.context_builder import build_agent_context
 from src.agents.contracts import (
     AgentIntent,
     AgentInvocationRequest,
@@ -14,7 +14,6 @@ from src.agents.contracts import (
 )
 from src.agents.policies.resource_guard import AgentResourceDeniedError, enforce_agent_resource_access
 from src.agents.policies.scope_resolver import resolve_agent_scope
-from src.config import Settings
 from src.db.models import AgentWorkspaceMembership, User, WorkspaceMembership
 from src.services.agent_workspace_service import add_agent_workspace_member, create_agent_workspace
 from src.services.company_service import get_or_create_company_workspace
@@ -95,6 +94,11 @@ async def _seed_agent_workspaces(client, auth_headers):
         )
         await add_agent_workspace_member(db, quality.id, users["quality@example.com"].id, "lead")
         await add_agent_workspace_member(db, executive.id, users["executive@example.com"].id, "lead")
+        # AGGREGATE/EXECUTIVE scope (resolve_agent_scope) aggregates over whichever business
+        # workspaces the caller holds "executive_viewer" on directly - being "lead" of the
+        # separate `executive` AgentWorkspace row above is unrelated to that check.
+        await add_agent_workspace_member(db, delivery.id, users["executive@example.com"].id, "executive_viewer")
+        await add_agent_workspace_member(db, quality.id, users["executive@example.com"].id, "executive_viewer")
         await db.commit()
         return {
             "organization_id": organization["id"],
@@ -242,22 +246,16 @@ async def test_context_builder_uses_db_role_and_feature_flags(client, auth_heade
         requested_scope=RequestedScope.WORKSPACE,
         target_agent_workspace_id=seed["delivery_id"],
     )
-    settings = Settings(
-        _env_file=None,
-        multi_agent_enabled=True,
-        product_delivery_agent_enabled=True,
-    )
 
     async with db_session.async_session_maker() as db:
+        delivery_user = await db.get(User, seed["delivery_user_id"])
         context = await build_agent_context(
             db,
-            user_id=seed["delivery_user_id"],
+            user=delivery_user,
             organization_workspace_id=seed["organization_id"],
             invocation=invocation,
             agent_profile=AgentProfile.PRODUCT_DELIVERY,
             intent=AgentIntent.DELIVERY_BRIEF,
-            prompt_version="product-delivery-v1",
-            settings=settings,
         )
 
     assert context.actor.business_role == BusinessRole.LEAD
@@ -265,35 +263,12 @@ async def test_context_builder_uses_db_role_and_feature_flags(client, auth_heade
     assert context.runtime.agent_profile == AgentProfile.PRODUCT_DELIVERY
 
 
-@pytest.mark.asyncio
-async def test_context_builder_fails_closed_when_profile_flag_is_disabled(client, auth_headers):
-    seed = await _seed_agent_workspaces(client, auth_headers)
-    invocation = AgentInvocationRequest(
-        message="Tình hình delivery tuần này?",
-        requested_scope=RequestedScope.WORKSPACE,
-        target_agent_workspace_id=seed["delivery_id"],
-    )
-
-    async with db_session.async_session_maker() as db:
-        with pytest.raises(AgentScopeDeniedError) as error:
-            await build_agent_context(
-                db,
-                user_id=seed["delivery_user_id"],
-                organization_workspace_id=seed["organization_id"],
-                invocation=invocation,
-                agent_profile=AgentProfile.PRODUCT_DELIVERY,
-                intent=AgentIntent.DELIVERY_BRIEF,
-                prompt_version="product-delivery-v1",
-                settings=Settings(
-                    _env_file=None,
-                    multi_agent_enabled=False,
-                    product_delivery_agent_enabled=False,
-                    quality_assurance_agent_enabled=False,
-                    executive_agent_enabled=False,
-                ),
-            )
-
-    assert error.value.resolution.reason == PolicyReason.FEATURE_DISABLED
+# NOTE: MULTI_AGENT_ENABLED/<profile>_AGENT_ENABLED feature-flag gating (G6 kill switch) no longer
+# lives inside build_agent_context - it's checked by the caller (src.api.routes._run_specialist_chat)
+# before build_agent_context is ever invoked, since build_agent_context itself never raises (a
+# denial is expressed as authorization.decision == DENY so G6 audit logging records every attempt
+# uniformly, see context_builder.py's own docstring). Coverage for the disabled-flag path now lives
+# at the HTTP layer instead of this unit test.
 
 
 @pytest.mark.asyncio
@@ -496,26 +471,20 @@ async def test_conversation_mapping_enters_scope_only_with_active_group_consent(
     assert after_consent.allowed_resource_ids == (conversation_id,)
     assert after_consent.consent_scope_hash is not None
 
-    context_settings = Settings(
-        _env_file=None,
-        multi_agent_enabled=True,
-        product_delivery_agent_enabled=True,
-    )
     invocation = AgentInvocationRequest(
         message="Tóm tắt release",
         requested_scope=RequestedScope.WORKSPACE,
         target_agent_workspace_id=seed["delivery_id"],
     )
     async with db_session.async_session_maker() as db:
+        delivery_user = await db.get(User, seed["delivery_user_id"])
         context = await build_agent_context(
             db,
-            user_id=seed["delivery_user_id"],
+            user=delivery_user,
             organization_workspace_id=seed["organization_id"],
             invocation=invocation,
             agent_profile=AgentProfile.PRODUCT_DELIVERY,
             intent=AgentIntent.DELIVERY_BRIEF,
-            prompt_version="product-delivery-v1",
-            settings=context_settings,
         )
     assert context.authorization.allowed_resource_ids == (conversation_id,)
     assert context.authorization.consent_scope_hash == after_consent.consent_scope_hash

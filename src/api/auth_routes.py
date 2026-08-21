@@ -12,6 +12,7 @@ from src.config import get_settings
 from src.db.models import GoogleIdentity, User
 from src.db.session import get_db
 from src.models.auth_schemas import (
+    AdminRegisterRequest,
     AuthResponse,
     ChangePasswordRequest,
     GoogleAuthRequest,
@@ -20,6 +21,7 @@ from src.models.auth_schemas import (
     UpdateProfileRequest,
     UserPublic,
 )
+from src.services.audit_service import record_audit_event
 from src.services.workspace_service import create_personal_workspace
 
 router = APIRouter()
@@ -131,6 +133,75 @@ async def google_auth(request: GoogleAuthRequest, db: AsyncSession = Depends(get
         await db.commit()
         await db.refresh(user)
 
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has been disabled")
+
+    token = create_access_token(user.id)
+    return AuthResponse(access_token=token, user=_to_public(user))
+
+
+@router.post("/admin/register", response_model=AuthResponse)
+async def register_admin(body: AdminRegisterRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
+    """Create the first administrator from the separate Frontend/admin app's one-time setup
+    screen, gated by ADMIN_BOOTSTRAP_KEY. Not a replacement for INITIAL_ADMIN_EMAIL (still works
+    unchanged via /register) - this exists for deployments that would rather gate the first admin
+    behind a secret than pre-decide an email address. Once an admin exists, additional admins are
+    promoted from the Admin > Users screen instead."""
+    bootstrap_key = get_settings().admin_bootstrap_key
+    if not bootstrap_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Admin bootstrap is not configured"
+        )
+    if not secrets.compare_digest(body.bootstrap_key, bootstrap_key):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid admin bootstrap key")
+
+    admin_exists = (await db.execute(select(User.id).where(User.role == "admin").limit(1))).scalar_one_or_none()
+    if admin_exists is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An admin account already exists. Ask an existing admin to promote another account.",
+        )
+
+    normalized_email = str(body.email).lower()
+    existing = (await db.execute(select(User).where(User.email == normalized_email))).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+
+    user = User(
+        email=normalized_email,
+        password_hash=hash_password(body.password),
+        display_name=body.display_name,
+        role="admin",
+        platform_role="platform_admin",
+    )
+    db.add(user)
+    await db.flush()
+    await create_personal_workspace(db, user)
+    await record_audit_event(
+        db,
+        actor=user,
+        action="auth.admin_account_registered",
+        target_type="user",
+        target_id=user.id,
+        workspace_id=None,
+        metadata={"method": "bootstrap_key"},
+    )
+    await db.commit()
+    await db.refresh(user)
+
+    token = create_access_token(user.id)
+    return AuthResponse(access_token=token, user=_to_public(user))
+
+
+@router.post("/admin/login", response_model=AuthResponse)
+async def admin_login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
+    """Same credential check as /login, plus a role check - used by the separate Frontend/admin
+    app so a non-admin account can't get a session there even with a correct password."""
+    user = (await db.execute(select(User).where(User.email == body.email.lower()))).scalar_one_or_none()
+    if user is None or not verify_password(body.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+    if user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has been disabled")
 

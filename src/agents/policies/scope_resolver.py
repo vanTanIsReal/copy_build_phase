@@ -1,3 +1,8 @@
+"""Agent-workspace scope resolution: turns (user, organization workspace, requested profile/scope)
+into what that user is actually allowed to see. Ported narrowly from the G19-T132-Lương-Trí-Tuệ
+branch's foundation - see docs/MULTI_AGENT_PROGRESS.md. Nothing here is wired into `/chat` yet.
+"""
+
 import hashlib
 
 from pydantic import BaseModel, ConfigDict
@@ -50,10 +55,46 @@ async def _has_organization_access(db: AsyncSession, user_id: str, workspace_id:
                 WorkspaceMembership.workspace_id == workspace_id,
                 WorkspaceMembership.user_id == user_id,
                 WorkspaceMembership.status == "active",
-                WorkspaceMembership.role.in_(("owner", "admin", "member")),
             )
         )
     ).scalar_one_or_none() is not None
+
+
+async def list_active_agent_workspace_memberships(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    organization_workspace_id: str | None = None,
+    business_roles: tuple[str, ...] | None = None,
+) -> tuple[AgentWorkspace, ...]:
+    """Every active AgentWorkspace the user has an active membership in.
+
+    Shared by the EXECUTIVE branch of resolve_agent_scope below (organization- and
+    executive_viewer-scoped) and by the self-service "my agent workspaces" listing (unscoped,
+    any active role) - one query, two callers, so the membership-filtering logic lives in exactly
+    one place.
+    """
+    stmt = (
+        select(AgentWorkspace)
+        .join(AgentWorkspaceMembership, AgentWorkspaceMembership.agent_workspace_id == AgentWorkspace.id)
+        .where(
+            AgentWorkspace.status == "active",
+            AgentWorkspaceMembership.user_id == user_id,
+            AgentWorkspaceMembership.status == "active",
+        )
+        .order_by(AgentWorkspace.key.asc())
+    )
+    if organization_workspace_id is not None:
+        stmt = stmt.where(AgentWorkspace.organization_workspace_id == organization_workspace_id)
+    if business_roles is not None:
+        stmt = stmt.where(AgentWorkspaceMembership.business_role.in_(business_roles))
+    return tuple((await db.execute(stmt)).scalars().all())
+
+
+async def list_my_agent_workspaces(db: AsyncSession, *, user_id: str) -> tuple[AgentWorkspace, ...]:
+    """Agent workspaces the user has ANY active membership in (member/lead/executive_viewer),
+    across every organization workspace - backs GET /api/v1/agent-workspaces?mine=true."""
+    return await list_active_agent_workspace_memberships(db, user_id=user_id)
 
 
 async def _resolve_conversation_resources(
@@ -100,50 +141,36 @@ async def resolve_agent_scope(
     if agent_profile == AgentProfile.EXECUTIVE:
         if requested_scope != RequestedScope.AGGREGATE or target_agent_workspace_id is not None:
             return _denied(PolicyReason.INVALID_SCOPE)
-        executive_membership = (
-            await db.execute(
-                select(AgentWorkspaceMembership.id)
-                .join(
-                    AgentWorkspace,
-                    AgentWorkspace.id == AgentWorkspaceMembership.agent_workspace_id,
-                )
-                .where(
-                    AgentWorkspace.organization_workspace_id == organization_workspace_id,
-                    AgentWorkspace.agent_profile == AgentProfile.EXECUTIVE.value,
-                    AgentWorkspace.status == "active",
-                    AgentWorkspaceMembership.user_id == user_id,
-                    AgentWorkspaceMembership.business_role.in_(("lead", "member", "executive_viewer")),
-                    AgentWorkspaceMembership.status == "active",
-                )
-            )
-        ).scalar_one_or_none()
-        if executive_membership is None:
-            return _denied(PolicyReason.NOT_MEMBER)
-        allowed_ids = tuple(
-            (
-                await db.execute(
-                    select(AgentWorkspace.id)
-                    .where(
-                        AgentWorkspace.organization_workspace_id == organization_workspace_id,
-                        AgentWorkspace.status == "active",
-                        AgentWorkspace.agent_profile.in_(
-                            (
-                                AgentProfile.PRODUCT_DELIVERY.value,
-                                AgentProfile.QUALITY_ASSURANCE.value,
-                            )
-                        ),
-                    )
-                    .order_by(AgentWorkspace.key.asc())
-                )
-            )
-            .scalars()
-            .all()
+        allowed = await list_active_agent_workspace_memberships(
+            db,
+            user_id=user_id,
+            organization_workspace_id=organization_workspace_id,
+            business_roles=("executive_viewer",),
         )
+        if not allowed:
+            return _denied(PolicyReason.NOT_MEMBER)
+        # `allowed` only proves active *membership* (status=="active"); a member can still have
+        # opted their own AI access out separately (consent_status) without leaving the workspace.
+        # If the executive_viewer has consented in at least one, aggregate over those; a total
+        # revoke across every executive_viewer membership is reported distinctly from NOT_MEMBER.
+        consented_ids = (
+            await db.execute(
+                select(AgentWorkspaceMembership.agent_workspace_id).where(
+                    AgentWorkspaceMembership.agent_workspace_id.in_([w.id for w in allowed]),
+                    AgentWorkspaceMembership.user_id == user_id,
+                    AgentWorkspaceMembership.status == "active",
+                    AgentWorkspaceMembership.consent_status == "active",
+                )
+            )
+        ).scalars().all()
+        if not consented_ids:
+            return _denied(PolicyReason.WORKSPACE_CONSENT_REVOKED)
+        allowed = tuple(w for w in allowed if w.id in set(consented_ids))
         return ResolvedAgentScope(
             decision=PolicyDecision.ALLOW,
             reason=PolicyReason.ALLOWED,
             business_role=BusinessRole.EXECUTIVE,
-            allowed_agent_workspace_ids=allowed_ids,
+            allowed_agent_workspace_ids=tuple(workspace.id for workspace in allowed),
         )
 
     if agent_profile not in {AgentProfile.PRODUCT_DELIVERY, AgentProfile.QUALITY_ASSURANCE}:
@@ -173,6 +200,8 @@ async def resolve_agent_scope(
     ).scalar_one_or_none()
     if membership is None:
         return _denied(PolicyReason.NOT_MEMBER)
+    if membership.consent_status != "active":
+        return _denied(PolicyReason.WORKSPACE_CONSENT_REVOKED)
     role = BusinessRole.LEAD if membership.business_role == "lead" else BusinessRole.MEMBER
     allowed_resource_ids, consent_scope_hash = await _resolve_conversation_resources(
         db,

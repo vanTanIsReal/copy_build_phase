@@ -1,3 +1,14 @@
+"""Deterministic Router (MULTI_AGENT_IMPLEMENTATION_PLAN.md #4, architecture diagram: `Shared
+Orchestrator -> Deterministic Router -> {Delivery,Quality,Executive} Agent`).
+
+Plain code, no LLM call: `requested_scope` on the client's AgentInvocationRequest is a REQUEST, not a
+grant (G0) - this function only ever picks a profile *deterministically* from that request plus the
+already-DB-verified `AgentWorkspace.agent_profile` for a WORKSPACE-scoped request. Real entitlement
+(is this user actually allowed into that workspace/profile) is decided by
+src.agents.policies.scope_resolver.resolve_agent_scope, called from context_builder - this module
+never queries membership/consent itself, only which *profile* the request is asking to reach.
+"""
+
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,7 +66,10 @@ async def route_agent_request(
     invocation: AgentInvocationRequest,
     intent: AgentIntent,
 ) -> AgentRoute:
-    """Select a registered profile deterministically; authorization still runs afterwards."""
+    """Select a registered profile deterministically. Authorization (can THIS user actually reach
+    that profile/workspace) still runs afterwards in context_builder - a route being resolvable
+    only means the request *shape* is coherent (right scope for the target profile), not that the
+    caller is allowed to have it."""
 
     if invocation.requested_scope == RequestedScope.PERSONAL:
         if invocation.target_agent_workspace_id is not None:
@@ -69,6 +83,7 @@ async def route_agent_request(
 
     if invocation.requested_scope != RequestedScope.WORKSPACE or invocation.target_agent_workspace_id is None:
         raise AgentRouteDeniedError(PolicyReason.INVALID_SCOPE)
+
     agent_workspace = await db.get(AgentWorkspace, invocation.target_agent_workspace_id)
     if (
         agent_workspace is None

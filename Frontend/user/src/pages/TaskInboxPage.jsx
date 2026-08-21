@@ -4,24 +4,19 @@ import PageHeader from '../components/common/PageHeader'
 import StatCard from '../components/common/StatCard'
 import { formatDue } from '../components/task/TaskTable'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { listTasks, updateTaskStatus } from '../api/tasks'
+import { groupTasks } from '../utils/taskGrouping'
 
 const sourceLabel = { manual: 'Manual', proactive: 'AI suggestion' }
 const priorityClass = { High: 'danger', Medium: 'warning', Low: 'info' }
-const DUE_SOON_HOURS = 48
-
-const byDueAtThenPriority = (a, b) => {
-  const rank = { High: 0, Medium: 1, Low: 2 }
-  if (!a.due_at && !b.due_at) return (rank[a.priority] ?? 1) - (rank[b.priority] ?? 1)
-  if (!a.due_at) return 1
-  if (!b.due_at) return -1
-  return new Date(a.due_at) - new Date(b.due_at)
-}
+const ACTION_FAILED = 'Không thực hiện được, thử lại sau.'
 
 // "Inbox nhiệm vụ ưu tiên" (đề bài, Nâng cao): a triage feed distinct from the full /tasks list -
 // only what needs a decision or attention *right now*, ranked instead of just chronological.
 export default function TaskInboxPage() {
   const { token } = useAuth()
+  const { pushToast } = useToast()
   const { subscribe } = useOutletContext()
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
@@ -45,21 +40,11 @@ export default function TaskInboxPage() {
     if (data.type === 'task_deleted') setTasks(prev => prev.filter(t => t.id !== data.task_id))
   }), [subscribe])
 
-  const now = Date.now()
-  const soonCutoff = now + DUE_SOON_HOURS * 3600 * 1000
-  const active = tasks.filter(t => t.status === 'pending' || t.status === 'in_progress')
+  const { needsDecision, overdue, dueSoon, highPriority } = groupTasks(tasks)
 
-  const needsDecision = tasks.filter(t => t.status === 'suggested').sort(byDueAtThenPriority)
-  const overdue = active.filter(t => t.due_at && new Date(t.due_at).getTime() < now).sort(byDueAtThenPriority)
-  const dueSoon = active
-    .filter(t => t.due_at && new Date(t.due_at).getTime() >= now && new Date(t.due_at).getTime() <= soonCutoff)
-    .sort(byDueAtThenPriority)
-  const shownIds = new Set([...overdue, ...dueSoon].map(t => t.id))
-  const highPriority = active.filter(t => t.priority === 'High' && !shownIds.has(t.id)).sort(byDueAtThenPriority)
-
-  const accept = (task) => updateTaskStatus(token, task.id, 'pending').then(upsertTask)
-  const dismiss = (task) => updateTaskStatus(token, task.id, 'dismissed').then(upsertTask)
-  const complete = (task) => updateTaskStatus(token, task.id, 'completed').then(upsertTask)
+  const accept = (task) => updateTaskStatus(token, task.id, 'pending').then(upsertTask).catch(err => pushToast(err.detail || ACTION_FAILED))
+  const dismiss = (task) => updateTaskStatus(token, task.id, 'dismissed').then(upsertTask).catch(err => pushToast(err.detail || ACTION_FAILED))
+  const complete = (task) => updateTaskStatus(token, task.id, 'completed').then(upsertTask).catch(err => pushToast(err.detail || ACTION_FAILED))
 
   const totalInboxCount = needsDecision.length + overdue.length + dueSoon.length + highPriority.length
 

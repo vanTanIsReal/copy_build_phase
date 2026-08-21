@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 1440
     initial_admin_email: str = ""
     bootstrap_owner_user_id: str = ""
+    # Alternative to initial_admin_email for bootstrapping the first admin from the separate
+    # Frontend/admin app's own registration screen (POST /auth/admin/register) instead of
+    # pre-deciding an email address - only usable while no admin account exists yet.
+    admin_bootstrap_key: str = ""
     # "Sign in with Google" - Web application OAuth Client ID (audience for ID-token verification).
     # Distinct from the per-user Calendar OAuth client below. No client secret is needed here:
     # this setting only verifies Google Sign-In ID tokens.
