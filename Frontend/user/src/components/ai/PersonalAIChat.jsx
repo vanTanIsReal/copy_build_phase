@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAuth } from '../../context/AuthContext'
 import { chatWithAgent, resumeAgent } from '../../api/agent'
@@ -14,6 +14,8 @@ const prompts = [
 
 function describeInterrupt(interrupt) {
   const d = interrupt.draft
+  if (interrupt.type === 'memory_write') return `Bạn có muốn Orbit ghi nhớ "${d.title}" cho các phiên sau?`
+  if (interrupt.type === 'memory_delete') return `Bạn có muốn Orbit quên memory "${d.title}"?`
   if (interrupt.type === 'calendar_event') {
     if (d.conflicts?.length) {
       const clash = d.conflicts.map(c => c.title).join(', ')
@@ -38,7 +40,16 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
   // from "the user picked a different thread from the sidebar" (needs a real fetch).
   const [loadedThreadId,setLoadedThreadId]=useState(null)
   const [pending,setPending]=useState(null)
-  const [sending,setSending]=useState(false)
+  // Requests may finish after the user has selected another thread. Track activity by thread so
+  // one request cannot paint a spinner or append its response into a different session.
+  const [sendingThreadKeys,setSendingThreadKeys]=useState([])
+  const activeThreadRef=useRef(threadId)
+  activeThreadRef.current=threadId
+  const threadKey=(id)=>id || '__new_thread__'
+  const sending=sendingThreadKeys.includes(threadKey(threadId))
+  const markSending=(key,value)=>setSendingThreadKeys(prev => value
+    ? (prev.includes(key) ? prev : [...prev,key])
+    : prev.filter(item=>item!==key))
 
   const pushMessage = (msg) => setMessages(prev => [...prev, { id: Date.now() + Math.random(), ...msg }])
 
@@ -56,8 +67,8 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadedThreadId is the "already handled" guard, re-running on it would defeat that
   }, [threadId, token])
 
-  const handleResult = (res) => {
-    if (res.thread_id && res.thread_id !== threadId) onThreadIdChange?.(res.thread_id)
+  const handleResult = (res, expectedThreadId=threadId) => {
+    if (res.thread_id && res.thread_id !== expectedThreadId) onThreadIdChange?.(res.thread_id)
     setLoadedThreadId(res.thread_id)
     if (res.status === 'interrupted') {
       setPending({ thread_id: res.thread_id, interrupt: res.interrupt })
@@ -70,27 +81,39 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
 
   const send = async (value=draft) => {
     if(!value.trim() || sending) return
+    const requestThreadId=threadId
+    const requestKey=threadKey(requestThreadId)
     pushMessage({ own:true, text:value })
     setDraft('')
-    setSending(true)
+    markSending(requestKey,true)
     try {
-      const res = await chatWithAgent(token, { message: value, thread_id: threadId, context_limit: 20 })
-      handleResult(res)
+      const res = await chatWithAgent(token, { message: value, thread_id: requestThreadId })
+      if (activeThreadRef.current===requestThreadId) handleResult(res,requestThreadId)
+      else onActivity?.() // result is persisted in its own checkpoint; refresh the sidebar only
     } catch (err) {
-      pushMessage({ text: err.detail || 'Không gọi được AI Assistant, thử lại sau.' })
-    } finally { setSending(false) }
+      if (activeThreadRef.current===requestThreadId) {
+        pushMessage({ text: err.detail || 'Không gọi được AI Assistant, thử lại sau.' })
+      }
+    } finally { markSending(requestKey,false) }
   }
 
   const respond = async (approved, edits) => {
     if (!pending || sending) return
-    setSending(true)
+    const requestThreadId=threadId
+    const requestKey=threadKey(requestThreadId)
+    const requestPending=pending
+    markSending(requestKey,true)
     try {
-      const res = await resumeAgent(token, { thread_id: pending.thread_id, approved, edits })
-      setPending(null)
-      handleResult(res)
+      const res = await resumeAgent(token, { thread_id: requestPending.thread_id, approved, edits })
+      if (activeThreadRef.current===requestThreadId) {
+        setPending(null)
+        handleResult(res,requestThreadId)
+      } else onActivity?.()
     } catch (err) {
-      pushMessage({ text: err.detail || 'Không gọi được AI Assistant, thử lại sau.' })
-    } finally { setSending(false) }
+      if (activeThreadRef.current===requestThreadId) {
+        pushMessage({ text: err.detail || 'Không gọi được AI Assistant, thử lại sau.' })
+      }
+    } finally { markSending(requestKey,false) }
   }
 
   return <section className="personal-chat">
@@ -102,6 +125,6 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
       </motion.div>)}</AnimatePresence>
       {sending && <div className="personal-message"><div className="message-ai-icon"><i className="bi bi-stars"/></div><div className="personal-message-bubble">Đang xử lý...</div></div>}
     </div>
-    <div className="personal-composer-wrap"><div className="active-sources"><span><i className="bi bi-database-check"/> Đang dùng 4 nguồn</span><button>Chats <i className="bi bi-check"/></button><button>Tasks <i className="bi bi-check"/></button><button>Calendar <i className="bi bi-check"/></button><button>Memory <i className="bi bi-check"/></button></div><form className="personal-composer" onSubmit={e=>{e.preventDefault();send()}}><button type="button" className="icon-btn"><i className="bi bi-plus-lg"/></button><textarea rows="1" value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Hỏi Orbit về công việc và lịch trình của bạn..." onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}}}/><button type="button" className="icon-btn"><i className="bi bi-mic"/></button><button className="personal-send" aria-label="Gửi" disabled={sending} onClick={e=>{e.preventDefault();send()}}><i className="bi bi-arrow-up"/></button></form><small>Orbit có thể mắc lỗi. Hãy kiểm tra lại thông tin quan trọng.</small></div>
+    <div className="personal-composer-wrap"><div className="active-sources"><span><i className="bi bi-database-check"/> Nguồn được gọi theo nhu cầu</span><button>Chats</button><button>Tasks</button><button>Calendar</button><button>Memory</button></div><form className="personal-composer" onSubmit={e=>{e.preventDefault();send()}}><button type="button" className="icon-btn"><i className="bi bi-plus-lg"/></button><textarea rows="1" value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Hỏi Orbit về công việc và lịch trình của bạn..." onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}}}/><button type="button" className="icon-btn"><i className="bi bi-mic"/></button><button className="personal-send" aria-label="Gửi" disabled={sending} onClick={e=>{e.preventDefault();send()}}><i className="bi bi-arrow-up"/></button></form><small>Orbit có thể mắc lỗi. Hãy kiểm tra lại thông tin quan trọng.</small></div>
   </section>
 }

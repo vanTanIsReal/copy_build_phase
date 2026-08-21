@@ -24,7 +24,7 @@ from src.api.timeline_routes import router as timeline_router
 from src.api.workspace_routes import router as workspace_router
 from src.config import get_settings
 from src.db.session import init_db
-from src.services import calendar_service, thread_memory_service
+from src.services import calendar_service, memory_maintenance_service, thread_memory_service
 from src.services.ai_config_service import load_saved_ai_configuration
 from src.services.company_service import get_or_create_company_workspace
 from src.services.scheduler import scheduler
@@ -62,6 +62,15 @@ async def lifespan(app: FastAPI):
         seconds=settings.calendar_poll_interval_seconds,
         id="calendar_poll",
         replace_existing=True,
+    )
+    scheduler.add_job(
+        memory_maintenance_service.heartbeat,
+        "interval",
+        seconds=settings.memory_heartbeat_interval_seconds,
+        id="memory_heartbeat",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
     )
     yield
     scheduler.shutdown(wait=False)

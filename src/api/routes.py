@@ -43,6 +43,8 @@ from src.services import (
     calendar_service,
     chat_service,
     consent_service,
+    guardrail_service,
+    quick_action_service,
     reminder_service,
     thread_memory_service,
     usage_service,
@@ -108,6 +110,15 @@ _SPECIALIST_DENY_TEXT = {
 # In-memory only - bounded by ActionProposal's own 15-minute expires_at, so losing this on a
 # restart just means "ask the agent again", not silent data loss.
 _pending_specialist_proposals: dict[str, ActionProposal] = {}
+
+
+async def _persistent_thread_state(thread_id: str, current_user: User) -> dict:
+    """Authorize checkpoint reads even after the process-local ownership cache is lost."""
+    snapshot = await agent_graph.agent.aget_state({"configurable": {"thread_id": thread_id}})
+    prior = (snapshot.values or {}) if snapshot else {}
+    if prior.get("user_id") not in (None, current_user.id):
+        raise HTTPException(status_code=403, detail="Not your conversation")
+    return prior
 
 
 def _format_messages(messages: list[ChatMessage]) -> str:
@@ -562,14 +573,49 @@ async def chat(
     else:
         scoped_messages = request.messages[-request.context_limit :] if request.messages else []
         context_text = _format_messages(scoped_messages)
+
+    if request.quick_action:
+        # AIPanel's deterministic Quick Actions (Summarize/Extract tasks) always send one fixed
+        # message the planner's system prompt always maps to the same tool - there's no real
+        # decision to make, so the planner's LLM call is pure overhead. Skip the planner + the
+        # whole LangGraph/checkpointer run entirely and call the tool's own logic directly - 1 LLM
+        # call instead of 2. Runs after the conversation access/consent/budget checks above, so it
+        # gets the same guarantees as the graph path, just no LLM decision step after them.
+        request_decision = guardrail_service.evaluate_request(
+            request.message, conversation_mode=bool(request.conversation_id)
+        )
+        context_decision = guardrail_service.evaluate_context(context_text)
+        blocked = request_decision if not request_decision.allowed else context_decision
+        if not blocked.allowed:
+            return ChatResponse(
+                response=blocked.response, thread_id=thread_id, status="completed", context_scope=context_scope
+            )
+        try:
+            text = await quick_action_service.run_quick_action(request.quick_action, context_text)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        output_decision = guardrail_service.evaluate_output(text)
+        if not output_decision.allowed:
+            text = output_decision.response
+        return ChatResponse(response=text, thread_id=thread_id, status="completed", context_scope=context_scope)
+
     inputs = {
         "messages": [HumanMessage(content=request.message)],
+        # Preserve the original data so the deterministic guard can classify it accurately.
+        # Each LLM-facing consumer sanitizes it at its own trust boundary.
         "context": context_text,
         "user_id": current_user.id,
         "workspace_id": workspace_id,
         "conversation_id": request.conversation_id,
+        "thread_id": thread_id,
         "consent_scope_hash": conversation_view.consent_scope_hash if conversation_view else None,
         "source_message_ids": conversation_view.source_message_ids if conversation_view else [],
+        "user_context": {
+            "display_name": current_user.display_name,
+            "job_title": current_user.job_title,
+            "timezone": current_user.timezone,
+            "preferences": current_user.preferences,
+        },
     }
     try:
         result = await agent_graph.agent.ainvoke(inputs, config)

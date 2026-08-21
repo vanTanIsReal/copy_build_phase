@@ -20,6 +20,30 @@ services:
         value: gemini-2.5-flash
       - key: DAILY_TOKEN_BUDGET
         value: "150000"
+      - key: AGENT_CONTEXT_WINDOW_TOKENS
+        value: "32768"
+      - key: AGENT_OUTPUT_RESERVE_TOKENS
+        value: "4096"
+      - key: MEMORY_SHORT_TERM_FRACTION
+        value: "0.10"
+      - key: MEMORY_LONG_TERM_FRACTION
+        value: "0.04"
+      - key: MEMORY_EPISODIC_FRACTION
+        value: "0.03"
+      - key: MEMORY_RETRIEVAL_FRACTION
+        value: "0.03"
+      - key: MEMORY_HEARTBEAT_INTERVAL_SECONDS
+        value: "900"
+      - key: MEMORY_COMPACTION_MESSAGE_THRESHOLD
+        value: "24"
+      - key: MEMORY_RECENT_MESSAGES_TO_KEEP
+        value: "12"
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "1440"
+      - key: CHROMA_PERSIST_DIR
+        value: ./data/chroma
       - key: CALENDAR_TIMEZONE
         value: Asia/Ho_Chi_Minh
       - key: SCHEDULER_TIMEZONE

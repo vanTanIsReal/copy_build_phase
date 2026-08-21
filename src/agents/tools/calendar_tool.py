@@ -5,7 +5,7 @@ from langgraph.prebuilt import InjectedState
 from langgraph.types import interrupt
 
 from src.agents.state import AgentState
-from src.services import calendar_service
+from src.services import calendar_service, guardrail_service
 from src.services.google_credentials import CalendarNotConnectedError
 
 
@@ -27,7 +27,8 @@ async def create_calendar_event(
     state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
 ) -> str:
     """Draft a Google Calendar event. Requires the user's explicit confirmation before it is
-    actually created.
+    actually created. Never use this tool to schedule, coordinate, facilitate, or conceal
+    illegal/unsafe conduct; those requests are rejected.
 
     Args:
         summary: Event title.
@@ -37,6 +38,10 @@ async def create_calendar_event(
         attendees: Optional list of attendee email addresses.
     """
     user_id, _workspace_id = _agent_identity(state)
+    policy = guardrail_service.evaluate_action_content(f"{summary}\n{description}")
+    if not policy.allowed:
+        return policy.response
+
     try:
         conflicts = await calendar_service.find_conflicts(user_id, start_iso, end_iso)
     except CalendarNotConnectedError:
@@ -61,6 +66,12 @@ async def create_calendar_event(
         return "Calendar event was not created (user declined)."
 
     draft.update(decision.get("edits") or {})
+    policy = guardrail_service.evaluate_action_content(
+        f"{draft.get('summary', '')}\n{draft.get('description', '')}"
+    )
+    if not policy.allowed:
+        return policy.response
+
     try:
         created = await calendar_service.create_event(
             user_id,
@@ -108,7 +119,10 @@ async def list_calendar_events(
     if not items:
         return "No events found in that range."
     return "\n".join(
-        f"- {e.get('summary')} (id={e.get('id')}, {e['start'].get('dateTime', e['start'].get('date'))})" for e in items
+        f"- {guardrail_service.sanitize_untrusted_text(e.get('summary') or '')} "
+        f"(id={guardrail_service.sanitize_untrusted_text(e.get('id') or '')}, "
+        f"{e['start'].get('dateTime', e['start'].get('date'))})"
+        for e in items
     )
 
 
@@ -122,7 +136,8 @@ async def update_calendar_event(
     state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
 ) -> str:
     """Draft changes to an existing Google Calendar event (found via list_calendar_events).
-    Requires the user's explicit confirmation before they take effect. Only pass the fields
+    Requires the user's explicit confirmation before they take effect. Never use this tool to
+    schedule, coordinate, facilitate, or conceal illegal/unsafe conduct. Only pass the fields
     that should change; the rest stay as-is.
 
     Args:
@@ -133,11 +148,21 @@ async def update_calendar_event(
         description: New details, if changing.
     """
     draft = {"event_id": event_id, "summary": summary, "start": start_iso, "end": end_iso, "description": description}
+    policy = guardrail_service.evaluate_action_content(f"{summary or ''}\n{description or ''}")
+    if not policy.allowed:
+        return policy.response
+
     decision = interrupt({"type": "calendar_event_update", "draft": draft})
     if not decision or not decision.get("approved"):
         return "Calendar event was not updated (user declined)."
 
     draft.update(decision.get("edits") or {})
+    policy = guardrail_service.evaluate_action_content(
+        f"{draft.get('summary') or ''}\n{draft.get('description') or ''}"
+    )
+    if not policy.allowed:
+        return policy.response
+
     user_id, workspace_id = _agent_identity(state)
     try:
         updated = await calendar_service.update_event(

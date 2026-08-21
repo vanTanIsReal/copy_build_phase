@@ -662,7 +662,8 @@ class Memory(Base):
     __tablename__ = "memories"
     __table_args__ = (
         CheckConstraint(
-            "memory_type IN ('preference', 'relationship', 'episodic', 'semantic')",
+            "memory_type IN ('preference', 'relationship', 'episodic', 'semantic', "
+            "'fact', 'entity', 'decision', 'open_loop', 'knowledge', 'procedural')",
             name="ck_memory_type",
         ),
         CheckConstraint(
@@ -679,16 +680,33 @@ class Memory(Base):
     category: Mapped[str] = mapped_column(default="Preference")  # "Work" | "Preference" | "People" | ...
     title: Mapped[str]
     detail: Mapped[str] = mapped_column(default="")
-    memory_type: Mapped[str] = mapped_column(default="semantic")
+    # memory_type describes how recall/consolidation should treat the record: auto-extracted
+    # memories from conversations use preference/relationship/episodic/semantic; memories the
+    # user explicitly asks Orbit to remember (remember_fact tool) use fact/entity/decision/
+    # open_loop/knowledge - see ck_memory_type above for the full allowed set.
+    memory_type: Mapped[str] = mapped_column(default="semantic", index=True)
+    status: Mapped[str] = mapped_column(default="active", index=True)
+    source_type: Mapped[str] = mapped_column(default="manual")
+    source_id: Mapped[str | None] = mapped_column(default=None)
+    source_thread_id: Mapped[str | None] = mapped_column(default=None, index=True)
     source_conversation_id: Mapped[str | None] = mapped_column(
         ForeignKey("conversations.id"), default=None, index=True
     )
     source_message_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     consent_scope_hash: Mapped[str | None] = mapped_column(default=None, index=True)
-    sensitivity: Mapped[str] = mapped_column(default="normal")
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict)
     confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    importance: Mapped[float] = mapped_column(Float, default=0.5)
+    sensitivity: Mapped[str] = mapped_column(default="normal")
+    user_confirmed: Mapped[bool] = mapped_column(default=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None, index=True)
     last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    access_count: Mapped[int] = mapped_column(Integer, default=0)
+    content_hash: Mapped[str] = mapped_column(default="", index=True)
+    # JSON keeps the deployment PostgreSQL-only without making pgvector a hard dependency. The
+    # retrieval service can later move this to pgvector without changing the API or memory schema.
+    embedding: Mapped[list | None] = mapped_column(JSON, default=None)
+    embedding_model: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
@@ -722,6 +740,47 @@ class AssistantThread(Base):
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True, index=True)
     title: Mapped[str]  # fixed at creation from the first message - like a conversation name, never edited after
     preview: Mapped[str] = mapped_column(default="")
+    session_summary: Mapped[str] = mapped_column(Text, default="")
+    compacted_message_count: Mapped[int] = mapped_column(Integer, default=0)
+    summary_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    last_memory_maintenance_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    owner: Mapped["User"] = relationship()
+
+
+class MemoryEpisode(Base):
+    """A compact, chronological account of one completed slice of an assistant thread.
+
+    Episodes are evidence-backed summaries, not instructions. Durable facts extracted from an
+    episode are written as ``Memory(status='pending_review')`` until the user approves them.
+    """
+
+    __tablename__ = "memory_episodes"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    thread_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    conversation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"), default=None, index=True
+    )
+    summary: Mapped[str] = mapped_column(Text)
+    decisions: Mapped[list] = mapped_column(JSON, default=list)
+    open_loops: Mapped[list] = mapped_column(JSON, default=list)
+    source_ids: Mapped[list] = mapped_column(JSON, default=list)
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict)
+    confidence: Mapped[float] = mapped_column(Float, default=0.8)
+    importance: Mapped[float] = mapped_column(Float, default=0.5)
+    message_count: Mapped[int] = mapped_column(Integer, default=0)
+    sequence: Mapped[int] = mapped_column(Integer, default=0)
+    embedding: Mapped[list | None] = mapped_column(JSON, default=None)
+    embedding_model: Mapped[str | None] = mapped_column(default=None)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 

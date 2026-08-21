@@ -5,6 +5,8 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from psycopg_pool import AsyncConnectionPool
 
 from src.agents.nodes.compact_node import compact_thread_node
+from src.agents.nodes.context_node import context_node
+from src.agents.nodes.guardrail_node import input_guardrail_node, output_guardrail_node
 from src.agents.nodes.planner_node import planner_node
 from src.agents.state import AgentState
 from src.agents.tools import ALL_TOOLS
@@ -19,10 +21,15 @@ TERMINAL_TOOLS = {"summarize_conversation", "extract_tasks"}
 
 
 def route_after_planner(state: AgentState) -> str:
-    """Route to tool execution, or end the run if the planner errored or has a final reply."""
+    """Route tool calls to execution and plain replies through output validation."""
     if state.get("error"):
         return END
-    return tools_condition(state)
+    return "tools" if tools_condition(state) == "tools" else "output_guardrail"
+
+
+def route_after_input_guardrail(state: AgentState) -> str:
+    """A blocked request ends without spending tokens or exposing it to the planner."""
+    return END if state.get("guardrail_blocked") or state.get("guardrail_requires_clarification") else "context_builder"
 
 
 def route_after_tools(state: AgentState) -> str:
@@ -30,20 +37,34 @@ def route_after_tools(state: AgentState) -> str:
     back to the planner so it can phrase a reply or decide on further tool calls."""
     last = state["messages"][-1]
     if isinstance(last, ToolMessage) and last.name in TERMINAL_TOOLS:
-        return END
+        return "output_guardrail"
     return "planner"
 
 
 def build_graph(checkpointer):
     graph = StateGraph(AgentState)
 
+    graph.add_node("input_guardrail", input_guardrail_node)
+    graph.add_node("context_builder", context_node)
     graph.add_node("planner", planner_node)
     graph.add_node("tools", ToolNode(ALL_TOOLS))
+    graph.add_node("output_guardrail", output_guardrail_node)
     graph.add_node("compact_thread", compact_thread_node)
 
-    graph.set_entry_point("planner")
-    graph.add_conditional_edges("planner", route_after_planner, {"tools": "tools", END: "compact_thread"})
-    graph.add_conditional_edges("tools", route_after_tools, {"planner": "planner", END: "compact_thread"})
+    graph.set_entry_point("input_guardrail")
+    graph.add_conditional_edges(
+        "input_guardrail", route_after_input_guardrail, {"context_builder": "context_builder", END: END}
+    )
+    graph.add_edge("context_builder", "planner")
+    graph.add_conditional_edges(
+        "planner",
+        route_after_planner,
+        {"tools": "tools", "output_guardrail": "output_guardrail", END: END},
+    )
+    graph.add_conditional_edges(
+        "tools", route_after_tools, {"planner": "planner", "output_guardrail": "output_guardrail"}
+    )
+    graph.add_edge("output_guardrail", "compact_thread")
     graph.add_edge("compact_thread", END)
 
     return graph.compile(checkpointer=checkpointer)
