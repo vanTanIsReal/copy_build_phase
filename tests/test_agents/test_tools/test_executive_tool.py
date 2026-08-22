@@ -181,6 +181,68 @@ async def test_executive_brief_aggregates_real_published_delivery_and_quality_br
 
 
 @pytest.mark.asyncio
+async def test_executive_brief_with_one_missing_fixture_reports_gap_without_inference(
+    auth_headers, other_auth_headers
+):
+    alice = await _user("alice@example.com")
+    bob = await _user("bob@example.com")
+    org_id, delivery_id, _quality_id = await _make_org_with_delivery_and_quality(alice.id, bob.id)
+
+    delivery_context = await _workspace_context(
+        alice,
+        org_id,
+        delivery_id,
+        AgentProfile.PRODUCT_DELIVERY,
+        AgentIntent.DELIVERY_BRIEF,
+    )
+    async with db_session.async_session_maker() as db:
+        await delivery_tool.build_delivery_brief(db, delivery_context)
+
+    executive_context = await _executive_context(bob, org_id)
+    async with db_session.async_session_maker() as db:
+        result = await executive_tool.build_executive_brief(db, executive_context)
+
+    brief = result.payload["executive_brief"]
+    assert len(brief["workspace_brief_ids"]) == 1
+    assert result.data_gaps
+    assert any("Quality" in gap and "No brief" in gap for gap in result.data_gaps)
+    assert brief["risks"] == []  # Executive must not infer the missing Quality assessment.
+
+
+@pytest.mark.asyncio
+async def test_executive_brief_excludes_stale_fixture_from_current_summary(auth_headers, other_auth_headers):
+    alice = await _user("alice@example.com")
+    bob = await _user("bob@example.com")
+    org_id, delivery_id, _quality_id = await _make_org_with_delivery_and_quality(alice.id, bob.id)
+    generated_at = datetime.now(UTC) - timedelta(hours=48)
+    stale_brief = WorkspaceBrief(
+        brief_id=f"delivery-brief-{uuid4()}",
+        trace_id="trace-stale-summary",
+        organization_workspace_id=org_id,
+        agent_workspace_id=delivery_id,
+        brief_type=BriefType.DELIVERY,
+        producer_profile=AgentProfile.PRODUCT_DELIVERY,
+        period_start=generated_at - timedelta(days=7),
+        period_end=generated_at,
+        generated_at=generated_at,
+        expires_at=generated_at + timedelta(hours=24),
+        headline="Outdated delivery status",
+        facts=({"id": "old-fact", "title": "Old fact"},),
+    )
+    async with db_session.async_session_maker() as db:
+        await workspace_brief_service.save_brief(db, stale_brief)
+
+    executive_context = await _executive_context(bob, org_id)
+    async with db_session.async_session_maker() as db:
+        result = await executive_tool.build_executive_brief(db, executive_context)
+
+    brief = result.payload["executive_brief"]
+    assert stale_brief.brief_id not in brief["workspace_brief_ids"]
+    assert all(fact.get("id") != "old-fact" for fact in brief["facts"])
+    assert any("stale" in gap.lower() for gap in result.data_gaps)
+
+
+@pytest.mark.asyncio
 async def test_get_workspace_briefs_alerts_admins_when_a_brief_is_stale(client, auth_headers, other_auth_headers, admin_auth_headers, monkeypatch):
     """Sprint 3 G6 fix: get_workspace_briefs must both report the staleness as a data_gap (already
     covered elsewhere) AND page admins via agent_audit_service.alert_brief_stale - proving the
