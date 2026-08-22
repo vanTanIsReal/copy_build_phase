@@ -13,6 +13,7 @@ from src.db import session as db_session
 from src.db.models import AssistantThread, Memory, MemoryEpisode
 from src.services import guardrail_service, memory_service, usage_service
 from src.services.llm import get_llm
+from src.services.workspace_service import resolve_workspace_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,10 @@ async def _consolidate_thread(thread: AssistantThread) -> bool:
         ).scalar_one_or_none()
         if not current or current.compacted_message_count != thread.compacted_message_count:
             return False  # another worker already consolidated this range
+        # Durable notes still need a workspace_id (memories.workspace_id is NOT NULL) even though
+        # this background job has no per-request workspace context - fall back to the owner's
+        # personal workspace, same default resolve_workspace_for_user uses everywhere else.
+        workspace = await resolve_workspace_for_user(db, current.owner_id, None)
         episode = MemoryEpisode(
             owner_id=current.owner_id, thread_id=current.thread_id, summary=summary,
             decisions=[str(x)[:500] for x in payload.get("decisions", []) if str(x).strip()][:20],
@@ -133,7 +138,7 @@ async def _consolidate_thread(thread: AssistantThread) -> bool:
             if duplicate:
                 continue
             note = Memory(
-                owner_id=current.owner_id, category="Work", title=title, detail=detail,
+                owner_id=current.owner_id, workspace_id=workspace.id, category="Work", title=title, detail=detail,
                 memory_type=memory_type, status="pending_review", source_type="episode",
                 source_id=episode.id, source_thread_id=current.thread_id,
                 provenance={"episode_id": episode.id, "thread_id": current.thread_id,

@@ -37,10 +37,10 @@ async def create_calendar_event(
         description: Optional event details.
         attendees: Optional list of attendee email addresses.
     """
-    user_id, _workspace_id = _agent_identity(state)
     policy = guardrail_service.evaluate_action_content(f"{summary}\n{description}")
     if not policy.allowed:
         return policy.response
+    user_id, _workspace_id = _agent_identity(state)
 
     try:
         conflicts = await calendar_service.find_conflicts(user_id, start_iso, end_iso)

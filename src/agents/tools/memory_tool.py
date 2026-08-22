@@ -77,7 +77,8 @@ async def remember_fact(
 
     owner_id = (state or {}).get("user_id")
     memory = Memory(
-        owner_id=owner_id, title=draft["title"], detail=draft.get("detail", ""),
+        owner_id=owner_id, workspace_id=(state or {}).get("workspace_id"),
+        title=draft["title"], detail=draft.get("detail", ""),
         memory_type=draft.get("memory_type", memory_type), category=draft.get("category", category),
         status="active", source_type="user_confirmed", user_confirmed=True,
         source_thread_id=(state or {}).get("thread_id"),

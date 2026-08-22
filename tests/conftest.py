@@ -44,6 +44,18 @@ def _no_live_domain_classifier(monkeypatch):
     )
 
 
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def _shared_schema():
+    """A few agent tests (test_graph.py, test_tools/test_calendar_tool.py) invoke
+    agent_graph.agent.ainvoke() directly instead of going through the `client` fixture, so they
+    never get its per-test schema/session-maker override. Since context_node now unconditionally
+    reads `memories`/`memory_episodes` on every graph run (input_guardrail -> context_builder),
+    those direct-invocation tests need the shared in-memory engine's schema created once up front,
+    or they hit "no such table: memories" the moment the graph touches the DB."""
+    async with db_session.engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
 
 @pytest_asyncio.fixture
 async def client(monkeypatch):

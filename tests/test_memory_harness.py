@@ -37,15 +37,24 @@ async def _user_id(client, headers) -> str:
     return (await client.get("/api/v1/auth/me", headers=headers)).json()["id"]
 
 
-async def _insert_case_records(case: dict, *, primary_id: str, other_id: str) -> None:
+async def _workspace_id(client, headers) -> str:
+    """memories.workspace_id is NOT NULL - every Memory built directly in this harness (bypassing
+    remember_fact/memory_maintenance_service, which resolve this themselves) needs a real one."""
+    workspaces = (await client.get("/api/v1/workspaces", headers=headers)).json()
+    return next(w["id"] for w in workspaces if w["type"] == "personal")
+
+
+async def _insert_case_records(case: dict, *, primary_id: str, other_id: str, primary_workspace_id: str, other_workspace_id: str) -> None:
     now = datetime.now(UTC)
     async with db_session.async_session_maker() as db:
         for record in case["records"]:
             expires = record.get("expires")
+            is_primary = record["owner"] == "primary"
             db.add(
                 Memory(
                     id=record["id"],
-                    owner_id=primary_id if record["owner"] == "primary" else other_id,
+                    owner_id=primary_id if is_primary else other_id,
+                    workspace_id=primary_workspace_id if is_primary else other_workspace_id,
                     category="Work",
                     title=record["title"],
                     detail=record.get("detail", ""),
@@ -83,7 +92,12 @@ def test_memory_harness_cases_are_safe_and_well_formed():
 @pytest.mark.parametrize("case", HARNESS_CASES, ids=lambda case: case["case_id"])
 async def test_retrieval_cases_enforce_recall_and_non_leakage(client, auth_headers, other_auth_headers, case):
     primary_id, other_id = await _user_id(client, auth_headers), await _user_id(client, other_auth_headers)
-    await _insert_case_records(case, primary_id=primary_id, other_id=other_id)
+    primary_workspace_id = await _workspace_id(client, auth_headers)
+    other_workspace_id = await _workspace_id(client, other_auth_headers)
+    await _insert_case_records(
+        case, primary_id=primary_id, other_id=other_id,
+        primary_workspace_id=primary_workspace_id, other_workspace_id=other_workspace_id,
+    )
 
     recalled = await memory_service.retrieve_memories(primary_id, case["query"], limit=case["limit"])
     recalled_ids = {memory.id for memory in recalled}
@@ -97,12 +111,13 @@ async def test_retrieval_cases_enforce_recall_and_non_leakage(client, auth_heade
 @pytest.mark.asyncio
 async def test_semantic_retrieval_beats_lexical_noise_and_tracks_access(client, auth_headers, monkeypatch):
     owner_id = await _user_id(client, auth_headers)
+    workspace_id = await _workspace_id(client, auth_headers)
     async with db_session.async_session_maker() as db:
         db.add_all(
             [
-                Memory(id="semantic-target", owner_id=owner_id, category="Work", title="Schema rollout",
+                Memory(id="semantic-target", owner_id=owner_id, workspace_id=workspace_id, category="Work", title="Schema rollout",
                        detail="Deploy database migration safely", embedding=[1.0, 0.0], importance=0.7),
-                Memory(id="lexical-noise", owner_id=owner_id, category="Work", title="Deploy notes",
+                Memory(id="lexical-noise", owner_id=owner_id, workspace_id=workspace_id, category="Work", title="Deploy notes",
                        detail="This text repeats deploy deploy deploy", embedding=[0.0, 1.0], importance=0.3),
             ]
         )
@@ -127,13 +142,14 @@ async def test_explicit_replacement_supersedes_old_memory_and_preserves_provenan
     client, auth_headers
 ):
     owner_id = await _user_id(client, auth_headers)
+    workspace_id = await _workspace_id(client, auth_headers)
     async with db_session.async_session_maker() as db:
         old = Memory(
-            id="old-preference", owner_id=owner_id, category="Preference", memory_type="preference",
+            id="old-preference", owner_id=owner_id, workspace_id=workspace_id, category="Preference", memory_type="preference",
             title="Planning format", detail="Use a daily checklist", status="active",
         )
         replacement = Memory(
-            id="new-preference", owner_id=owner_id, category="Preference", memory_type="preference",
+            id="new-preference", owner_id=owner_id, workspace_id=workspace_id, category="Preference", memory_type="preference",
             title="Planning format", detail="Use a weekly Kanban board", status="active",
         )
         db.add(old)
@@ -255,11 +271,12 @@ async def test_heartbeat_compaction_is_idempotent_and_rejects_injected_durable_n
 @pytest.mark.asyncio
 async def test_maintenance_revokes_expired_notes_and_backfills_embedding(client, auth_headers, monkeypatch):
     owner_id = await _user_id(client, auth_headers)
+    workspace_id = await _workspace_id(client, auth_headers)
     async with db_session.async_session_maker() as db:
         db.add_all(
             [
-                Memory(id="expired", owner_id=owner_id, title="Old", status="active", expires_at=datetime.now(UTC) - timedelta(minutes=1)),
-                Memory(id="needs-vector", owner_id=owner_id, title="Current", status="active", detail="Work preference"),
+                Memory(id="expired", owner_id=owner_id, workspace_id=workspace_id, title="Old", status="active", expires_at=datetime.now(UTC) - timedelta(minutes=1)),
+                Memory(id="needs-vector", owner_id=owner_id, workspace_id=workspace_id, title="Current", status="active", detail="Work preference"),
             ]
         )
         await db.commit()

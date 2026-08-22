@@ -22,6 +22,11 @@ async def _user_id(client, headers) -> str:
     return (await client.get("/api/v1/auth/me", headers=headers)).json()["id"]
 
 
+async def _workspace_id(client, headers) -> str:
+    workspaces = (await client.get("/api/v1/workspaces", headers=headers)).json()
+    return next(w["id"] for w in workspaces if w["type"] == "personal")
+
+
 @pytest.mark.agent_quality_harness
 def test_short_term_memory_keeps_latest_turns_without_carrying_old_overflow(monkeypatch):
     settings = SimpleNamespace(agent_context_window_tokens=8_192, memory_short_term_fraction=0.02)
@@ -58,10 +63,12 @@ async def test_short_term_follow_up_uses_the_immediately_preceding_clarification
 @pytest.mark.asyncio
 async def test_long_term_memory_is_recalled_across_threads_for_its_owner(client, auth_headers):
     owner_id = await _user_id(client, auth_headers)
+    workspace_id = await _workspace_id(client, auth_headers)
     async with db_session.async_session_maker() as db:
         db.add(
             Memory(
                 owner_id=owner_id,
+                workspace_id=workspace_id,
                 category="Work",
                 memory_type="decision",
                 title="Release code BLUE-42",
