@@ -12,7 +12,7 @@ from starlette.concurrency import run_in_threadpool
 
 from src.auth.dependencies import get_current_user
 from src.config import get_settings
-from src.db.models import EventCandidate, User
+from src.db.models import Conversation, EventCandidate, User
 from src.db.session import get_db
 from src.models.calendar_schemas import (
     CalendarConnectionStatusOut,
@@ -56,7 +56,13 @@ async def _candidate_for_manager(db: AsyncSession, candidate_id: str, current_us
     candidate = await db.get(EventCandidate, candidate_id)
     if candidate is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event candidate not found")
-    await require_conversation_access(db, current_user, candidate.conversation_id, "manager")
+    conversation = await db.get(Conversation, candidate.conversation_id)
+    # A group's "manager" is the single confirmation authority for the whole team roster. A direct
+    # (1-1) conversation has no such concept - both participants are peers, and confirming always
+    # writes to the confirming person's own connected calendar (never a shared/fixed account, see
+    # confirm_event_candidate below), so either participant may act on their own behalf.
+    minimum_role = "manager" if conversation is not None and conversation.type == "group" else "participant"
+    await require_conversation_access(db, current_user, candidate.conversation_id, minimum_role)
     return candidate
 
 
@@ -153,7 +159,7 @@ async def confirm_event_candidate(
     ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="The manager who owns the original calendar event must confirm this change",
+            detail="Only the person who owns the original calendar event can confirm this change",
         )
     try:
         if candidate.operation == "create":

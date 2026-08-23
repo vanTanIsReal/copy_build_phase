@@ -82,7 +82,7 @@ export default function AIPanel({
   const [asking, setAsking] = useState(false)
 
   const refreshEventCandidates = () => {
-    if (!conversationId || !granted || aiMode !== 'group_managed') {
+    if (!conversationId || !granted) {
       setEventCandidates([])
       return Promise.resolve()
     }
@@ -255,7 +255,7 @@ export default function AIPanel({
         <small className="d-block text-muted mt-2">Authorized content is sent to the configured external AI provider for processing.</small>
       </div>
 
-      {aiMode === 'group_managed' && granted && <div className="border border-white/10 bg-white/5 backdrop-blur-md text-orbit-ink rounded-3 p-3 mt-3 small">
+      {granted && <div className="border border-white/10 bg-white/5 backdrop-blur-md text-orbit-ink rounded-3 p-3 mt-3 small">
         <div className="d-flex justify-content-between align-items-center gap-2"><strong>Calendar suggestions</strong>{canManageAi && <button className="btn btn-sm btn-light" onClick={scanHistory} disabled={candidateBusy==='__backfill__'}>{candidateBusy==='__backfill__' ? 'Scanning…' : 'Scan next 200 old messages'}</button>}</div>
         {backfillStatus && <div className="text-muted mt-2">Processed {backfillStatus.processed} messages; found {backfillStatus.extracted}. {backfillStatus.has_more ? 'More history remains.' : 'History scan is complete.'}</div>}
         {!eventCandidates.length && <div className="text-muted mt-2">No pending event suggestions.</div>}

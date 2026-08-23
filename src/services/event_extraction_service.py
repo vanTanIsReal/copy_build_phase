@@ -1,4 +1,5 @@
-"""Incremental and resumable calendar-fact extraction for AI-enabled group conversations."""
+"""Incremental and resumable calendar-fact extraction for AI-enabled group conversations, and for
+direct (1-1) conversations where each participant has individually granted contribution consent."""
 
 import json
 import logging
@@ -11,7 +12,7 @@ from sqlalchemy import and_, or_, select
 from src.config import get_settings
 from src.db import session as db_session
 from src.db.models import Conversation, EventCandidate, EventExtractionCursor, Message, User
-from src.services import consent_service, usage_service
+from src.services import chat_service, consent_service, proactive_service, usage_service
 from src.services.authorization_service import get_authorized_participant_ids
 from src.services.llm import get_llm
 from src.websocket.manager import manager
@@ -47,18 +48,26 @@ def _parse_datetime(value: object, timezone: str) -> datetime | None:
     return parsed
 
 
-async def _context_ending_at(db, conversation_id: str, message: Message, limit: int = 16):
+async def _context_ending_at(
+    db, conversation_id: str, message: Message, limit: int = 16, readable_ids: set[str] | None = None
+):
+    """`readable_ids`, when given, restricts context to messages authored by a participant who has
+    granted contribution consent - a group with `ai_enabled` has already authorized its whole
+    roster (pass None), but a direct conversation's consent is per-participant (see the caller)."""
+    conditions = [
+        Message.conversation_id == conversation_id,
+        or_(
+            Message.created_at < message.created_at,
+            and_(Message.created_at == message.created_at, Message.id <= message.id),
+        ),
+    ]
+    if readable_ids is not None:
+        conditions.append(Message.sender_id.in_(readable_ids))
     rows = (
         await db.execute(
             select(Message, User)
             .join(User, User.id == Message.sender_id)
-            .where(
-                Message.conversation_id == conversation_id,
-                or_(
-                    Message.created_at < message.created_at,
-                    and_(Message.created_at == message.created_at, Message.id <= message.id),
-                ),
-            )
+            .where(*conditions)
             .order_by(Message.created_at.desc(), Message.id.desc())
             .limit(limit)
         )
@@ -96,14 +105,26 @@ async def _extract_event_candidate(
             conversation is None
             or message is None
             or message.conversation_id != conversation_id
-            or conversation.type != "group"
-            or not conversation.ai_enabled
+            or (conversation.type == "group" and not conversation.ai_enabled)
         ):
             return None
         if not force and not looks_like_event(message.content):
             return None
+        readable_ids: set[str] | None = None
+        if conversation.type != "group":
+            # A direct conversation has no single manager-controlled `ai_enabled` switch - that's
+            # a group-only policy (see proactive_service.py's docstring on the same distinction).
+            # Each participant grants their own contribution consent instead, so reuse the exact
+            # eligibility gate Task detection already uses: only extract when the message's own
+            # author has consented, and only feed the LLM messages from consenting authors.
+            participant_ids = await chat_service.get_participant_ids(db, conversation_id)
+            readable_ids, eligible_ids = await proactive_service._permission_scope(
+                db, conversation=conversation, participant_ids=participant_ids
+            )
+            if message.sender_id not in eligible_ids:
+                return None
         scope_hash = await consent_service.get_consent_scope_hash(db, conversation_id)
-        context_rows = await _context_ending_at(db, conversation_id, message)
+        context_rows = await _context_ending_at(db, conversation_id, message, readable_ids=readable_ids)
         # A source message can contribute to only one active extraction result.  This makes retries
         # and overlapping backfill batches idempotent without relying on JSON containment SQL.
         prior = list(
@@ -182,8 +203,12 @@ async def _extract_event_candidate(
 
     async with db_session.async_session_maker() as db:
         conversation = await db.get(Conversation, conversation_id)
-        if conversation is None or not conversation.ai_enabled:
+        if conversation is None or (conversation.type == "group" and not conversation.ai_enabled):
             return None
+        # For a direct conversation this scope_hash re-check (unlike the group ai_enabled check
+        # above) is what actually re-validates consent hasn't changed since the eligibility gate
+        # ran - get_consent_scope_hash folds in each participant's AIPermission state for
+        # non-group conversations (see consent_service.get_consent_scope_hash).
         if await consent_service.get_consent_scope_hash(db, conversation_id) != scope_hash:
             return None
         source_ids = [row.id for row, _ in context_rows]
@@ -257,8 +282,11 @@ async def process_event_backfill_batch(conversation_id: str, batch_size: int = 2
         return {"status": "paused", "processed": 0, "extracted": 0, "has_more": True}
     async with db_session.async_session_maker() as db:
         conversation = await db.get(Conversation, conversation_id)
-        if conversation is None or conversation.type != "group" or not conversation.ai_enabled:
+        if conversation is None or (conversation.type == "group" and not conversation.ai_enabled):
             return {"status": "disabled", "processed": 0, "has_more": False}
+        # No batch-level consent gate needed here for a direct conversation: each message below
+        # still goes through maybe_extract_event_candidate -> _extract_event_candidate, which
+        # applies the per-sender eligibility check itself.
         cursor = await db.get(EventExtractionCursor, conversation_id)
         if cursor is None:
             cursor = EventExtractionCursor(conversation_id=conversation_id, status="running")

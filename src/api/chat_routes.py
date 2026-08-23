@@ -223,6 +223,12 @@ async def get_conversation_ai_permission(
             can_manage=participant.resource_role == "manager",
         )
     permission = await chat_service.get_ai_permission(db, conversation_id, current_user.id)
+    # can_manage has two unrelated meanings depending on mode: for "group_managed" it gates the
+    # single group-wide ai_enabled toggle (real single-owner decision, manager-only). For
+    # "individual" it instead gates managing this conversation's calendar-suggestion candidates
+    # (Confirm/Dismiss/backfill) - a direct conversation has no "manager", and confirming always
+    # writes to the confirming person's own calendar (see calendar_routes.confirm_event_candidate),
+    # so every participant may act on their own behalf here.
     if permission is None:
         return AIPermissionOut(
             conversation_id=conversation_id,
@@ -230,7 +236,7 @@ async def get_conversation_ai_permission(
             contribution_allowed=False,
             updated_at=None,
             mode="individual",
-            can_manage=False,
+            can_manage=True,
         )
     return AIPermissionOut(
         conversation_id=conversation_id,
@@ -238,7 +244,7 @@ async def get_conversation_ai_permission(
         contribution_allowed=permission.contribution_allowed,
         updated_at=permission.updated_at.isoformat(),
         mode="individual",
-        can_manage=False,
+        can_manage=True,
     )
 
 
@@ -263,7 +269,7 @@ async def update_conversation_ai_permission(
         contribution_allowed=permission.contribution_allowed,
         updated_at=permission.updated_at.isoformat(),
         mode="individual",
-        can_manage=False,
+        can_manage=True,
     )
 
 

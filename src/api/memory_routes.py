@@ -5,7 +5,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
-from src.db.models import Memory, User
+from src.db.models import Memory, User, Workspace
 from src.db.session import get_db
 from src.models.memory_schemas import MemoryCreateRequest, MemoryOut, MemoryUpdateRequest
 from src.services import guardrail_service, memory_service
@@ -33,7 +33,15 @@ async def _get_own_memory_or_404(memory_id: str, current_user: User, db: AsyncSe
     ).scalar_one_or_none()
     if memory is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
-    await resolve_workspace_for_user(db, current_user.id, memory.workspace_id)
+    # Same workspace_id caveat as list_memories/list_tasks: an AI-extracted memory from a shared
+    # personal-workspace conversation can legitimately carry a *different* participant's personal
+    # workspace_id. owner_id above already proved this memory is this user's own - only
+    # re-validate workspace membership for an organization workspace, where it's a real
+    # multi-tenant boundary. Without this, editing/deleting such a memory raised
+    # "Workspace access denied" for its own owner.
+    workspace = await db.get(Workspace, memory.workspace_id)
+    if workspace is not None and workspace.type == "organization":
+        await resolve_workspace_for_user(db, current_user.id, memory.workspace_id)
     return memory
 
 

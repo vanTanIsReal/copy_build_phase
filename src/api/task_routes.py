@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
 from src.config import get_settings
-from src.db.models import Conversation, Task, User
+from src.db.models import Conversation, Task, User, Workspace
 from src.db.session import get_db
 from src.models.task_schemas import TaskCreateRequest, TaskOut, UpdateTaskStatusRequest
 from src.services import consent_service
@@ -45,7 +45,15 @@ async def _get_own_task_or_404(task_id: str, current_user: User, db: AsyncSessio
     ).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    await resolve_workspace_for_user(db, current_user.id, task.workspace_id)
+    # Same workspace_id caveat as list_tasks below: a task proactively suggested to a participant
+    # of a personal-workspace conversation can legitimately carry a *different* participant's
+    # personal workspace_id. `owner_id` above already proved this task is this user's own -
+    # re-validating workspace membership on top of that only makes sense for an organization
+    # workspace, where it's a real multi-tenant boundary. Without this, Accept/Dismiss on a
+    # proactively-suggested task raised "Workspace access denied" for its own owner.
+    workspace = await db.get(Workspace, task.workspace_id)
+    if workspace is not None and workspace.type == "organization":
+        await resolve_workspace_for_user(db, current_user.id, task.workspace_id)
     return task
 
 
