@@ -6,6 +6,7 @@ import 'bootstrap/dist/js/bootstrap.bundle.min.js'
 import '../../shared/styles.css'
 import './admin.css'
 import './workspace-admin.css'
+import './admin-fx.css'
 import AppRouter from './router/AppRouter'
 import { AuthProvider } from './context/AuthContext'
 
