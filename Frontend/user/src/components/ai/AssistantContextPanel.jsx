@@ -73,7 +73,7 @@ export default function AssistantContextPanel({ open, onClose }) {
       })}</div>
     </section>
     <section className="context-section">
-      <div className="context-section-head"><h4><i className="bi bi-journal-bookmark"/> Memory liên quan</h4><button onClick={()=>navigate('/memory')}>Xem tất cả</button></div>
+      <div className="context-section-head"><h4><i className="bi bi-journal-bookmark"/> Memory mới nhất</h4><button onClick={()=>navigate('/memory')}>Xem tất cả</button></div>
       {!latestMemory && <p className="context-empty">Chưa có memory nào.</p>}
       {latestMemory && <div className="related-memory"><i className="bi bi-lightbulb"/><p>{latestMemory.detail || latestMemory.title}</p></div>}
     </section>

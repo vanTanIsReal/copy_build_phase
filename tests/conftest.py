@@ -1,6 +1,9 @@
 import os
 from unittest.mock import AsyncMock
 
+# Admin configuration tests validate provider/model selection, not a live provider call.
+os.environ.setdefault("GOOGLE_API_KEY", "test-google-api-key")
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -21,6 +24,37 @@ from src.db.base import Base
 from src.db.models import User
 from src.db.session import get_db
 from src.main import app
+from src.services.domain_classifier_service import DomainAssessment
+
+
+@pytest.fixture(autouse=True)
+def _no_live_domain_classifier(monkeypatch):
+    """Unresolved domain checks use an LLM in production; tests opt into exact clarify/deny
+    behavior explicitly and otherwise keep existing fixtures deterministic/offline."""
+    async def allow_test_request(*args, **kwargs):
+        return DomainAssessment(
+            decision="allow",
+            intent="authorized_chat_analysis" if kwargs.get("conversation_mode") else "technical_work",
+            confidence=0.99,
+            reason="Allowed by deterministic test classifier.",
+        )
+
+    monkeypatch.setattr(
+        "src.services.domain_classifier_service.classify_domain_request", allow_test_request
+    )
+
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def _shared_schema():
+    """A few agent tests (test_graph.py, test_tools/test_calendar_tool.py) invoke
+    agent_graph.agent.ainvoke() directly instead of going through the `client` fixture, so they
+    never get its per-test schema/session-maker override. Since context_node now unconditionally
+    reads `memories`/`memory_episodes` on every graph run (input_guardrail -> context_builder),
+    those direct-invocation tests need the shared in-memory engine's schema created once up front,
+    or they hit "no such table: memories" the moment the graph touches the DB."""
+    async with db_session.engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
 
 
 @pytest_asyncio.fixture

@@ -5,6 +5,7 @@ import ConversationHeader from '../components/chat/ConversationHeader'
 import MessageArea from '../components/chat/MessageArea'
 import AIPanel from '../components/chat/AIPanel'
 import NewConversationModal from '../components/chat/NewConversationModal'
+import HologramSurface from '../components/fx/HologramSurface'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { useConversations } from '../hooks/useConversations'
@@ -20,6 +21,9 @@ export default function ChatPage() {
   const { sendJson, subscribe } = useOutletContext()
   const [mobileChat, setMobileChat] = useState(false)
   const [aiOpen, setAiOpen] = useState(false)
+  // Threaded down to MessageArea's PulseWave (pillar 3) so the composer's "AI active" glow reflects
+  // AIPanel's real in-flight state, not a fake/local signal.
+  const [aiBusy, setAiBusy] = useState(false)
   const [newConvoOpen, setNewConvoOpen] = useState(false)
   const [selectedId, setSelectedId] = useState(() => location.state?.conversationId || null)
   const [aiGranted, setAiGranted] = useState(false)
@@ -171,13 +175,13 @@ export default function ChatPage() {
   }
 
   return (
-    <div className={`chat-layout ${mobileChat ? 'show-chat' : ''}`}>
+    <HologramSurface className={`chat-layout orbit-fx ${mobileChat ? 'show-chat' : ''}`}>
       <ConversationList conversations={conversations} selectedId={selectedId} onSelect={onSelect} onNewConversation={() => setNewConvoOpen(true)} onToggleAi={onToggleAiInList} />
       <section className="conversation-pane">
         {selectedConversation ? (
           <>
             <ConversationHeader conversation={selectedConversation} onBack={() => setMobileChat(false)} onAI={() => setAiOpen(true)} onHide={onHide} onLeave={onLeave} aiGranted={aiGranted} onToggleAi={onToggleAi} aiMode={aiMode} canManageAi={canManageAi} />
-            <MessageArea conversation={selectedConversation} messages={messages} currentUserId={user?.id} onSend={onSend} loading={messagesLoading} firstUnreadMessageId={firstUnreadMessageId} unreadCount={unreadCount} />
+            <MessageArea conversation={selectedConversation} messages={messages} currentUserId={user?.id} onSend={onSend} loading={messagesLoading} firstUnreadMessageId={firstUnreadMessageId} unreadCount={unreadCount} aiBusy={aiBusy} />
           </>
         ) : (
           <div className="chat-empty-state"><i className="bi bi-chat-dots" /><p>Select a conversation or start a new one</p></div>
@@ -195,8 +199,9 @@ export default function ChatPage() {
         onToggleContribution={onToggleContribution}
         aiMode={aiMode}
         canManageAi={canManageAi}
+        onBusyChange={setAiBusy}
       />
       <NewConversationModal open={newConvoOpen} onClose={() => setNewConvoOpen(false)} onCreated={onCreated} />
-    </div>
+    </HologramSurface>
   )
 }

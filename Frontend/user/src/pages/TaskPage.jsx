@@ -4,6 +4,7 @@ import PageHeader from '../components/common/PageHeader'
 import StatCard from '../components/common/StatCard'
 import TaskTable, { formatDue } from '../components/task/TaskTable'
 import NewTaskModal from '../components/task/NewTaskModal'
+import EmptyState from '../components/fx/EmptyState'
 import { useAuth } from '../context/AuthContext'
 import { listTasks, updateTaskStatus, deleteTask } from '../api/tasks'
 
@@ -60,7 +61,7 @@ export default function TaskPage() {
     <div className="stats-grid"><StatCard label="Total tasks" value={mainTasks.length} icon="bi-list-task"/><StatCard label="Completed" value={completed} icon="bi-check2-circle" color="success"/><StatCard label="Pending" value={pending} icon="bi-hourglass-split" color="warning"/><StatCard label="Overdue" value={overdue} icon="bi-exclamation-circle" color="danger" note={overdue ? 'Needs attention' : undefined}/></div>
     <section className="content-card"><div className="card-toolbar"><div><h3>All tasks</h3><span>{shownTasks.length} of {mainTasks.length} tasks across your conversations</span></div><div className="toolbar-actions"><div className="mini-search"><i className="bi bi-search"/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search tasks"/></div></div></div>{loading ? <p className="text-muted small p-3 mb-0">Loading...</p> : <TaskTable tasks={shownTasks} onComplete={complete} onDelete={remove}/>}</section>
     <section className="suggested-section"><div className="section-heading"><div><span className="ai-label"><i className="bi bi-stars"/> AI suggestions</span><h3>Tasks you may have missed</h3><p>Orbit found these action items in your conversations.</p></div></div><div className="suggestion-grid">{suggestions.map(s=><div className="suggestion-card" key={s.id}><div className="suggestion-check"><i className="bi bi-stars"/></div><div className="flex-grow-1"><h4>{s.title}</h4><div className="suggestion-meta"><span><i className="bi bi-chat-left-text"/>{sourceLabel[s.source] || s.source}</span><span><i className="bi bi-calendar3"/>{formatDue(s.due_at)}</span></div></div><div className="suggestion-actions"><button className="btn btn-sm btn-primary" onClick={() => accept(s)}>Accept</button><button className="btn btn-sm btn-light" onClick={() => dismiss(s)}>Dismiss</button></div></div>)}
-      {!loading && !suggestions.length && <p className="text-muted small mb-0">No new suggestions right now — try "Extract tasks" in a conversation's AI panel.</p>}
+      {!loading && !suggestions.length && <EmptyState variant="float" icon="bi-stars" title="No new suggestions right now" description={'Try "Extract tasks" in a conversation\'s AI panel — Orbit is standing by to scan for action items.'} />}
     </div></section>
     <NewTaskModal open={newOpen} onClose={()=>setNewOpen(false)} onCreated={upsertTask}/>
   </div>

@@ -5,12 +5,26 @@ from src.config import get_settings
 
 settings = get_settings()
 
+
+def _sync_jobstore_url(url: str) -> str:
+    """Return a sync psycopg URL for APScheduler's SQLAlchemy job store.
+
+    The rest of the application uses asyncpg, and some deployments therefore
+    provide DATABASE_URL with an explicit ``postgresql+asyncpg://`` scheme.
+    SQLAlchemyJobStore is synchronous, so allowing that scheme through makes it
+    attempt async I/O outside a greenlet during application startup.
+    """
+    scheme, separator, rest = url.partition("://")
+    if separator and scheme in {"postgresql", "postgresql+asyncpg"}:
+        return f"postgresql+psycopg://{rest}"
+    return url
+
+
 # SQLAlchemyJobStore uses a *sync* engine, so it needs its own driver: psycopg2 (default for
 # "postgresql://") isn't installed, but psycopg3 is (already pulled in for the LangGraph
-# checkpointer) - point it at that dialect instead of adding another dependency.
-_jobstore_url = settings.database_url
-if _jobstore_url.startswith("postgresql://"):
-    _jobstore_url = _jobstore_url.replace("postgresql://", "postgresql+psycopg://", 1)
+# checkpointer) - point it at that dialect instead of adding another dependency. Normalize an
+# explicit asyncpg URL too, since DATABASE_URL is shared with the application's async engine.
+_jobstore_url = _sync_jobstore_url(settings.database_url)
 
 # SQLAlchemyJobStore persists scheduled jobs (e.g. reminders) so they survive a server restart -
 # without it, a job's row in the DB could say "scheduled" while the actual APScheduler job that

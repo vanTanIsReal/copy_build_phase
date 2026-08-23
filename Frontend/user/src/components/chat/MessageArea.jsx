@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import MessageBubble from './MessageBubble'
+import PulseWave from '../fx/PulseWave'
+import { springs } from '../fx/springs'
 
-export default function MessageArea({ conversation, messages, currentUserId, onSend, loading, firstUnreadMessageId, unreadCount }) {
+export default function MessageArea({ conversation, messages, currentUserId, onSend, loading, firstUnreadMessageId, unreadCount, aiBusy = false }) {
   const [draft, setDraft] = useState('')
   const scrollRef = useRef(null)
   const [unreadDismissed, setUnreadDismissed] = useState(false)
@@ -24,7 +27,10 @@ export default function MessageArea({ conversation, messages, currentUserId, onS
   }
 
   return (
-    <div className="message-area">
+    // Faint dot-matrix texture on the central canvas (pillar 1) - a Tailwind arbitrary
+    // background-image so the panel doesn't read as an empty flat void, kept subtle (2% opacity
+    // dots) so it never competes with the actual messages on top of it.
+    <div className="message-area bg-[radial-gradient(circle,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[length:22px_22px]">
       {unreadTargetLoaded && !unreadDismissed && (
         <button type="button" className="jump-to-unread-btn" onClick={jumpToUnread}>
           <i className="bi bi-arrow-up" /> {unreadCount} tin nhắn mới
@@ -33,16 +39,25 @@ export default function MessageArea({ conversation, messages, currentUserId, onS
       <div className="messages-scroll">
         <div className="date-divider"><span>Today</span></div>
         {loading && <p className="text-muted small text-center mt-3">Đang tải tin nhắn...</p>}
-        {!loading && messages.map(m => (
-          <div key={m.id} id={`msg-${m.id}`}>
-            {m.id === firstUnreadMessageId && <div className="unread-divider"><span>{unreadCount} tin nhắn mới</span></div>}
-            <MessageBubble message={m} own={m.sender_id === currentUserId} />
-          </div>
-        ))}
+        <AnimatePresence initial={false}>
+          {!loading && messages.map(m => (
+            // Pillar 4: message overshoot entrance - slides up and slightly overshoots before
+            // settling, spring-driven (never linear easing).
+            <motion.div
+              key={m.id} id={`msg-${m.id}`} layout
+              initial={{ opacity: 0, y: 18, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={springs.messageEnter}
+            >
+              {m.id === firstUnreadMessageId && <div className="unread-divider"><span>{unreadCount} tin nhắn mới</span></div>}
+              <MessageBubble message={m} own={m.sender_id === currentUserId} />
+            </motion.div>
+          ))}
+        </AnimatePresence>
         <div ref={scrollRef} />
       </div>
       <form className="composer" onSubmit={submit}>
         <div className="composer-main"><button type="button" className="icon-btn"><i className="bi bi-paperclip" /></button><input value={draft} onChange={e => setDraft(e.target.value)} placeholder={`Message ${conversation.name}...`} /><button type="button" className="icon-btn"><i className="bi bi-emoji-smile" /></button><button className="send-btn" aria-label="Send"><i className="bi bi-send-fill" /></button></div>
+        <PulseWave active={aiBusy} />
         <div className="composer-help"><span><i className="bi bi-stars" /> Type <strong>@orbit</strong> to ask AI</span><span>Enter to send</span></div>
       </form>
     </div>

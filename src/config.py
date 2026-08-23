@@ -43,6 +43,19 @@ class Settings(BaseSettings):
     # Keep this switch only for local/demo compatibility and isolated tests.
     allow_self_service_organization_creation: bool = False
 
+    # Agent context engineering. Fractions are budgets for optional/retrieved layers, not a claim
+    # that every model or turn must consume exactly these percentages. System/policy and output
+    # reserve are protected; lower-value retrieval is trimmed first.
+    agent_context_window_tokens: int = Field(default=32_768, ge=8_192)
+    agent_output_reserve_tokens: int = Field(default=4_096, ge=512)
+    memory_short_term_fraction: float = Field(default=0.10, ge=0.02, le=0.50)
+    memory_long_term_fraction: float = Field(default=0.04, ge=0.01, le=0.20)
+    memory_episodic_fraction: float = Field(default=0.03, ge=0.0, le=0.20)
+    memory_retrieval_fraction: float = Field(default=0.03, ge=0.0, le=0.30)
+    memory_heartbeat_interval_seconds: int = Field(default=900, ge=60)
+    memory_compaction_message_threshold: int = Field(default=24, ge=8)
+    memory_recent_messages_to_keep: int = Field(default=12, ge=4)
+
     # Database
     database_url: str = "sqlite:///./data/app.db"
     db_pool_size: int = Field(default=10, ge=1, le=100)

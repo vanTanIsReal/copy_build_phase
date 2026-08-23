@@ -4,6 +4,7 @@ import Sidebar from './Sidebar'
 import TopNavbar from './TopNavbar'
 import ReminderToast from './ReminderToast'
 import TaskSuggestedToast from './TaskSuggestedToast'
+import TransitionVeil from '../fx/TransitionVeil'
 import { useAuth } from '../../context/AuthContext'
 import { useChatSocket } from '../../api/useWebSocket'
 import { getNotificationPermission, notifyTaskSuggested } from '../../utils/browserNotifications'
@@ -15,6 +16,15 @@ export default function AppLayout() {
   const handlersRef = useRef(new Set())
   const [toastReminder, setToastReminder] = useState(null)
   const [toastTask, setToastTask] = useState(null)
+  // Data Flight target (pillar 2): the Sidebar's Tasks nav icon, shared with TaskSuggestedToast so
+  // it knows where to fly to. AppLayout is already the common ancestor of both, so a single ref
+  // passed down one level is enough - no Context needed.
+  const tasksIconRef = useRef(null)
+  const [flightPulse, setFlightPulse] = useState(false)
+  const onFlightArrive = useCallback(() => {
+    setFlightPulse(true)
+    setTimeout(() => setFlightPulse(false), 450)
+  }, [])
 
   const subscribe = useCallback((handler) => {
     handlersRef.current.add(handler)
@@ -36,11 +46,12 @@ export default function AppLayout() {
   })
 
   return (
-    <div className="app-shell">
-      <Sidebar open={open} onClose={() => setOpen(false)} />
+    <div className="app-shell orbit-fx">
+      <TransitionVeil />
+      <Sidebar open={open} onClose={() => setOpen(false)} tasksIconRef={tasksIconRef} flightPulse={flightPulse} />
       <div className="app-column"><TopNavbar onMenu={() => setOpen(true)} /><main className="app-main"><Outlet context={{ sendJson, subscribe }} /></main></div>
       {toastReminder && <ReminderToast reminder={toastReminder} onClose={() => setToastReminder(null)} />}
-      {toastTask && <TaskSuggestedToast task={toastTask} onClose={() => setToastTask(null)} />}
+      {toastTask && <TaskSuggestedToast task={toastTask} onClose={() => setToastTask(null)} tasksIconRef={tasksIconRef} onFlightArrive={onFlightArrive} />}
     </div>
   )
 }

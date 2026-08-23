@@ -21,7 +21,10 @@ export async function apiFetch(path, { method = 'GET', body, token } = {}) {
   })
   if (!res.ok) {
     const payload = await res.json().catch(() => null)
-    throw new ApiError(res.status, payload?.detail || res.statusText)
+    const detail = Array.isArray(payload?.detail)
+      ? payload.detail.map((item) => item.msg || 'Invalid value').join(', ')
+      : payload?.detail || res.statusText
+    throw new ApiError(res.status, detail)
   }
   if (res.status === 204) return null
   return res.json()

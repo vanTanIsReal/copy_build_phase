@@ -5,7 +5,7 @@ from langgraph.prebuilt import InjectedState
 
 from src.agents.state import AgentState
 from src.db import session as db_session
-from src.services import consent_service
+from src.services import consent_service, guardrail_service
 
 
 @tool
@@ -27,4 +27,6 @@ async def search_messages(
         result = await consent_service.search_authorized_messages(
             db, conversation_id, query, max_results
         )
-    return result or f"No authorized messages matched '{query}'."
+    if not result:
+        return f"No authorized messages matched '{query}'."
+    return guardrail_service.sanitize_untrusted_text(result)

@@ -7,6 +7,8 @@ import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { listTasks, updateTaskStatus } from '../api/tasks'
 import { groupTasks } from '../utils/taskGrouping'
+import HologramSurface from '../components/fx/HologramSurface'
+import FluidButton from '../components/fx/FluidButton'
 
 const sourceLabel = { manual: 'Manual', proactive: 'AI suggestion' }
 const priorityClass = { High: 'danger', Medium: 'warning', Low: 'info' }
@@ -42,7 +44,9 @@ export default function TaskInboxPage() {
 
   const { needsDecision, overdue, dueSoon, highPriority } = groupTasks(tasks)
 
-  const accept = (task) => updateTaskStatus(token, task.id, 'pending').then(upsertTask).catch(err => pushToast(err.detail || ACTION_FAILED))
+  // Re-throws after toasting (unlike dismiss/complete below) so FluidButton's own success/error
+  // state - the checkmark morph - only ever fires on a real success, never on a swallowed failure.
+  const accept = (task) => updateTaskStatus(token, task.id, 'pending').then(upsertTask).catch(err => { pushToast(err.detail || ACTION_FAILED); throw err })
   const dismiss = (task) => updateTaskStatus(token, task.id, 'dismissed').then(upsertTask).catch(err => pushToast(err.detail || ACTION_FAILED))
   const complete = (task) => updateTaskStatus(token, task.id, 'completed').then(upsertTask).catch(err => pushToast(err.detail || ACTION_FAILED))
 
@@ -79,7 +83,7 @@ export default function TaskInboxPage() {
   }
 
   return (
-    <div className="page-container">
+    <HologramSurface className="page-container orbit-fx">
       <PageHeader
         eyebrow="Personal"
         title="Task Inbox"
@@ -105,7 +109,7 @@ export default function TaskInboxPage() {
       <Section
         icon="bi-stars" title="Needs your decision" items={needsDecision} tone="primary"
         actions={(task) => <>
-          <button className="btn btn-sm btn-primary" onClick={() => accept(task)}>Accept</button>
+          <FluidButton label="Accept" className="btn btn-sm btn-primary" onClick={() => accept(task)} />
           <button className="btn btn-sm btn-light" onClick={() => dismiss(task)}>Dismiss</button>
         </>}
       />
@@ -121,6 +125,6 @@ export default function TaskInboxPage() {
         icon="bi-flag" title="High priority" items={highPriority} tone="warning"
         actions={(task) => <button className="btn btn-sm btn-primary" onClick={() => complete(task)}>Complete</button>}
       />
-    </div>
+    </HologramSurface>
   )
 }

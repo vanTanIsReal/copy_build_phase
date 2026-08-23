@@ -66,3 +66,192 @@
 - Added AI panel controls, candidate review UI, and “scan next 200 old messages”.
 - Verification: affected regression group 67 passed; new group/event tests 4 passed; migration head
   test passed; Ruff and frontend production build passed. Full suite rerun follows this entry.
+
+# 2026-08-21 — Sci-fi UI animation overhaul (Frontend/user, AI/chat surfaces only)
+
+- Scope decision (confirmed with the user before starting): only the AI-facing surfaces get the new
+  dark/glow visual treatment — `/chat`, the AI Panel, `/assistant`, Task Inbox + the Sidebar's Tasks
+  nav icon. Profile/Settings/plain Calendar/the admin app are untouched, still the current light
+  Bootstrap theme. Kept Bootstrap + the existing plain CSS-variable system (no Tailwind) - added a
+  new `Frontend/user/src/orbit-fx.css`, scoped entirely under a `.orbit-fx` class (never `:root`),
+  imported only by `Frontend/user/src/main.jsx` (never `Frontend/shared/styles.css`, which is also
+  imported by `Frontend/admin`).
+- A near-identical redesign (Tailwind+Shadcn foundation, dark theme, Command Palette, HITL Drawer,
+  AI presence animations) was attempted 2026-08-19/20 on `feature/delivery-agent-tools` and fully
+  reverted the next day (`3c6920e`) with **no recorded reason anywhere in the repo** — not in the
+  revert commit body, not here. Investigated that history first (git log/diff on the 6 commits
+  involved) before starting this attempt; found no documented failure mode to avoid, but recording
+  this entry specifically so that gap doesn't repeat if this attempt also needs to be revisited.
+- New effects layer, `Frontend/user/src/components/fx/`: `springs.js` (tuned Framer Motion spring
+  presets, e.g. `messageEnter`/`flight`/`buttonMorph`/`buttonSnap` - deliberately no linear easing
+  anywhere), `HologramSurface.jsx` + `TransitionVeil.jsx` (page bloom-in + route-change glass veil -
+  chose NOT to do a true bidirectional AnimatePresence route crossfade, since that needs moving
+  `AppRouter`'s route table into `AppLayout` below the single shared WebSocket, remounting it on
+  every nav), `DataFlightCard.jsx` (manual rect-measure + Framer spring "fly" from
+  `TaskSuggestedToast` to the Sidebar's Tasks icon - not `layoutId`, since the toast and the tiny
+  icon have incompatible shapes for a shared-element morph), `useScrambleText.js` +
+  `ScrambledMarkdown.jsx` (matrix-style decode on a raw-string buffer, swapped for the real
+  `Markdown.jsx` once locked in - `Markdown.jsx` itself untouched, it exposes no char-level DOM to
+  animate), `ScanningBorder.jsx` + `PulseWave.jsx` (GSAP - the only two places GSAP is used at all,
+  chosen because a continuous linear loop and a randomized staggered multi-element loop are GSAP's
+  strength; every other animation here is Framer Motion), `FluidButton.jsx` (Accept/Confirm morphs
+  pill → pulse ring → neon-green check; found and fixed 3 pre-existing call sites
+  (`TaskInboxPage.accept`, `AIPanel.respondToInterrupt`, `PersonalAIChat.respond`) that swallowed
+  their own errors via `.catch()` without re-throwing - FluidButton would have shown a false success
+  checkmark on a real failure had these not been fixed to re-throw after toasting/setError).
+- Wired into `AppLayout.jsx`/`Sidebar.jsx`/`TaskSuggestedToast.jsx` (Data Flight + arrival pulse),
+  `ChatPage.jsx`/`MessageArea.jsx` (bloom entrance, message overshoot spring, composer pulse wave),
+  `AIPanel.jsx`/`PersonalAIChat.jsx` (scanning border, scramble-text, fluid confirm button, panel
+  re-bloom on conversation/thread change), `TaskInboxPage.jsx`/`PersonalAssistantPage.jsx` (bloom
+  entrance, fluid Accept button).
+- Added `gsap` (`^3.15.0` resolved) to `Frontend/user/package.json`; `framer-motion@^11.11.17` was
+  already installed and needed no bump - it already covers every mechanism used (spring
+  `transition`, `variants`, `AnimatePresence`, `layout`).
+- Verification: `npm run build` in `Frontend/user` - 750 modules, clean (up from 736 pre-change, 0
+  errors). Started the Vite dev server and curl'd every new/changed module path directly
+  (`/src/components/fx/*.jsx`, `AppLayout.jsx`, `AIPanel.jsx`, `PersonalAIChat.jsx`,
+  `TaskInboxPage.jsx`, `orbit-fx.css`) - all 200, none returned Vite's transform-error overlay.
+  **Not done**: no browser-automation tool is available in this environment, so there was no actual
+  logged-in visual/console-error pass through `/chat`, `/assistant`, `/tasks/inbox` - someone should
+  open the app locally and click through those three routes with devtools open before calling this
+  fully verified.
+
+# 2026-08-22 — Local dev DB reset, 1:1 chat directory/conversation regression fix, global Tailwind dark theme (Frontend/user)
+
+- **Local dev DB migration mismatch** (blocking `python scripts\run_dev.py` startup): the local
+  Postgres `orbit` DB's `alembic_version` pointed at `9a1c7e2f4b3d`, one of the feature-branch
+  "fresh baseline" migrations deleted during the `feature/delivery-agent-tools` → `develop` merge
+  (2026-08-21 entry above). Root-caused via a direct `asyncpg` inspection script (`psql` isn't on
+  PATH in this environment) comparing the live `workspaces` table's real columns against what
+  `develop`'s current chain (`20260803_01`, a `down_revision=None` fresh-baseline) expects. Fixed,
+  with explicit user confirmation first (this drops local dev data): `DROP SCHEMA public CASCADE`
+  + `CREATE SCHEMA public` on the local `orbit` DB, then `alembic upgrade head` clean from scratch
+  (17 migrations, lands on `20260821_16`). Verified `workspaces.slug` exists and `/health` returns
+  200 after a real `run_dev.py` start.
+- **1:1 chat regression found + fixed** (reported as "New conversation" showing no users, later
+  "workspace_id is required"/"Workspace access denied" once directory was fixed): the merge's
+  workspace-scoped directory/conversation model assumed every user has an `organization`
+  workspace, but a freshly-registered user only ever gets a `personal` one (no auto-enrollment,
+  and self-service org creation is off by default - `allow_self_service_organization_creation:
+  bool = False`). This broke plain 1:1/group chat for any two ordinary users end-to-end: `GET
+  /users` returned `[]` for personal workspaces, `POST /conversations` hard-required an
+  organization workspace, `GET /conversations` inner-joined `WorkspaceMembership` (which has zero
+  rows for personal workspaces, so it always returned `[]` even for conversations that did exist),
+  and `require_conversation_access` (gates message read/send) also required an active
+  `WorkspaceMembership` row unconditionally. Fixed across 3 files
+  (`src/api/chat_routes.py`, `src/services/chat_service.py`, `src/services/authorization_service.py`):
+  personal-workspace users now get the global active-user directory and can create/list/message in
+  direct+group conversations without any organization workspace, while organization-workspace
+  membership scoping is untouched for the B2B/agent-workspace path. Verified end-to-end with a
+  throwaway pair of registered accounts via curl against the real API (directory list, create
+  conversation, list from both sides, send/read a message both ways), then cleaned the test rows
+  from the DB. `pytest tests/ -v`: 404 passed (2 pre-existing/unrelated failures, confirmed
+  pre-existing by reproducing them identically on unmodified `develop` HEAD). `ruff check` clean.
+- **Global Tailwind v4 dark theme, whole `Frontend/user` app** (scope explicitly widened past the
+  prior AI/chat-only decision, per new instructions + follow-up AskUserQuestion confirmations: yes
+  to installing real Tailwind, yes to whole-app scope). `Frontend/admin` is untouched (separate
+  Vite app/build, own `vite.config.js`, never imports anything added here) and confirmed to still
+  build clean.
+  - Installed `tailwindcss@^4` + `@tailwindcss/vite@^4` in `Frontend/user` only; wired via
+    `@tailwindcss/vite` in `vite.config.js`. New `src/orbit-tailwind.css` imports only Tailwind's
+    `theme`+`utilities` layers (preflight skipped on purpose - Bootstrap 5 stays the base design
+    system, Tailwind is purely an additive utility layer) plus a small `@theme` block of reusable
+    tokens (`orbit-bg/panel/panel-2/line/glow-a/glow-b/neon/ink/muted` colors, `orbit-glow`/
+    `orbit-glow-focus`/`orbit-panel` shadows) mirroring the existing `--ofx-*` custom properties in
+    `orbit-fx.css` so both consumption paths (scoped-CSS overrides vs. new Tailwind-authored
+    components) share one palette.
+  - `.orbit-fx` (previously re-added per AI/chat page) is now applied exactly once, on the root
+    `.app-shell` in `AppLayout.jsx` - since every protected route renders under it, this alone
+    retroactively extends every existing `.orbit-fx <descendant-class>` rule app-wide with no
+    per-page changes. `orbit-fx.css` gained a large new section covering what wasn't already
+    dark: global shell/TopNavbar/Sidebar nav chrome, Bootstrap primitives used everywhere
+    (`.form-control`/`.form-select`/`.btn-light`/`.dropdown-menu`/`.modal-content`/`.table`/
+    `.progress`/`.btn-close`), Tasks (table, badges), Calendar (`.fc` FullCalendar CSS vars,
+    detected-events sidebar, event modal), Reminders, Memory, Profile/Settings, Workspace
+    management. Explicitly **not** covered: `RelationshipsPage`'s bespoke `.relationship-*`
+    classes, and Login/Register (outside `AppLayout`) - disclosed as a known gap, not silently
+    dropped.
+  - New reusable `components/fx/EmptyState.jsx` (Tailwind + Framer Motion, no CSS file
+    dependency): 3 variants (`radar` sweep, `pulse` rings, `float` hover) replacing static
+    gray-icon empty states in `TaskTable.jsx` (no tasks), `TaskPage.jsx` (no suggestions),
+    `MemoryPage.jsx` (no memories), `WorkspaceManagementPage.jsx` (no workspace assigned, both
+    empty branches).
+  - Sidebar (`Sidebar.jsx`) restructured as a floating glass panel: cosmetic surface
+    (`rounded-2xl border border-white/10 bg-orbit-panel/85 backdrop-blur-xl shadow-orbit-panel`)
+    is literal Tailwind utility classes on the `<aside>` per the requested deliverable; the
+    structural detachment itself (margin pulling the fixed-position box in from the viewport
+    edges, `--sidebar` bumped +16px so `.app-column`'s margin-left still leaves exactly one gap
+    past the sidebar's new edge) stays in `orbit-fx.css` for cross-breakpoint safety - mixing
+    responsive-critical sizing into ad-hoc utility classes risked fighting `styles.css`'s own
+    mobile drawer media queries.
+  - AI input + prompt cards (`PersonalAIChat.jsx`) upgraded to literal Tailwind glassmorphism:
+    prompt cards get `bg-white/5 backdrop-blur-md` + an absolutely-positioned corner gradient
+    flare span (can't target `::before` with utility classes); the composer gets
+    `shadow-orbit-glow` at rest and `focus-within:shadow-orbit-glow-focus
+    focus-within:border-orbit-glow-a` on focus; a soft `animate-ping` ring behinds the mic icon
+    while a request is in flight (placeholder "AI is listening/processing" cue - no real audio
+    input exists to drive it off of yet, reuses the existing `sending` state).
+  - Center canvas dot-matrix texture (Tailwind arbitrary `radial-gradient` background, ~5%
+    opacity) added to both message canvases: `MessageArea.jsx` (`/chat`) and `PersonalAIChat.jsx`
+    (`/assistant`).
+  - Verification: `npm run build` in `Frontend/user` - clean, 730 modules. Ran the Vite dev
+    server and curl'd every new/changed module path (all 200) plus fetched the compiled
+    `orbit-tailwind.css` to confirm Tailwind's JIT actually generated the expected utilities
+    (`orbit-panel`, `orbit-glow`, etc. present in the output). `Frontend/admin` rebuilt clean and
+    unaffected. **Not done**: same disclosed gap as the 2026-08-21 entry - no browser-automation
+    tool in this environment, so no actual logged-in visual pass through the app; someone should
+    click through `/tasks`, `/tasks/inbox`, `/calendar`, `/memory`, `/profile`, `/workspaces`,
+    `/chat`, `/assistant` locally before calling this fully verified.
+
+## Follow-up (same day) — "conversation_id does not belong to workspace_id" in AI Panel
+
+Reported via screenshot: opening the AI Assistant panel on a direct conversation between two
+personal-workspace users showed a red error "conversation_id does not belong to workspace_id" in
+the Ask Orbit box, and `/chat` failed outright for the non-creating participant. Same root cause
+family as the chat/directory fix above, one level deeper: 3 more spots compared the *caller's own*
+resolved `workspace_id` (from `WorkspaceContext`, always that user's own personal workspace by
+default) against `conversation.workspace_id` (anchored to whichever participant's personal
+workspace created the conversation first) and rejected on any mismatch - which is exactly what
+happens whenever the *other* participant (not the creator) uses the AI panel on that conversation.
+Fixed by only enforcing the mismatch as an error when the relevant workspace is `organization`
+(where it's a real scoping signal); for `personal` workspaces it's expected and already safe,
+since `require_conversation_access`/`ConversationParticipant` (not workspace membership) is what
+actually authorizes the request:
+- `src/api/routes.py` (`POST /chat`)
+- `src/api/task_routes.py` (`POST /tasks`, AI-extracted tasks from a shared conversation)
+- `src/services/memory_service.py` (`validate_memory_source`, AI-extracted memories)
+
+Checked `src/services/thread_memory_service.py`'s similar-looking `workspace_id` check too -
+not affected, `AgentThread` rows are already strictly per-user (id embeds `user.id`), so the
+value passed in is always self-consistent per user regardless of this fix.
+
+Verified live: registered a throwaway pair of users, direct conversation created by one, granted
+AI permission and called `POST /chat` as the *other* participant with their own (previously
+mismatching) `workspace_id` - no longer 422s, request reaches the LLM call (the resulting "Dịch vụ
+AI tạm thời không khả dụng" response is this dev environment's separate LLM-provider config issue,
+unrelated to this fix). Cleaned up the test rows afterward. `ruff check` clean on all 3 files;
+`pytest tests/ -v` re-run in full after this change (see below for result).
+
+## Follow-up #2 (same day) — realtime message delivery required an F5 to show up
+
+Reported: after sending a message, neither sender nor recipient saw it appear until refreshing
+the page. Same bug family, one more spot: `authorization_service.get_authorized_participant_ids`
+(used by `chat_routes.send_message`/the WebSocket send path/`proactive_service`/
+`event_extraction_service`/`consent_service` to compute "who is really in this conversation")
+unconditionally required an active `WorkspaceMembership` row per participant - which personal
+workspaces never have, so it silently returned an **empty list** for every personal-workspace
+conversation. `manager.broadcast_to_users([], ...)` then had nobody to push the `new_message`
+WebSocket event to; only the plain REST `GET .../messages` fetch (on page reload) ever showed the
+new message. Fixed with the same `organization`-only enforcement as the earlier two fixes.
+
+This function turned out to be a shared choke point - the same fix also restores proactive task
+detection, AI-consent context building, and event-candidate extraction for personal-workspace
+conversations, all of which were silently no-op-ing for the same reason (not separately reported
+yet, but they'd have hit an identical empty-participant-list dead end).
+
+Verified live end-to-end with a real WebSocket client (not just curl): registered a throwaway
+pair of users, opened a real `ws://.../api/v1/ws` connection as the recipient, sent a message via
+the REST endpoint as the sender, confirmed the recipient's live socket actually received the
+`new_message` event (no refresh). Cleaned up the test rows afterward. `ruff check` clean;
+`tests/test_websocket.py` + `tests/test_chat.py` + `tests/test_admin.py` green immediately after
+the change, full `pytest tests/ -v` re-run afterward (see below).

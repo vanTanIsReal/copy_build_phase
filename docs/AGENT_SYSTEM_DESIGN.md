@@ -414,6 +414,30 @@ flowchart LR
 so `consent_scope_hash` mỗi lần gọi tool side-effect — xem `docs/branches/G19-T132-Luong-Tri-Tue.md`
 để hiểu vì sao đây là lớp bắt buộc, không phải tuỳ chọn).
 
+Cùng chuỗi gate G0-G6 trên, nhìn theo góc guardrail/memory (personal agent, `input_guardrail`/
+`output_guardrail` node trong `src/agents/graph.py`) tương ứng với các lớp phòng thủ sau, theo thứ
+tự thực thi:
+
+| Lớp | Khi nào | Kiểm tra | Nếu không đạt |
+|---|---|---|---|
+| Authentication | Trước agent | User, workspace, session | 401/deny |
+| Resource authorization | Trước retrieval | Membership, department, entitlement | DENY |
+| Consent/privacy | Trước retrieval/cache | Purpose, revoked_at, scope hash | DENY/invalidate |
+| Injection defense | Trước/sau retrieval | Untrusted instructions, secret requests | Ignore/deny |
+| Domain intent gate | Sau hard safety | Deterministic high-confidence rules, sau đó semantic `allow/clarify/deny` | Hỏi một câu cụ thể khi mơ hồ |
+| Quality gate | Sau extraction | Schema, confidence, source, ambiguity | Clarify/suggestion |
+| Tool policy | Trước mỗi tool | Allowlist, args, ownership, target | DENY/HITL |
+| HITL binding | Trước side effect | Actor, tool, payload hash, expiry | Wait/reconfirm |
+| Cost/latency | Toàn run | Step/tool/token/time budget | Fallback/partial |
+| Output/privacy | Trước response | PII, forbidden fields, sources | MASK/DENY |
+| Audit | Mọi quyết định | Metadata, version, result | Fail closed cho side effect |
+
+Hard safety không phụ thuộc LLM. Regex chỉ xử lý injection, prohibited content và các intent công
+việc chắc chắn; request an toàn nhưng chưa xác định được chuyển sang structured semantic classifier
+với ontology task/calendar/memory/authorized-chat/professional-communication/technical-work. Kết quả
+confidence thấp bị hạ thành `clarify`, không tự mở rộng domain hoặc từ chối đoán. Quyền đọc một
+conversation không đồng nghĩa mọi câu hỏi trong panel đều thuộc domain.
+
 ## 9. HITL protocol
 
 ### 9.1 Hành động luôn cần xác nhận
@@ -502,8 +526,11 @@ Ví dụ metadata mô tả tool (không phải schema đã code hoá):
 
 ## 11. Memory và brief policy
 
-> CURRENT trên `main`: LangGraph checkpoint và memory CRUD/retrieval cơ bản cho profile `personal`.
-> Bảng governance dưới đây, vector similarity và automatic memory consolidation vẫn là TARGET.
+> CURRENT: LangGraph checkpoint giữ working memory theo thread; structured memory giữ facts,
+> preferences, decisions và open loops theo user; `memory_episodes` giữ episodic summaries;
+> retrieval xếp hạng hybrid lexical + embedding + recency + importance. Khi embedding provider
+> không sẵn sàng, lexical recall vẫn hoạt động. Bảng governance dưới đây áp dụng cho cả memory
+> của profile `personal` lẫn `WorkspaceBrief`/`ExecutiveBrief` của các specialist agent.
 
 | Loại memory | Ví dụ | Scope | TTL/xóa |
 |---|---|---|---|
@@ -514,13 +541,22 @@ Ví dụ metadata mô tả tool (không phải schema đã code hoá):
 | `WorkspaceBrief` | Delivery brief, Quality brief | Agent Workspace, versioned | `expires_at`; `is_stale()` bắt buộc kiểm trước khi dùng |
 | `ExecutiveBrief` | Tổng hợp liên workspace | Aggregate | Nguồn = `workspace_brief_ids`; brief rỗng phải có `data_gaps` |
 
-Không ghi sensitive inference, raw chat dài hoặc dữ liệu ngoài purpose. Retrieval luôn filter owner,
-workspace, sensitivity, consent scope và expiry trước semantic similarity.
+Không ghi sensitive inference, password/token, raw chat dài hoặc dữ liệu ngoài purpose. Retrieval
+filter owner, trạng thái và expiry trước khi xếp hạng. Mọi record có source/provenance, confidence,
+importance và TTL; đề xuất do background consolidation tạo ra là `pending_review`, không được đưa
+vào prompt cho đến khi user duyệt.
 
 `WorkspaceBrief`/`ExecutiveBrief` không phải cache tùy ý — mỗi handoff giữa agent giữ cùng `trace_id`,
 producer profile, thời điểm tạo và expiry; Delivery/Quality không "chat tự do" với Executive, chỉ
 trao đổi qua brief đã validate schema (mục 4.2 của
 [MULTI_AGENT_IMPLEMENTATION_PLAN.md](MULTI_AGENT_IMPLEMENTATION_PLAN.md)).
+
+Với profile `personal`: short-term dùng LangGraph checkpoint theo thread nhưng planner chỉ nhận
+recent turns trong token budget. Context builder nạp theo thứ tự policy/system → task →
+server-authenticated user context → long-term memory → episodic memory → authorized conversation
+retrieval → tool output. Policy không bao giờ bị trim. Heartbeat định kỳ compact phần hội thoại cũ
+thành episode, tạo durable-note candidates chờ duyệt, backfill embedding, hết hạn record theo TTL
+và không tự mở rộng quyền truy cập.
 
 ## 12. Model strategy
 
