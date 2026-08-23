@@ -147,4 +147,4 @@ Nguyên tắc: log phải phản ánh **prompt thật của người dùng**, kh
 | Hướng dẫn cho AI agent | 🟢 | `CLAUDE.md`, `.agents/rules/`, `.agents/workflows/` |
 | Worklog theo ngày | 🟢 | `WORKLOG.md` |
 | Docker | 🟢 (chưa deploy) | `Dockerfile`, `docker-compose.yml` |
-| CD / deploy workflow | 🔴 | Chưa có — xem [../ROADMAP.md](../ROADMAP.md) mục #1 |
+| CD / deploy workflow | 🟡 Workflow tồn tại, chưa từng chạy deploy thật | `.github/workflows/deploy.yml` (gate sau CI) — vẫn thiếu bước bấm dashboard thủ công bắt buộc trước lần deploy đầu, xem [../DEPLOYMENT.md](../DEPLOYMENT.md) và [../ROADMAP.md](../ROADMAP.md) mục #1 |

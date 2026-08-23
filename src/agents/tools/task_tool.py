@@ -7,16 +7,16 @@ from langgraph.prebuilt import InjectedState
 
 from src.agents.state import AgentState
 from src.config import get_settings
+from src.services import chat_service, task_service, usage_service
 from src.services.llm import get_llm
 
 
-@tool
-async def extract_tasks(
-    state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
-) -> str:
-    """Extract action items, tasks, and appointments mentioned in the conversation the user is
-    currently asking about, as a JSON array."""
-    text = (state or {}).get("context", "")
+async def generate_tasks_json(context: str) -> str:
+    """Build the prompt, call the LLM once, log usage, and return the raw JSON array text. This is
+    the real logic - `extract_tasks` below is a thin @tool wrapper around it for the LangGraph
+    path; `quick_action_service` calls this directly for AIPanel's Extract tasks button (routes.py
+    bypasses the planner entirely there, see ROADMAP.md "batch LLM call")."""
+    text = context or ""
     if not text.strip():
         return "[]"
 
@@ -35,4 +35,33 @@ async def extract_tasks(
         f"{text}"
     )
     result = await llm.ainvoke(prompt)
+    await usage_service.log_usage(
+        provider=settings.llm_provider, model=settings.model_name, usage_metadata=result.usage_metadata
+    )
     return result.content
+
+
+@tool
+async def extract_tasks(
+    state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
+) -> str:
+    """Extract action items, tasks, and appointments mentioned in the conversation the user is
+    currently asking about, as a JSON array."""
+    return await generate_tasks_json((state or {}).get("context", ""))
+
+
+@tool
+async def list_tasks(state: Annotated[AgentState, InjectedState] = None) -> str:  # type: ignore[assignment]
+    """List the current user's own tasks (from /tasks - manually created, or previously accepted
+    from an AI suggestion), sorted soonest-due first. Use this to answer questions about their
+    deadlines, to-do list, or what's overdue/upcoming - it is NOT the same as extract_tasks, which
+    only reads the conversation currently open in the chat panel and never touches saved tasks.
+    Read-only, no confirmation needed."""
+    tasks = await task_service.list_tasks_for_owner((state or {}).get("user_id"))
+    if not tasks:
+        return "The user has no tasks saved."
+    lines = []
+    for t in tasks:
+        due = chat_service.format_local_timestamp(t.due_at.isoformat()) if t.due_at else "no due date"
+        lines.append(f"- {t.title} (status: {t.status}, priority: {t.priority}, due: {due})")
+    return "\n".join(lines)

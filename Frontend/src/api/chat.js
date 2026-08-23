@@ -20,6 +20,15 @@ export const sendMessage = (token, conversationId, content) =>
 export const markRead = (token, conversationId) =>
   apiFetch(`/conversations/${conversationId}/read`, { method: 'POST', token })
 
+// "Delete conversation" - hides it from MY list only, doesn't touch it for other participants
+// (see src/services/chat_service.py::hide_conversation). Reappears automatically on new activity.
+export const deleteConversation = (token, conversationId) =>
+  apiFetch(`/conversations/${conversationId}`, { method: 'DELETE', token })
+
+// Leaves a group for good - only valid for type "group" (backend 400s for "direct").
+export const leaveConversation = (token, conversationId) =>
+  apiFetch(`/conversations/${conversationId}/leave`, { method: 'POST', token })
+
 export const getAiPermission = (token, conversationId) =>
   apiFetch(`/conversations/${conversationId}/ai-permission`, { token })
 

@@ -1,7 +1,7 @@
 # PRD — Orbit
 
 > Product Requirements Document · AI Agent Trợ lý cá nhân trong Chat
-> Team DRIVER ENGINEER (P-132) · Cập nhật 2026-08-04
+> Team DRIVER ENGINEER (P-132) · Cập nhật 2026-08-15
 
 Tài liệu này mô tả **yêu cầu sản phẩm và trạng thái thực tế đã build**. Kiến trúc kỹ thuật chi tiết
 xem [../ARCHITECTURE.md](../ARCHITECTURE.md); tiến độ theo đề bài xem [../ROADMAP.md](../ROADMAP.md);
@@ -35,8 +35,17 @@ dùng rời khỏi app chat và không bao giờ tự ý hành động thay họ
 - [x] Đăng ký bằng email + mật khẩu, mật khẩu hash bằng **bcrypt** (không lưu plaintext).
 - [x] Đăng nhập trả **JWT access token**; frontend gửi qua `Authorization: Bearer`.
 - [x] Mọi route ứng dụng nằm sau `ProtectedRoute`; chưa đăng nhập → redirect `/login`.
-- [x] Hai role: `user` và `admin`. Admin đầu tiên bootstrap qua `INITIAL_ADMIN_EMAIL`.
-- [x] Route `/admin/*` chặn bằng `AdminRoute` (FE) **và** `require_admin` dependency (BE).
+- [x] Hai role: `user` và `admin`. Admin đầu tiên bootstrap qua `INITIAL_ADMIN_EMAIL` (áp dụng cho
+      cả tài khoản tạo qua Google, không riêng `/register`), hoặc qua `POST /auth/admin/register`
+      (chặn bằng `ADMIN_BOOTSTRAP_KEY`, chỉ dùng được 1 lần khi chưa có admin nào).
+- [x] Từ 2026-08-14, admin **không còn** là route con `/admin/*` trong app người dùng — là **app Vite
+      riêng biệt** (`Frontend/admin/`, cổng 5174, `AdminGuard` + `BrowserRouter` riêng, đăng nhập qua
+      `POST /auth/admin/login`), chỉ tài khoản `role=admin` vào được. Backend vẫn 1 app FastAPI duy
+      nhất, mọi route admin đi qua `require_admin` như trước.
+- [x] **Đăng nhập bằng Google** (cộng thêm, không thay email/mật khẩu): `POST /auth/google` xác
+      minh ID token, find-or-create qua bảng `google_identities` riêng — không đổi cấu trúc bảng
+      `users`/JWT hiện có. Chỉ tự liên kết vào tài khoản mật khẩu có sẵn khi Google xác nhận
+      `email_verified`.
 
 ### US-2 — Nhắn tin 1-1 và nhóm realtime 🟢
 
@@ -113,14 +122,17 @@ dùng rời khỏi app chat và không bao giờ tự ý hành động thay họ
 - [x] `/assistant` chat trực tiếp với agent, giữ `thread_id` xuyên suốt hội thoại.
 - [x] Khi agent trả `status: "interrupted"` → hiện nút **Xác nhận / Huỷ** ngay trong bong bóng chat.
 
-### US-10 — Admin dashboard + cảnh báo token 🟡
+### US-10 — Admin dashboard + cảnh báo token 🟢
 
 - [x] Dashboard: thống kê user/hội thoại/tin nhắn; quản lý user (đổi role, khoá/mở); kiểm duyệt và
       xoá hội thoại; xem/xoá Task, Reminder, Memory toàn hệ thống.
 - [x] Bảng `usage_logs` ghi token mỗi lần gọi LLM (best-effort, không phá luồng chat nếu lỗi).
 - [x] Stat card tổng token + số request hôm nay + % so với `DAILY_TOKEN_BUDGET`; banner đỏ khi ≥80%.
-- [ ] 🟡 Cảnh báo chỉ hiện khi admin **chủ động mở trang** — chưa push/email, chưa tự chặn gọi LLM
-      khi vượt ngân sách.
+- [x] `usage_service._maybe_alert_budget` đẩy WebSocket `usage_budget_alert` tới **mọi admin đang
+      online** ngay khi vượt 80%/100% (không chỉ khi admin chủ động mở trang Admin — hiện qua
+      `BudgetAlertToast` ở bất kỳ trang nào), **và** `usage_service.is_over_budget()` chặn hẳn cuộc
+      gọi LLM mới (`/chat`, proactive detection) một khi đã chạm ngân sách — `/chat/resume` được
+      miễn trừ để không treo `interrupt()` dở dang.
 
 ### US-11 — Xử lý lỗi 🟢
 
@@ -142,8 +154,8 @@ dùng rời khỏi app chat và không bao giờ tự ý hành động thay họ
 | **Múi giờ** | Toàn hệ thống dùng `Asia/Ho_Chi_Minh` (scheduler, usage, FE `utils/datetime.js`, FullCalendar) | 🟢 |
 | **Realtime** | Chat, Reminder, Task, Calendar đều đẩy realtime qua **một** kênh WebSocket dùng chung | 🟢 |
 | **Chất lượng** | `pytest tests/ -v` + `ruff check .` sạch + `npm run build` sạch, chạy CI trên GitHub Actions | 🟢 |
-| **Vận hành** | Rate limiting trên API | 🔴 Cần trước khi mở public |
-| **Vận hành** | Deploy online + CD | 🔴 Hạng mục lớn nhất còn lại |
+| **Vận hành** | Rate limiting trên API | 🟢 REST (slowapi, theo IP/user) — WebSocket `/ws` cố tình hoãn, xem ROADMAP.md |
+| **Vận hành** | Deploy online + CD | 🔴 Hạng mục lớn nhất còn lại — code/workflow đã sẵn sàng nhưng chưa deploy thật, xem DEPLOYMENT.md |
 
 ## 5. Mô hình dữ liệu
 
@@ -159,6 +171,7 @@ erDiagram
     conversations ||--o{ tasks : "sinh ra"
     conversations ||--o{ ai_permissions : "có"
     users ||--o{ ai_permissions : "cấp quyền"
+    users ||--o| google_identities : "đăng nhập bằng"
 
     users {
         string id PK
@@ -231,16 +244,29 @@ erDiagram
         int total_tokens
         datetime created_at
     }
-    calendar_sync_state {
+    users ||--o| google_calendar_credentials : "kết nối"
+    google_calendar_credentials {
         string id PK
-        string sync_token
-        datetime updated_at
+        string user_id FK
+        string google_email
+        text refresh_token_enc
+        text access_token_enc
+        datetime token_expiry
+        text sync_token
+        datetime created_at
     }
     ai_permissions {
         string conversation_id PK
         string user_id PK
         boolean granted
         datetime updated_at
+    }
+    google_identities {
+        string id PK
+        string user_id FK
+        string google_sub UK
+        string email
+        datetime created_at
     }
 ```
 
@@ -255,35 +281,44 @@ là khoá ngoại.
 - `tasks.source`: `manual` | `proactive` · `tasks.priority`: `High` | `Medium` | `Low`
 - `reminders.status`: `scheduled` | `fired` | `cancelled` · `reminders.source`: `manual` | `agent` | `proactive`
 
-Sự kiện lịch **không lưu trong DB** — nguồn sự thật là Google Calendar; `calendar_sync_state` chỉ giữ
-con trỏ đồng bộ (1 dòng, `id="default"`).
+Sự kiện lịch **không lưu trong DB** — nguồn sự thật là Google Calendar; `google_calendar_credentials`
+(1 dòng/user, refresh/access token mã hoá Fernet) chỉ giữ credential OAuth + con trỏ đồng bộ
+(`sync_token`) riêng cho từng người.
+
+ERD trên chỉ vẽ các bảng cốt lõi cho luồng sản phẩm chính — chưa vẽ `system_config` (override runtime
+cho ngân sách token + cấu hình LLM), `audit_logs` (vệt hành động admin), và `assistant_threads` (phiên
+chat của trang `/assistant`). Field-level đầy đủ cho mọi bảng: xem
+[../ARCHITECTURE.md](../ARCHITECTURE.md) mục Database.
 
 ## 6. API Surface
 
-Tất cả dưới prefix `/api/v1`, đều yêu cầu JWT trừ `/auth/register` và `/auth/login`.
+Tất cả dưới prefix `/api/v1`, đều yêu cầu JWT trừ `/auth/register`, `/auth/login`, `/auth/google`.
 
 | Nhóm | Endpoint |
 | --- | --- |
-| **Auth** | `POST /auth/register` · `POST /auth/login` · `GET /auth/me` · `PATCH /auth/me` · `POST /auth/me/password` |
-| **Chat** | `GET /users` · `GET|POST /conversations` · `GET|POST /conversations/{id}/messages` · `POST /conversations/{id}/read` · `GET|PUT /conversations/{id}/ai-permission` |
-| **Agent** | `POST /chat` · `POST /chat/resume` · `GET /status` |
+| **Auth** | `POST /auth/register` · `POST /auth/login` · `POST /auth/google` · `GET /auth/me` · `PATCH /auth/me` · `POST /auth/me/password` · `POST /auth/admin/register` · `POST /auth/admin/login` (app admin, tách riêng) |
+| **Chat** | `GET /users` · `GET|POST /conversations` · `DELETE /conversations/{id}` · `POST /conversations/{id}/leave` · `GET|POST /conversations/{id}/messages` · `POST /conversations/{id}/read` · `GET|PUT /conversations/{id}/ai-permission` |
+| **Agent** | `POST /chat` · `POST /chat/resume` · `GET /status` · `GET /assistant/threads` · `GET /assistant/threads/{id}/messages` |
 | **Tasks** | `GET|POST /tasks` · `PATCH /tasks/{id}/status` · `DELETE /tasks/{id}` |
-| **Calendar** | `GET|POST /calendar/events` · `PATCH|DELETE /calendar/events/{id}` |
+| **Calendar** | `GET|POST /calendar/events` · `PATCH|DELETE /calendar/events/{id}` · `GET /calendar/connection` · `GET /calendar/oauth/url` · `GET /calendar/oauth/callback` · `DELETE /calendar/connection` |
 | **Reminders** | `GET|POST /reminders` · `DELETE /reminders/{id}` |
 | **Memories** | `GET|POST /memories` · `PATCH|DELETE /memories/{id}` |
-| **Admin** | `GET /admin/stats` · `GET /admin/users` · `PATCH /admin/users/{id}/role|status` · `GET /admin/conversations` · `GET /admin/conversations/{id}/messages` · `DELETE /admin/conversations/{id}` · `GET|DELETE /admin/tasks` · `GET|DELETE /admin/reminders` · `GET|DELETE /admin/memories` |
+| **Usage** | `GET /usage/status` (widget Sidebar app người dùng — không lộ cost/model) |
+| **Admin** | `GET /admin/stats` · `PATCH /admin/settings/budget` · `GET /admin/users` · `PATCH /admin/users/{id}/role|status` · `GET /admin/conversations` · `GET /admin/conversations/{id}/messages` · `DELETE /admin/conversations/{id}` · `GET|DELETE /admin/tasks` · `GET|DELETE /admin/reminders` · `GET|DELETE /admin/memories` · `GET|PATCH /admin/ai-management` · `GET /admin/system-health` · `GET /admin/ai-usage` · `GET /admin/audit-log` |
 | **Realtime** | `WS /api/v1/ws` |
 
 **Sự kiện WebSocket:** `new_message` · `reminder_fired` · `task_suggested` · `task_created` ·
-`task_updated` · `task_deleted` · `calendar_event_updated` · `calendar_event_deleted`
+`task_updated` · `task_deleted` · `calendar_event_updated` · `calendar_event_deleted` ·
+`conversation_member_left` · `usage_budget_alert`
 
 **Payload `interrupt()` (human-in-the-loop):** `type` = `calendar_event` | `calendar_event_update` |
 `calendar_event_delete` | `reminder`, kèm `draft` chứa nội dung sẽ được ghi.
 
-**Tool của agent (8 tool trong `ALL_TOOLS`):** `summarize_conversation` · `extract_tasks` ·
-`create_calendar_event` · `list_calendar_events` · `update_calendar_event` · `delete_calendar_event` ·
-`create_reminder` · `list_reminders`. Bốn tool có `interrupt()`: `create/update/delete_calendar_event`
-và `create_reminder`.
+**Tool của agent (11 tool trong `ALL_TOOLS`):** `summarize_conversation` · `extract_tasks` ·
+`list_tasks` · `search_messages` · `create_calendar_event` · `list_calendar_events` ·
+`update_calendar_event` · `delete_calendar_event` · `create_reminder` · `list_reminders` ·
+`list_memories`. Bốn tool có `interrupt()`:
+`create/update/delete_calendar_event` và `create_reminder`.
 
 ## 7. Luồng Agent (LangGraph)
 
@@ -325,5 +360,5 @@ trả lời, không gọi LLM lần 2 (tránh lỗi model tự sinh giả cú ph
 
 ---
 
-*Trạng thái trong tài liệu này phản ánh code tại commit `d431b71` (2026-08-04). Khi hoàn thành một
+*Trạng thái trong tài liệu này phản ánh code tại commit `ad01906` (2026-08-15). Khi hoàn thành một
 mục, cập nhật cả đây lẫn [../ROADMAP.md](../ROADMAP.md).*

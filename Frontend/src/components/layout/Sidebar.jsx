@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import { getUsageStatus } from '../../api/usage'
 
 const nav = [
   ['assistant', 'bi-stars', 'AI Assistant'], ['chat', 'bi-chat-dots', 'Chats'], ['tasks', 'bi-check2-square', 'Tasks'],
@@ -10,13 +12,19 @@ const nav = [
 
 const getInitials = (name) => (name || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase()
 
-const adminNav = [
-  ['admin', 'bi-speedometer2', 'Dashboard'], ['admin/users', 'bi-people', 'Users'], ['admin/conversations', 'bi-chat-square-text', 'Conversations'],
-  ['admin/user-data', 'bi-database', 'User data'],
-]
-
+// Admin console lives at a separate origin now (Frontend/admin, its own login) - no more "Admin"
+// nav section/links here, see Frontend/admin/src/AdminShell.jsx for the admin-only nav instead.
 export default function Sidebar({ open, onClose }) {
-  const { user, isAdmin } = useAuth()
+  const { user, token } = useAuth()
+  const [usage, setUsage] = useState(null)
+
+  useEffect(() => {
+    if (!token) return
+    getUsageStatus(token).then(setUsage).catch(() => setUsage(null))
+  }, [token])
+
+  const usedPct = usage ? Math.min(100, Math.max(0, usage.used_pct)) : 0
+
   return (
     <>
       <div className={`sidebar-backdrop ${open ? 'show' : ''}`} onClick={onClose} />
@@ -31,17 +39,13 @@ export default function Sidebar({ open, onClose }) {
               <i className={`bi ${icon}`} /><span>{label}</span>{label === 'AI Assistant' && <span className="new-pill">New</span>}
             </NavLink>
           ))}
-          {isAdmin && <>
-            <div className="nav-caption">Admin</div>
-            {adminNav.map(([path, icon, label]) => (
-              <NavLink key={path} to={`/${path}`} end onClick={onClose} className={({ isActive }) => `side-link ${isActive ? 'active' : ''}`}>
-                <i className={`bi ${icon}`} /><span>{label}</span>
-              </NavLink>
-            ))}
-          </>}
         </nav>
         <div className="sidebar-bottom">
-          <div className="ai-usage"><div className="d-flex align-items-center gap-2 mb-2"><i className="bi bi-stars" /><strong>AI credits</strong><span>72%</span></div><div className="progress"><div className="progress-bar" style={{width:'72%'}} /></div><small>Resets in 12 days</small></div>
+          <div className="ai-usage">
+            <div className="d-flex align-items-center gap-2 mb-2"><i className="bi bi-stars" /><strong>Ngân sách AI hôm nay</strong><span>{usage ? `${usage.used_pct}%` : '—'}</span></div>
+            <div className="progress"><div className="progress-bar" style={{ width: `${usedPct}%` }} /></div>
+            <small>{usage ? `${usage.tokens_used_today.toLocaleString()} / ${usage.daily_token_budget ? usage.daily_token_budget.toLocaleString() : '∞'} tokens · reset mỗi ngày` : 'Không tải được số liệu'}</small>
+          </div>
           <NavLink to="/profile" className="user-mini"><span className="avatar-photo">{getInitials(user?.display_name)}</span><span><strong>{user?.display_name || 'Loading...'}</strong><small>{user?.email}</small></span><i className="bi bi-three-dots ms-auto" /></NavLink>
         </div>
       </aside>

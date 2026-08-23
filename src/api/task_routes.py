@@ -6,19 +6,19 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.rate_limit import crud_rate_limit
 from src.auth.dependencies import get_current_user
 from src.config import get_settings
 from src.db.models import Task, User
 from src.db.session import get_db
 from src.models.task_schemas import TaskCreateRequest, TaskOut, UpdateTaskStatusRequest
-from src.services import calendar_service, reminder_service
+from src.services import calendar_service, reminder_service, task_service
+from src.services.google_credentials import CalendarNotConnected
 from src.websocket.manager import manager
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
-
-_PRIORITY_RANK = {"High": 0, "Medium": 1, "Low": 2}
+router = APIRouter(dependencies=[Depends(crud_rate_limit)])
 
 
 def _to_out(task: Task) -> TaskOut:
@@ -44,15 +44,8 @@ async def _get_own_task_or_404(task_id: str, current_user: User, db: AsyncSessio
 
 
 @router.get("/tasks", response_model=list[TaskOut])
-async def list_tasks(
-    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
-) -> list[TaskOut]:
-    tasks = (await db.execute(select(Task).where(Task.owner_id == current_user.id))).scalars().all()
-    def _sort_key(t: Task) -> tuple[bool, float, int]:
-        # .timestamp() gives a plain float to sort by - fine for a relative sort ordering.
-        return (t.due_at is None, t.due_at.timestamp() if t.due_at else 0.0, _PRIORITY_RANK.get(t.priority, 1))
-
-    tasks.sort(key=_sort_key)
+async def list_tasks(current_user: User = Depends(get_current_user)) -> list[TaskOut]:
+    tasks = await task_service.list_tasks_for_owner(current_user.id)
     return [_to_out(t) for t in tasks]
 
 
@@ -96,10 +89,12 @@ async def _add_to_calendar_and_reminder(task: Task, owner_id: str) -> None:
     start_iso = task.due_at.isoformat()
     end_iso = (task.due_at + timedelta(minutes=30)).isoformat()
     try:
-        event = calendar_service.create_event(summary=task.title, start_iso=start_iso, end_iso=end_iso)
+        event = await calendar_service.create_event(owner_id, summary=task.title, start_iso=start_iso, end_iso=end_iso)
         await calendar_service.broadcast_change(
-            "calendar_event_created", {"event": calendar_service.to_out_dict(event)}
+            owner_id, "calendar_event_created", {"event": calendar_service.to_out_dict(event)}
         )
+    except CalendarNotConnected:
+        logger.info("Skipped auto-create calendar event for task %s - owner hasn't connected Calendar", task.id)
     except Exception:  # noqa: BLE001 - best-effort, must not block the task Accept
         logger.exception("Auto-create calendar event for accepted task %s failed", task.id)
 

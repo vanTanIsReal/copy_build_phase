@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from src.api.rate_limit import crud_rate_limit
 from src.auth.dependencies import get_current_user
 from src.db.models import User
 from src.models.reminder_schemas import ReminderCreateRequest, ReminderOut
 from src.services import reminder_service
 
-router = APIRouter(dependencies=[Depends(get_current_user)])
+router = APIRouter(dependencies=[Depends(get_current_user), Depends(crud_rate_limit)])
 
 
 @router.get("/reminders", response_model=list[ReminderOut])

@@ -5,8 +5,9 @@
 Orbit là AI agent nhúng trong ứng dụng chat: FastAPI + LangGraph ở backend, React + Vite ở
 frontend, **PostgreSQL** làm database duy nhất (không còn hỗ trợ SQLite, xem mục Database). Backend
 có auth thật (JWT + bcrypt), nhắn tin 1-1/nhóm realtime qua WebSocket, phân
-quyền role user/admin, và agent LangGraph (LLM: Google Gemini hoặc Groq, đổi qua `.env`) với các
-tool có human-in-the-loop (calendar, reminder) cùng tool tóm tắt/trích xuất task. Toàn bộ tính
+quyền role user/admin, và agent LangGraph (LLM: Google Gemini, Groq, hoặc OpenAI, đổi qua `.env`)
+với các tool có human-in-the-loop (calendar, reminder) cùng tool tóm tắt/trích xuất task/tìm kiếm
+tin cũ. Toàn bộ tính
 năng người dùng (Tasks, Calendar, Reminders, Memory, Profile, AI Assistant, Admin) đã nối API thật
 — không còn trang nào dùng mock data.
 
@@ -92,6 +93,10 @@ graph TB
 - **Authentication:** JWT (PyJWT), password hash bcrypt (`src/auth/`). `get_current_user` +
   `require_admin` dependency cho phân quyền 2 role (`user`/`admin`). `/api/v1/chat` verify thêm
   người gọi có phải participant của `conversation_id` (nếu có truyền) trước khi cho agent xử lý.
+  Ngoài email/mật khẩu, `POST /auth/google` (`src/auth/google_oauth.py`) cho đăng nhập bằng Google —
+  xác minh chữ ký ID token (GIS, không cần client secret, không có route callback), find-or-create
+  qua bảng `google_identities` riêng (FK tới `users`, không ALTER bảng `users` sẵn có); JWT trả về
+  tạo bởi đúng `create_access_token` dùng chung với flow mật khẩu — cấu trúc token không đổi.
 
 ### 3. AI Agent (LangGraph)
 - **Agent Type:** Plan-and-execute dạng đơn giản — 1 node `planner` (LLM bound tools) ⇄ 1 node
@@ -99,17 +104,34 @@ graph TB
   (`summarize_conversation`, `extract_tasks`) dừng ngay sau khi chạy — dùng thẳng output làm câu trả
   lời, không gọi LLM lần 2 để "relay" lại (từng gây lỗi 400 do model tự hallucinate cú pháp tool call).
 - **State:** `AgentState` (TypedDict, `total=False`) — `messages` (reducer `add_messages`),
-  `context`, `summary`, `error`, `user_id`, ... (`src/agents/state.py`).
+  `context`, `summary`, `error`, `user_id`, `conversation_id` (chỉ set từ `routes.py`, không bao giờ
+  do LLM cung cấp — cho tool cần biết đang ở hội thoại nào mà không thể bị "spoof"), ...
+  (`src/agents/state.py`).
 - **Nodes:** `planner_node` (`src/agents/nodes/planner_node.py`) — bind `ALL_TOOLS`, inject ngày
   giờ hiện tại theo `calendar_timezone` vào system prompt (tránh agent đoán sai "tomorrow"/"next
   Monday"), ghi token usage qua `usage_service.log_usage`, bắt exception vào `state["error"]`.
-- **Tools** (`src/agents/tools/`, registry `ALL_TOOLS` trong `tools/__init__.py`):
-  - `summarize_conversation`, `extract_tasks` — đọc `state["context"]`, không cần xác nhận.
+- **Tools** (`src/agents/tools/`, registry `ALL_TOOLS` trong `tools/__init__.py`, 11 tool):
+  - `summarize_conversation`, `extract_tasks` — đọc `state["context"]`, không cần xác nhận. Chỉ có
+    ý nghĩa trong 1 hội thoại cụ thể (khác `list_tasks` bên dưới).
+  - `search_messages` — tìm tin nhắn cũ trong đúng hội thoại đang chat theo từ khoá (Postgres
+    `ILIKE`, không phải semantic search — dự án chủ động không dùng vector store), đọc-only, không
+    cần xác nhận; `conversation_id` lấy từ `state`, không phải tham số LLM tự truyền.
   - `create_calendar_event` / `list_calendar_events` / `update_calendar_event` /
     `delete_calendar_event` — Google Calendar thật qua `google-api-python-client`; mọi thao tác có
     tác dụng phụ đều bắt buộc `interrupt()` chờ xác nhận người dùng trước khi gọi API thật.
   - `create_reminder` / `list_reminders` — tương tự, `create_reminder` bắt buộc `interrupt()` trước
     khi lên lịch qua APScheduler (`SQLAlchemyJobStore`, bền vững qua restart).
+  - `list_tasks` / `list_memories` — đọc-only, không cần xác nhận; đọc thẳng bảng `tasks`/`memories`
+    của chính user đang chat (qua `task_service.list_tasks_for_owner`/`memory_service.
+    list_memories_for_owner`, dùng chung với route `GET /tasks`/`GET /memories`) — **không** đọc
+    theo hội thoại nào cả, khác hẳn `extract_tasks`. Đây là 2 tool duy nhất cho phép trang
+    `/assistant` (chat không gắn `conversation_id`) trả lời được câu hỏi kiểu "deadline nào sắp
+    tới"/"bạn nhớ gì về tôi" — trước khi có 2 tool này, panel "Bối cảnh của bạn" ở `/assistant` tuy
+    hiện đúng dữ liệu Task/Memory thật qua REST (`GET /tasks`, `/memories`, gọi trực tiếp từ
+    `AssistantContextPanel.jsx`, không qua agent) nhưng bản thân agent lại không có cách nào tự đọc
+    lại 2 nguồn đó khi được hỏi trực tiếp trong chat — planner ra 1 `AIMessage` rỗng, và
+    `_build_chat_response` (`src/api/routes.py`) coi đó là `status="completed"` hợp lệ nên không có
+    cả text lẫn lỗi hiển thị; giờ có 2 tool thật lẫn 1 câu fallback khi vẫn rỗng vì lý do khác.
 - **Checkpointer (memory hội thoại):** `AsyncPostgresSaver` (bền vững qua restart) — xây trong
   `init_checkpointer()` lúc FastAPI lifespan khởi động, vì cần chạy trong event loop đang hoạt động
   (`src/agents/graph.py`). `agent` là `None` cho tới khi hàm này chạy xong.
@@ -154,11 +176,15 @@ graph LR
   connection bị bind cứng vào loop đã tạo ra nó, pool connection tái sử dụng giữa 2 loop sẽ lỗi
   "attached to a different loop".
 - **Tables hiện có** (`src/db/models.py`): `User` (role, is_active, job_title, timezone,
-  preferences), `Conversation`, `ConversationParticipant`, `Message`, `Task` (status
+  preferences), `GoogleIdentity` (link `user_id` ↔ `google_sub` cho đăng nhập Google — bảng riêng,
+  không thêm cột vào `User`), `Conversation`, `ConversationParticipant`, `Message`, `Task` (status
   suggested/pending/in_progress/completed/dismissed, source manual/proactive), `Reminder` (status
   scheduled/fired/cancelled), `Memory` (ghi chú cá nhân người dùng tự thêm — category/title/detail,
   **khác** với agent checkpoint memory ở trên), `UsageLog` (token mỗi lần gọi LLM),
-  `CalendarSyncState` (1 dòng, lưu `syncToken` cho polling đồng bộ Google Calendar). Ngoài ra
+  `GoogleCalendarCredential` (1 dòng/user — `refresh_token_enc`/`access_token_enc` mã hoá Fernet,
+  `sync_token` cho polling đồng bộ, `google_email` để hiện UI; tồn tại = user đó đã Connect Google
+  Calendar riêng của họ — trước đây là `CalendarSyncState` dùng chung 1 dòng "default" cho cả app
+  hồi Calendar còn là 1 tài khoản chia sẻ, không mã hoá gì cả). Ngoài ra
   APScheduler tự quản bảng `apscheduler_jobs`, và khi dùng Postgres, LangGraph tự quản các bảng
   `checkpoints`/`checkpoint_blobs`/`checkpoint_writes`/`checkpoint_migrations`.
 
@@ -210,7 +236,18 @@ ngoài `ci.yml` (lint + test trên GitHub Actions). Đây là hạng mục lớn
   qua kể cả để test nhanh (quy ước trong `CLAUDE.md`).
 - `/api/v1/chat` verify current_user là participant của `conversation_id` trước khi agent xử lý —
   chặn user A mượn nội dung hội thoại của user B qua request tự chế.
-- Rate limiting: **chưa có** trên API endpoints — cân nhắc nếu deploy thật và mở public.
+- Rate limiting: **đã có** (slowapi, in-memory, phù hợp vì app chạy 1 uvicorn worker/1 instance,
+  không cần Redis) — `src/api/rate_limit.py`. Auth (`/register` 5/phút, `/login`+`/google` 10/phút)
+  và `/chat` (15/phút) theo IP/user khoá riêng qua `@limiter.limit(...)`; CRUD còn lại (tasks,
+  reminders, memories, calendar, conversations/messages, admin) 60/phút/user qua dependency dùng
+  chung `Depends(crud_rate_limit)` gắn ở từng router (không dùng `Limiter(default_limits=...)` +
+  `SlowAPIMiddleware` như tài liệu slowapi gợi ý mặc định — bản FastAPI đang pin không còn làm
+  phẳng route của `include_router()` vào `app.routes`, khiến middleware đó không tìm thấy handler
+  và coi mọi route là exempt; đã xác nhận bằng test, không phải suy đoán). `/health`, `/status`,
+  `/chat/resume` cố tình miễn (`@limiter.exempt`) — resume hoàn tất 1 hành động human-in-the-loop
+  đã xác nhận, chặn ở đó có thể treo `interrupt()`. Bổ sung cho `DAILY_TOKEN_BUDGET`
+  (`usage_service.is_over_budget()`), không thay thế: budget chặn theo $ tổng/ngày, rate limit
+  chặn burst/abuse theo phút.
 - Quyền AI đọc hội thoại: bảng `ai_permissions` (`conversation_id`, `user_id`, `granted`) thật ở
   backend — mỗi participant tự cấp/thu hồi quyền cho AI đọc hội thoại đó, độc lập với các thành
   viên khác (không cần đồng thuận cả nhóm). `POST /api/v1/chat` (`src/api/routes.py`) gọi
@@ -237,6 +274,8 @@ ngoài `ci.yml` (lint + test trên GitHub Actions). Đây là hạng mục lớn
 | Frontend framework | React + Vite | Giữ nguyên so với đề bài gợi ý Next.js — tránh viết lại toàn bộ frontend không tương xứng lợi ích |
 | Realtime | WebSocket thuần (FastAPI) | Dùng chung 1 kênh cho chat, reminder-fired, proactive-suggestion, calendar sync — không mở kênh song song |
 | Scheduler | APScheduler (`SQLAlchemyJobStore`) | Bền vững qua restart, dùng chung cho reminder-fire và calendar-poll thay vì đổi hẳn sang BullMQ/Node |
-| Đồng bộ Google Calendar | Polling định kỳ với `syncToken` (không phải webhook `events.watch`) | Webhook thật của Google cần domain public HTTPS mà project chưa deploy — polling là lựa chọn thực tế, có thể nâng cấp lên webhook sau khi deploy |
+| Đồng bộ Google Calendar | Polling định kỳ với `syncToken`, lặp riêng theo từng user **đang online** đã Connect (không phải webhook `events.watch`) | Webhook thật của Google cần domain public HTTPS mà project chưa deploy — polling là lựa chọn thực tế, có thể nâng cấp lên webhook sau khi deploy. Chỉ poll user đang online (không phải mọi user đã Connect) để không tốn quota Google cho thay đổi lịch của người không mở app — họ tự fetch lại khi mở `/calendar` |
+| Google Calendar OAuth | Per-user, redirect thật (`GET /calendar/oauth/url` → Google → `GET /calendar/oauth/callback` ở backend), OAuth Client "Web application" tách biệt với client đăng nhập, `state` ký JWT mang `user_id` | Yêu cầu đề bài "lịch cá nhân" — user phải thấy đúng lịch của họ, không phải 1 lịch dùng chung cho cả app. Tách 2 OAuth Client vì đăng nhập chỉ verify ID token (không cần secret), Calendar cần authorization-code + refresh_token (bắt buộc có secret) — không phải xin quyền Calendar ngay lúc đăng nhập |
+| Mã hoá refresh token | Fernet (`src/auth/crypto.py`), key `CREDENTIAL_ENCRYPTION_KEY` | Refresh token Calendar là bí mật dài hạn — lộ ra là đọc/ghi được lịch của user vô thời hạn tới khi họ tự revoke, khác `password_hash` (một chiều) hay JWT `secret_key` (không phải thứ đọc trực tiếp ra hành động trên tài khoản Google người khác) |
 
 Tiến độ triển khai theo giai đoạn và các hạng mục còn lại: xem [ROADMAP.md](ROADMAP.md).

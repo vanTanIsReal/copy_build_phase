@@ -93,3 +93,27 @@ async def test_ai_permission_put_requires_participant(client, auth_headers, othe
         f"/api/v1/conversations/{conversation_id}/ai-permission", json={"granted": True}, headers=third_headers
     )
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_conversation_list_reflects_ai_permission_state(client, auth_headers, other_auth_headers):
+    """GET /conversations (ConversationList.jsx's per-row AI toggle) must show the caller's own
+    grant state without a separate GET .../ai-permission round-trip per conversation."""
+    conversation_id = await _create_direct_conversation(client, auth_headers, other_auth_headers)
+
+    listed = await client.get("/api/v1/conversations", headers=auth_headers)
+    summary = next(c for c in listed.json()["conversations"] if c["id"] == conversation_id)
+    assert summary["ai_permission_granted"] is False
+
+    await client.put(
+        f"/api/v1/conversations/{conversation_id}/ai-permission", json={"granted": True}, headers=auth_headers
+    )
+
+    listed_again = await client.get("/api/v1/conversations", headers=auth_headers)
+    summary_again = next(c for c in listed_again.json()["conversations"] if c["id"] == conversation_id)
+    assert summary_again["ai_permission_granted"] is True
+
+    # Per-user, not shared - the other participant's own list must still show their own (ungranted) state.
+    other_listed = await client.get("/api/v1/conversations", headers=other_auth_headers)
+    other_summary = next(c for c in other_listed.json()["conversations"] if c["id"] == conversation_id)
+    assert other_summary["ai_permission_granted"] is False

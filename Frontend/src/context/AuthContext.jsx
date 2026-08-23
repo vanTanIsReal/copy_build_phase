@@ -1,10 +1,12 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import * as authApi from '../api/auth'
+import { useToast } from './ToastContext'
 
 const TOKEN_KEY = 'orbit_token'
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
+  const { pushToast } = useToast()
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY))
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -13,9 +15,17 @@ export function AuthProvider({ children }) {
     if (!token) { setUser(null); setLoading(false); return }
     authApi.getMe(token)
       .then(setUser)
-      .catch(() => { localStorage.removeItem(TOKEN_KEY); setToken(null); setUser(null) })
+      .catch(() => {
+        // Only reached when a token WAS present and got rejected (expired/revoked/invalid) - a
+        // fresh visit with no token at all takes the early `if (!token)` branch above instead, so
+        // this never fires for someone who simply hasn't logged in yet.
+        localStorage.removeItem(TOKEN_KEY)
+        setToken(null)
+        setUser(null)
+        pushToast('Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.')
+      })
       .finally(() => setLoading(false))
-  }, [token])
+  }, [token, pushToast])
 
   const login = async (email, password) => {
     const data = await authApi.login({ email, password })
@@ -29,6 +39,33 @@ export function AuthProvider({ children }) {
     localStorage.setItem(TOKEN_KEY, data.access_token)
     setUser(data.user)
     setToken(data.access_token)
+  }
+
+  // Handles both first-time signup and returning login transparently (find-or-create on the
+  // backend) - same as login/register above, just fed a Google ID token instead of a password.
+  const loginWithGoogle = async (idToken) => {
+    const data = await authApi.googleAuth(idToken)
+    localStorage.setItem(TOKEN_KEY, data.access_token)
+    setUser(data.user)
+    setToken(data.access_token)
+  }
+
+  // Used only by the separate Frontend/admin app (AdminLoginPage/AdminRegisterPage) - same
+  // localStorage/state wiring as login/register above, hitting the admin-only endpoints.
+  const loginAdmin = async (email, password) => {
+    const data = await authApi.adminLogin({ email, password })
+    localStorage.setItem(TOKEN_KEY, data.access_token)
+    setUser(data.user)
+    setToken(data.access_token)
+    return data
+  }
+
+  const registerAdmin = async (email, password, display_name, bootstrapKey) => {
+    const data = await authApi.registerAdmin({ email, password, display_name, bootstrap_key: bootstrapKey })
+    localStorage.setItem(TOKEN_KEY, data.access_token)
+    setUser(data.user)
+    setToken(data.access_token)
+    return data
   }
 
   const logout = () => {
@@ -49,7 +86,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, token, loading, isAdmin, login, register, logout, updateProfile, changePassword }}
+      value={{ user, token, loading, isAdmin, login, register, loginAdmin, registerAdmin, loginWithGoogle, logout, updateProfile, changePassword }}
     >
       {children}
     </AuthContext.Provider>

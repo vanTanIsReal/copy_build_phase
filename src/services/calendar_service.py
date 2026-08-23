@@ -1,98 +1,229 @@
 import logging
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
+from googleapiclient.discovery import Resource, build
 from googleapiclient.errors import HttpError
+from starlette.concurrency import run_in_threadpool
 
 from src.config import get_settings
-from src.db import session as db_session
-from src.db.models import CalendarSyncState
+from src.services import google_credentials
 from src.websocket.manager import manager
 
 logger = logging.getLogger(__name__)
 
-_SCOPES = ["https://www.googleapis.com/auth/calendar"]
+# calendarId is always "primary": the credential used to build the service is already this
+# specific user's own, so "primary" naturally resolves to their own main calendar. No per-user
+# calendar_id needs storing anywhere.
+_PRIMARY = "primary"
+
+# Fixed heuristic for suggest_alternative_slots (v1, not user-configurable): only offer
+# alternatives inside a plain working-hours window, searched a few days ahead. Revisit as a
+# per-user setting if this turns out to matter in practice.
+_WORK_DAY_START_HOUR = 8
+_WORK_DAY_END_HOUR = 20
+_SEARCH_DAYS_AHEAD = 3
+
+# Common relative ranges the agent's list_calendar_events tool resolves deterministically here
+# instead of leaving the LLM to freehand-compute time_min_iso/time_max_iso for phrases like "hôm
+# nay"/"tuần này" - the LLM reliably got "this week" wrong (picking "now" as the start instead of
+# the start of the week, silently excluding earlier-this-week events already past). Same reasoning/
+# pattern as chat_service.py's deterministic MessageScope resolution ("today"/"this_week"/...).
+SCOPE_CHOICES = ("today", "this_week", "next_7_days", "next_30_days")
 
 
-def get_calendar_service():
-    settings = get_settings()
-    creds = Credentials.from_authorized_user_file(settings.google_token_path, _SCOPES)
-    if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-        with open(settings.google_token_path, "w") as f:
-            f.write(creds.to_json())
-    return build("calendar", "v3", credentials=creds)
+def _local_now() -> datetime:
+    return datetime.now(ZoneInfo(get_settings().calendar_timezone))
 
 
-def list_events(time_min_iso: str, time_max_iso: str, max_results: int = 50) -> list[dict]:
-    settings = get_settings()
-    service = get_calendar_service()
-    resp = (
-        service.events()
-        .list(
-            calendarId=settings.google_calendar_id,
-            timeMin=time_min_iso,
-            timeMax=time_max_iso,
-            maxResults=max_results,
-            singleEvents=True,
-            orderBy="startTime",
+def resolve_scope(scope: str) -> tuple[str, str]:
+    """Deterministic (time_min_iso, time_max_iso) for one of SCOPE_CHOICES. "today"/"this_week"
+    cover the whole local day/week (Monday 00:00 through the following Monday 00:00) - including
+    the part already past - since "tuần này" means the whole current week, not just what's left of
+    it. "next_7_days"/"next_30_days" are forward-looking from right now, matching their name."""
+    now = _local_now()
+    if scope == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = start + timedelta(days=1)
+    elif scope == "this_week":
+        start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        end = start + timedelta(days=7)
+    elif scope == "next_7_days":
+        start, end = now, now + timedelta(days=7)
+    elif scope == "next_30_days":
+        start, end = now, now + timedelta(days=30)
+    else:
+        raise ValueError(f"Unknown calendar scope: {scope!r} (expected one of {SCOPE_CHOICES})")
+    return start.isoformat(), end.isoformat()
+
+
+async def _service(user_id: str) -> Resource:
+    creds = await google_credentials.get_credentials(user_id)
+    return await run_in_threadpool(build, "calendar", "v3", credentials=creds)
+
+
+async def list_events(user_id: str, time_min_iso: str, time_max_iso: str, max_results: int = 50) -> list[dict]:
+    service = await _service(user_id)
+
+    def _call():
+        return (
+            service.events()
+            .list(
+                calendarId=_PRIMARY,
+                timeMin=time_min_iso,
+                timeMax=time_max_iso,
+                maxResults=max_results,
+                singleEvents=True,
+                orderBy="startTime",
+            )
+            .execute()
         )
-        .execute()
-    )
+
+    resp = await run_in_threadpool(_call)
     return resp.get("items", [])
 
 
-def create_event(
-    summary: str, start_iso: str, end_iso: str, description: str = "", attendees: list[str] | None = None
+async def find_conflicts(user_id: str, start_iso: str, end_iso: str) -> list[dict]:
+    """Existing events overlapping [start_iso, end_iso). Google Calendar's timeMin/timeMax
+    semantics (an event qualifies when its end is after timeMin AND its start is before timeMax)
+    already express exactly the overlap test we need - no extra interval math required here."""
+    return await list_events(user_id, start_iso, end_iso)
+
+
+def _merge_busy_intervals(events: list[dict]) -> list[tuple[datetime, datetime]]:
+    """Sorted, merged busy intervals from timed events (all-day events, which only have a "date"
+    field and no precise time, are skipped here - known v1 limitation, not a bug: they still show
+    up as a conflict via find_conflicts, they just aren't accounted for when picking free gaps)."""
+    intervals = sorted(
+        (
+            (datetime.fromisoformat(e["start"]["dateTime"]).replace(tzinfo=None),
+             datetime.fromisoformat(e["end"]["dateTime"]).replace(tzinfo=None))
+            for e in events
+            if "dateTime" in e.get("start", {}) and "dateTime" in e.get("end", {})
+        ),
+        key=lambda iv: iv[0],
+    )
+    merged: list[tuple[datetime, datetime]] = []
+    for start, end in intervals:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+async def suggest_alternative_slots(
+    user_id: str, start_iso: str, end_iso: str, count: int = 2
+) -> list[dict]:
+    """Best-effort free-slot search: up to `count` gaps of the same duration as
+    [start_iso, end_iso), at/after the requested start time, inside working hours
+    (_WORK_DAY_START_HOUR-_WORK_DAY_END_HOUR local) over the next _SEARCH_DAYS_AHEAD days.
+    Pure interval scan, no LLM call - this is the tool "self-checking" its own proposal, not the
+    agent reasoning about it. Returns fewer than `count` (possibly none) if the window is full;
+    never raises for that."""
+    start = datetime.fromisoformat(start_iso).replace(tzinfo=None)
+    end = datetime.fromisoformat(end_iso).replace(tzinfo=None)
+    duration = end - start
+
+    window_start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    window_end = window_start + timedelta(days=_SEARCH_DAYS_AHEAD)
+    busy_items = await list_events(
+        user_id, window_start.isoformat(), window_end.isoformat(), max_results=100
+    )
+    busy = _merge_busy_intervals(busy_items)
+
+    candidates: list[dict] = []
+    day = window_start
+    while len(candidates) < count and day < window_end:
+        day_open = day.replace(hour=_WORK_DAY_START_HOUR, minute=0)
+        day_close = day.replace(hour=_WORK_DAY_END_HOUR, minute=0)
+        cursor = max(day_open, start) if day.date() == start.date() else day_open
+
+        for busy_start, busy_end in busy:
+            if not (busy_start.date() <= day.date() <= busy_end.date()):
+                continue
+            if cursor + duration <= busy_start:
+                candidates.append({"start": cursor.isoformat(), "end": (cursor + duration).isoformat()})
+                if len(candidates) >= count:
+                    break
+            cursor = max(cursor, busy_end)
+
+        if len(candidates) < count and cursor + duration <= day_close:
+            candidates.append({"start": cursor.isoformat(), "end": (cursor + duration).isoformat()})
+
+        day += timedelta(days=1)
+
+    return candidates[:count]
+
+
+async def create_event(
+    user_id: str,
+    summary: str,
+    start_iso: str,
+    end_iso: str,
+    description: str = "",
+    attendees: list[str] | None = None,
+    timezone: str | None = None,
 ) -> dict:
-    settings = get_settings()
-    service = get_calendar_service()
+    tz = timezone or get_settings().calendar_timezone
+    service = await _service(user_id)
     body = {
         "summary": summary,
         "description": description,
-        "start": {"dateTime": start_iso, "timeZone": settings.calendar_timezone},
-        "end": {"dateTime": end_iso, "timeZone": settings.calendar_timezone},
+        "start": {"dateTime": start_iso, "timeZone": tz},
+        "end": {"dateTime": end_iso, "timeZone": tz},
         "attendees": [{"email": a} for a in (attendees or [])],
     }
-    return service.events().insert(calendarId=settings.google_calendar_id, body=body).execute()
+
+    def _call():
+        return service.events().insert(calendarId=_PRIMARY, body=body).execute()
+
+    return await run_in_threadpool(_call)
 
 
-def update_event(
+async def update_event(
+    user_id: str,
     event_id: str,
     summary: str | None = None,
     start_iso: str | None = None,
     end_iso: str | None = None,
     description: str | None = None,
+    timezone: str | None = None,
 ) -> dict:
     """Patch an existing Google Calendar event - only the given fields change."""
-    settings = get_settings()
-    service = get_calendar_service()
+    tz = timezone or get_settings().calendar_timezone
+    service = await _service(user_id)
     body: dict = {}
     if summary is not None:
         body["summary"] = summary
     if description is not None:
         body["description"] = description
     if start_iso is not None:
-        body["start"] = {"dateTime": start_iso, "timeZone": settings.calendar_timezone}
+        body["start"] = {"dateTime": start_iso, "timeZone": tz}
     if end_iso is not None:
-        body["end"] = {"dateTime": end_iso, "timeZone": settings.calendar_timezone}
-    return service.events().patch(calendarId=settings.google_calendar_id, eventId=event_id, body=body).execute()
+        body["end"] = {"dateTime": end_iso, "timeZone": tz}
+
+    def _call():
+        return service.events().patch(calendarId=_PRIMARY, eventId=event_id, body=body).execute()
+
+    return await run_in_threadpool(_call)
 
 
-def delete_event(event_id: str) -> None:
-    settings = get_settings()
-    service = get_calendar_service()
-    service.events().delete(calendarId=settings.google_calendar_id, eventId=event_id).execute()
+async def delete_event(user_id: str, event_id: str) -> None:
+    service = await _service(user_id)
+
+    def _call():
+        service.events().delete(calendarId=_PRIMARY, eventId=event_id).execute()
+
+    await run_in_threadpool(_call)
 
 
-async def broadcast_change(event_type: str, payload: dict) -> None:
-    """Push a calendar change to everyone currently online. The connected Google Calendar is a
-    single shared account (not per-user OAuth), so a change matters to every viewer, not just
-    whoever triggered it - used after create/update/delete from both the REST route and the
-    agent tools (create/update/delete_calendar_event)."""
-    await manager.broadcast_to_users(list(manager.active.keys()), {"type": event_type, **payload})
+async def broadcast_change(user_id: str, event_type: str, payload: dict) -> None:
+    """Push a calendar change to the owning user only. Each user now connects their own Google
+    Calendar, so broadcasting any wider than that would leak one person's event titles to
+    everyone else online - this used to fan out to every connected user back when Calendar was
+    one shared account for the whole app."""
+    await manager.broadcast_to_users([user_id], {"type": event_type, **payload})
 
 
 def to_out_dict(event: dict) -> dict:
@@ -109,14 +240,13 @@ def to_out_dict(event: dict) -> dict:
     }
 
 
-def _fetch_changes(sync_token: str | None) -> tuple[list[dict], str | None]:
-    """One full page-through of events().list(). With no sync_token, this is a bootstrap sync
-    (events from the last day onward) that just establishes a fresh nextSyncToken; with one, it's
-    an incremental diff - Google returns only what changed since that token, deletions included
-    (as items with status="cancelled")."""
-    settings = get_settings()
-    service = get_calendar_service()
-    kwargs: dict = {"calendarId": settings.google_calendar_id, "singleEvents": True}
+async def _fetch_changes(user_id: str, sync_token: str | None) -> tuple[list[dict], str | None]:
+    """One full page-through of events().list() for this user's calendar. With no sync_token,
+    this is a bootstrap sync (events from the last day onward) that just establishes a fresh
+    nextSyncToken; with one, it's an incremental diff - Google returns only what changed since
+    that token, deletions included (as items with status="cancelled")."""
+    service = await _service(user_id)
+    kwargs: dict = {"calendarId": _PRIMARY, "singleEvents": True}
     if sync_token:
         kwargs["syncToken"] = sync_token
     else:
@@ -126,7 +256,7 @@ def _fetch_changes(sync_token: str | None) -> tuple[list[dict], str | None]:
     next_sync_token = None
     page_token = None
     while True:
-        resp = service.events().list(**kwargs, pageToken=page_token).execute()
+        resp = await run_in_threadpool(lambda: service.events().list(**kwargs, pageToken=page_token).execute())
         items.extend(resp.get("items", []))
         page_token = resp.get("nextPageToken")
         if not page_token:
@@ -135,46 +265,56 @@ def _fetch_changes(sync_token: str | None) -> tuple[list[dict], str | None]:
     return items, next_sync_token
 
 
-async def poll_calendar_changes() -> None:
-    """Periodic APScheduler job: Google Calendar push notifications need a public HTTPS callback
-    URL, which this project doesn't have (local dev only, no deployment yet), so this polls with
-    an incremental syncToken instead to catch changes made directly in Google Calendar (outside
-    the app) and broadcast them to everyone connected - the same WebSocket events the REST routes
-    and agent tools already send, so the frontend needs no changes to pick these up. Never raises:
-    a failed poll should not crash the scheduler, just retry next interval."""
-    async with db_session.async_session_maker() as db:
-        state = await db.get(CalendarSyncState, "default")
-        sync_token = state.sync_token if state else None
-
+async def _poll_one_user(user_id: str) -> None:
+    """One connected user's incremental sync + broadcast, isolated so a failure here (expired/
+    revoked credential, transient Google error, ...) never aborts another user's poll in the same
+    tick - see poll_calendar_changes."""
+    sync_token = await google_credentials.get_sync_token(user_id)
     try:
-        items, next_sync_token = _fetch_changes(sync_token)
+        items, next_sync_token = await _fetch_changes(user_id, sync_token)
+    except google_credentials.CalendarNotConnected:
+        return  # revoked mid-poll - get_credentials already cleaned up the row
     except HttpError as e:
         if sync_token and e.resp.status == 410:
             # Token expired/invalid (e.g. calendar untouched too long) - Google requires starting
             # over with a full sync rather than resuming.
-            logger.warning("Calendar sync token expired, resyncing from scratch")
+            logger.warning("Calendar sync token expired for user %s, resyncing from scratch", user_id)
             try:
-                items, next_sync_token = _fetch_changes(None)
+                items, next_sync_token = await _fetch_changes(user_id, None)
             except Exception:
-                logger.exception("Calendar poll full resync failed")
+                logger.exception("Calendar poll full resync failed for user %s", user_id)
                 return
         else:
-            logger.exception("Calendar poll failed")
+            logger.exception("Calendar poll failed for user %s", user_id)
             return
     except Exception:
-        logger.exception("Calendar poll failed")
+        logger.exception("Calendar poll failed for user %s", user_id)
         return
 
     for event in items:
         if event.get("status") == "cancelled":
-            await broadcast_change("calendar_event_deleted", {"event_id": event["id"]})
+            await broadcast_change(user_id, "calendar_event_deleted", {"event_id": event["id"]})
         else:
-            await broadcast_change("calendar_event_updated", {"event": to_out_dict(event)})
+            await broadcast_change(user_id, "calendar_event_updated", {"event": to_out_dict(event)})
 
-    async with db_session.async_session_maker() as db:
-        state = await db.get(CalendarSyncState, "default")
-        if state is None:
-            state = CalendarSyncState(id="default")
-            db.add(state)
-        state.sync_token = next_sync_token
-        await db.commit()
+    await google_credentials.set_sync_token(user_id, next_sync_token)
+
+
+async def poll_calendar_changes() -> None:
+    """Periodic APScheduler job (one job for the whole app, id "calendar_poll", unchanged): Google
+    Calendar push notifications need a public HTTPS callback URL, which this project doesn't have
+    (local dev only, no deployment yet), so this polls with an incremental syncToken instead to
+    catch changes made directly in Google Calendar (outside the app).
+
+    Only polls users who are currently online (connected over WebSocket): a 20-second job times N
+    connected users is N*4320 Google API requests/day, and an offline user's calendar changes don't
+    need realtime delivery - their frontend just re-fetches /calendar/events next time they open
+    the page. Never raises: a failed poll must not crash the scheduler, just retry next interval,
+    and one user's failure must not block any other user's poll in the same tick."""
+    connected = set(await google_credentials.list_connected_user_ids())
+    online = [uid for uid in list(manager.active.keys()) if uid in connected]
+    for user_id in online:
+        try:
+            await _poll_one_user(user_id)
+        except Exception:
+            logger.exception("Calendar poll failed for user %s", user_id)

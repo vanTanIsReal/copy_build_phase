@@ -1,20 +1,36 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useAuth } from '../../context/AuthContext'
+import { listAssistantThreads } from '../../api/assistant'
+import { formatDateShort, formatClock } from '../../utils/datetime'
 
-const sessions = [
-  { id: 1, title: 'Tổng quan hôm nay', preview: 'Lịch, task và deadline...', time: 'Bây giờ', active: true },
-  { id: 2, title: 'Chuẩn bị launch meeting', preview: 'Tóm tắt các quyết định...', time: 'Hôm qua' },
-  { id: 3, title: 'Công việc tuần này', preview: 'Các task ưu tiên cao...', time: '28 Jul' },
-  { id: 4, title: 'Northstar follow-up', preview: 'Deadline và người phụ trách...', time: '25 Jul' },
-]
+const formatThreadTime = (iso) => {
+  if (!iso) return ''
+  const sameDay = new Date(iso).toDateString() === new Date().toDateString()
+  return sameDay ? formatClock(iso) : formatDateShort(iso)
+}
 
-export default function AssistantSessionList() {
+export default function AssistantSessionList({ activeThreadId, onSelectThread, onNewThread, refreshSignal }) {
+  const { token } = useAuth()
   const [search, setSearch] = useState('')
-  const visible = sessions.filter(item => item.title.toLowerCase().includes(search.toLowerCase()))
+  const [threads, setThreads] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!token) return
+    setLoading(true)
+    listAssistantThreads(token).then(setThreads).catch(() => setThreads([])).finally(() => setLoading(false))
+  }, [token, refreshSignal])
+
+  const visible = threads.filter(t => t.title.toLowerCase().includes(search.toLowerCase()))
+
   return <aside className="assistant-sessions">
-    <div className="assistant-session-head"><div><span>Personal space</span><h2>Trợ lý của tôi</h2></div><button className="icon-btn primary-soft" aria-label="Cuộc trò chuyện mới"><i className="bi bi-plus-lg" /></button></div>
+    <div className="assistant-session-head"><div><span>Personal space</span><h2>Trợ lý của tôi</h2></div><button className="icon-btn primary-soft" aria-label="Cuộc trò chuyện mới" onClick={onNewThread}><i className="bi bi-plus-lg" /></button></div>
     <div className="session-search"><i className="bi bi-search"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Tìm cuộc trò chuyện"/></div>
     <div className="session-caption">Gần đây</div>
-    <div className="session-items">{visible.map(item=><button className={`session-item ${item.active?'active':''}`} key={item.id}><span className="session-item-icon"><i className="bi bi-chat-square-text"/></span><span className="session-item-copy"><strong>{item.title}</strong><small>{item.preview}</small></span><time>{item.time}</time></button>)}</div>
+    <div className="session-items">
+      {!loading && visible.length === 0 && <p className="session-empty">Chưa có cuộc trò chuyện nào với Trợ lý.</p>}
+      {visible.map(t=><button className={`session-item ${t.thread_id===activeThreadId?'active':''}`} key={t.thread_id} onClick={()=>onSelectThread(t.thread_id)}><span className="session-item-icon"><i className="bi bi-chat-square-text"/></span><span className="session-item-copy"><strong>{t.title}</strong><small>{t.preview}</small></span><time>{formatThreadTime(t.updated_at)}</time></button>)}
+    </div>
     <div className="assistant-private"><i className="bi bi-shield-check"/><div><strong>Không gian riêng tư</strong><small>Chỉ bạn có thể xem nội dung tại đây.</small></div></div>
   </aside>
 }
