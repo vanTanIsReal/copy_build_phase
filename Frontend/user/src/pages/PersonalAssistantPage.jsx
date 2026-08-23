@@ -2,6 +2,7 @@ import { useState } from 'react'
 import AssistantSessionList from '../components/ai/AssistantSessionList'
 import PersonalAIChat from '../components/ai/PersonalAIChat'
 import AssistantContextPanel from '../components/ai/AssistantContextPanel'
+import HologramSurface from '../components/fx/HologramSurface'
 
 export default function PersonalAssistantPage(){
   const [contextOpen,setContextOpen]=useState(false)
@@ -12,7 +13,7 @@ export default function PersonalAssistantPage(){
   // thread should show up (or move to the top) without a manual page refresh.
   const [threadsVersion,setThreadsVersion]=useState(0)
 
-  return <div className="personal-assistant-layout">
+  return <HologramSurface className="personal-assistant-layout orbit-fx">
     <AssistantSessionList
       activeThreadId={activeThreadId}
       onSelectThread={setActiveThreadId}
@@ -26,5 +27,5 @@ export default function PersonalAssistantPage(){
       onActivity={()=>setThreadsVersion(v=>v+1)}
     />
     <AssistantContextPanel open={contextOpen} onClose={()=>setContextOpen(false)}/>
-  </div>
+  </HologramSurface>
 }

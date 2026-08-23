@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import { useAuth } from '../../context/AuthContext'
 import { chatWithAgent, resumeAgent } from '../../api/agent'
 import { createTask } from '../../api/tasks'
 import { backfillEventCandidates, confirmEventCandidate, dismissEventCandidate, listEventCandidates } from '../../api/calendar'
-import Markdown from '../common/Markdown'
+import ScanningBorder from '../fx/ScanningBorder'
+import ScrambledMarkdown from '../fx/ScrambledMarkdown'
+import FluidButton from '../fx/FluidButton'
+import { springs } from '../fx/springs'
 
 const actions = [
   ['bi-text-paragraph', 'Summarize', 'Get the key points', '#526ff5'],
@@ -60,6 +63,7 @@ export default function AIPanel({
   onToggleContribution,
   aiMode = 'individual',
   canManageAi = false,
+  onBusyChange,
 }) {
   const { token } = useAuth()
   const [scope, setScope] = useState('latest_20')
@@ -92,6 +96,10 @@ export default function AIPanel({
     // refreshEventCandidates deliberately uses the current panel identity only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, conversationId, granted, aiMode])
+
+  // Reports whether an agent call is in flight, so MessageArea's PulseWave (pillar 3) reflects
+  // this panel's real busy state instead of a fake/local signal.
+  useEffect(() => { onBusyChange?.(Boolean(runningAction)) }, [runningAction, onBusyChange])
 
   const toggleGrant = async (next) => {
     try { await onToggleGrant(next) }
@@ -185,8 +193,12 @@ export default function AIPanel({
         setResultTitle(approved ? 'Done' : 'Cancelled')
         setResult(response.response)
       }
-    } catch (err) { setError(err.detail || 'Could not reach the AI agent.') }
-    finally { setRunningAction(null) }
+    } catch (err) {
+      setError(err.detail || 'Could not reach the AI agent.')
+      // Re-thrown so FluidButton's own success/error state - the checkmark morph - only ever
+      // fires on a real success, never on a swallowed failure.
+      throw err
+    } finally { setRunningAction(null) }
   }
 
   const askOrbit = async (value = question) => {
@@ -220,12 +232,20 @@ export default function AIPanel({
   }
 
   return (
-    <><div className={`ai-backdrop ${open ? 'show' : ''}`} onClick={onClose}/><aside className={`ai-panel ${open ? 'open' : ''}`}>
+    <><div className={`ai-backdrop orbit-fx ${open ? 'show' : ''}`} onClick={onClose}/><aside className={`ai-panel orbit-fx ${open ? 'open' : ''}`}>
+      <ScanningBorder active={Boolean(runningAction)} />
+      <AnimatePresence mode="wait">
+      <motion.div
+        key={conversationId || 'none'}
+        initial={{ opacity: 0, scale: 0.96, filter: 'blur(6px)' }}
+        animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+        transition={springs.surfaceOpen}
+      >
       <div className="ai-panel-header"><div className="ai-title-icon"><i className="bi bi-stars"/></div><div><h3>AI Assistant</h3><span>Context-aware help</span></div><button className="icon-btn ai-close" onClick={onClose}><i className="bi bi-x-lg"/></button></div>
       <div className={`permission-card ${granted ? 'granted' : ''}`}>
         <div className="permission-top"><div><i className={`bi ${granted ? 'bi-shield-check' : 'bi-shield-lock'}`}/></div><span><strong>{granted ? 'Assistant enabled' : 'Assistant disabled'}</strong><small>{aiMode === 'group_managed' ? 'A manager-controlled policy applies to the complete group conversation' : 'Individual access and author consent apply'}</small></span>{granted && <span className="live-badge">Active</span>}</div>
         {aiMode === 'group_managed' ? <>
-          {canManageAi ? <button className={`btn w-100 mt-3 ${granted ? 'btn-light text-danger' : 'btn-primary'}`} onClick={()=>toggleGrant(!granted)} disabled={!conversationId}>{granted ? 'Disable AI for this group' : 'Enable AI for this group'}</button> : <div className="alert alert-light border small mt-3 mb-0">Only a conversation manager can change this policy.</div>}
+          {canManageAi ? <button className={`btn w-100 mt-3 ${granted ? 'btn-light text-danger' : 'btn-primary'}`} onClick={()=>toggleGrant(!granted)} disabled={!conversationId}>{granted ? 'Disable AI for this group' : 'Enable AI for this group'}</button> : <div className="alert border border-white/10 bg-white/5 backdrop-blur-md text-orbit-ink small mt-3 mb-0">Only a conversation manager can change this policy.</div>}
           <small className="d-block text-muted mt-2">When enabled, all group messages may be processed as continuous context. Every member can see that AI is active.</small>
         </> : <>
           {granted ? <button className="revoke-btn" onClick={()=>toggleGrant(false)}>Disable my Assistant access</button> : <button className="btn btn-primary w-100 mt-3" onClick={()=>toggleGrant(true)} disabled={!conversationId}><i className="bi bi-shield-check me-2"/>Enable my Assistant access</button>}
@@ -235,7 +255,7 @@ export default function AIPanel({
         <small className="d-block text-muted mt-2">Authorized content is sent to the configured external AI provider for processing.</small>
       </div>
 
-      {aiMode === 'group_managed' && granted && <div className="border rounded-3 p-3 mt-3 small">
+      {aiMode === 'group_managed' && granted && <div className="border border-white/10 bg-white/5 backdrop-blur-md text-orbit-ink rounded-3 p-3 mt-3 small">
         <div className="d-flex justify-content-between align-items-center gap-2"><strong>Calendar suggestions</strong>{canManageAi && <button className="btn btn-sm btn-light" onClick={scanHistory} disabled={candidateBusy==='__backfill__'}>{candidateBusy==='__backfill__' ? 'Scanning…' : 'Scan next 200 old messages'}</button>}</div>
         {backfillStatus && <div className="text-muted mt-2">Processed {backfillStatus.processed} messages; found {backfillStatus.extracted}. {backfillStatus.has_more ? 'More history remains.' : 'History scan is complete.'}</div>}
         {!eventCandidates.length && <div className="text-muted mt-2">No pending event suggestions.</div>}
@@ -245,10 +265,12 @@ export default function AIPanel({
       <div className="ai-section-title"><span>Quick actions</span><i className="bi bi-lightning-charge-fill"/></div>
       <div className="quick-grid">{actions.map(([icon,title,sub,color])=>{ const isRunning = runningAction === title; const invalidCustom = scope === 'custom' && (!customSince || !customUntil); return <motion.button key={title} whileHover={{y:-2}} whileTap={{scale:.98}} disabled={!granted || Boolean(runningAction) || invalidCustom} onClick={handlers[title]}><span style={{color,background:`${color}12`}}><i className={`bi ${isRunning ? 'bi-hourglass-split' : icon}`}/></span><strong>{title}</strong><small>{isRunning ? 'Working...' : sub}</small></motion.button> })}</div>
       {error && <div className="auth-error">{error}</div>}
-      {contextScope && <div className="alert alert-light border py-2 px-3 small mt-2 mb-2">This request used {contextScope.included_message_count}/{contextScope.window_message_count} messages in its selected window.{contextScope.excluded_participants?.length > 0 && <> Excluded authors: {contextScope.excluded_participants.join(', ')}.</>}</div>}
-      {result && <div className="border rounded-3 p-3 mt-2 small"><strong className="d-block mb-1">{resultTitle}</strong><Markdown>{result}</Markdown>{pending && <div className="d-flex flex-wrap gap-2 mt-2">{pending.interrupt?.draft?.alternatives?.map((alternative, index) => <button className="btn btn-sm btn-outline-primary" disabled={runningAction==='__resume__'} key={`${alternative.start}-${index}`} onClick={()=>respondToInterrupt(true, {start: alternative.start, end: alternative.end})}>Dùng {alternative.start} - {alternative.end}</button>)}<button className="btn btn-sm btn-primary" disabled={runningAction==='__resume__'} onClick={()=>respondToInterrupt(true)}>Xác nhận</button><button className="btn btn-sm btn-light" disabled={runningAction==='__resume__'} onClick={()=>respondToInterrupt(false)}>Hủy</button></div>}</div>}
+      {contextScope && <div className="alert border border-white/10 bg-white/5 backdrop-blur-md text-orbit-ink py-2 px-3 small mt-2 mb-2">This request used {contextScope.included_message_count}/{contextScope.window_message_count} messages in its selected window.{contextScope.excluded_participants?.length > 0 && <> Excluded authors: {contextScope.excluded_participants.join(', ')}.</>}</div>}
+      {result && <div className="border border-white/10 bg-white/5 backdrop-blur-md text-orbit-ink rounded-3 p-3 mt-2 small"><strong className="d-block mb-1">{resultTitle}</strong><ScrambledMarkdown text={result} active={Boolean(result)}/>{pending && <div className="d-flex flex-wrap gap-2 mt-2">{pending.interrupt?.draft?.alternatives?.map((alternative, index) => <button className="btn btn-sm btn-outline-primary" disabled={runningAction==='__resume__'} key={`${alternative.start}-${index}`} onClick={()=>respondToInterrupt(true, {start: alternative.start, end: alternative.end}).catch(()=>{})}>Dùng {alternative.start} - {alternative.end}</button>)}<FluidButton label="Xác nhận" disabled={runningAction==='__resume__'} onClick={()=>respondToInterrupt(true)}/><button className="btn btn-sm btn-light" disabled={runningAction==='__resume__'} onClick={()=>respondToInterrupt(false).catch(()=>{})}>Hủy</button></div>}</div>}
       <div className="ask-card"><div className="ask-title"><span><i className="bi bi-stars"/></span><div><strong>Ask Orbit</strong><small>About this conversation</small></div></div><textarea value={question} onChange={event=>setQuestion(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();askOrbit()}}} placeholder="Ask anything about this conversation..." disabled={!granted}/><div className="ask-footer"><span>AI may make mistakes</span><button disabled={!granted || asking || !question.trim()} onClick={()=>askOrbit()}><i className={`bi ${asking?'bi-hourglass-split':'bi-arrow-up'}`}/></button></div></div>
       <div className="suggested-prompts"><span>Try asking</span><button disabled={asking || !granted} onClick={()=>askOrbit('What decisions were made today?')}>“What decisions were made today?”</button><button disabled={asking || !granted} onClick={()=>askOrbit('Who assigned me tasks?')}>“Who assigned me tasks?”</button></div>
+      </motion.div>
+      </AnimatePresence>
     </aside></>
   )
 }

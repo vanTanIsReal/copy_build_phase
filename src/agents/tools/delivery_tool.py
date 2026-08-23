@@ -39,6 +39,7 @@ from src.agents.contracts import (
     action_payload_hash,
 )
 from src.agents.policies.resource_guard import enforce_agent_workspace_access
+from src.agents.policies.scope_resolver import InvalidAttendeeError, validate_attendee_ids
 from src.agents.schemas.delivery import DeliveryBriefPayload
 from src.agents.tools.registry import assert_tool_allowed
 from src.services import delivery_workspace_service, workspace_brief_service
@@ -277,6 +278,14 @@ async def propose_delivery_meeting(
     event - a human must confirm via the HITL executor before this has any real effect."""
     workspace_id = _workspace_id(context)
     await enforce_agent_workspace_access(db, context=context, agent_workspace_id=workspace_id)
+    try:
+        await validate_attendee_ids(
+            db, organization_workspace_id=context.actor.organization_workspace_id, attendee_ids=attendee_ids
+        )
+    except InvalidAttendeeError as exc:
+        return ToolResult(
+            status=ToolResultStatus.ERROR, error_code="INVALID_ATTENDEE", error_message=str(exc)
+        )
 
     now = datetime.now(UTC)
     draft_payload = {

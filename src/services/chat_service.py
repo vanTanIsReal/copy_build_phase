@@ -329,33 +329,36 @@ async def get_or_create_direct_conversation(
 ) -> Conversation:
     if user_a_id == user_b_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot create a conversation with self")
-    if workspace_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="workspace_id is required")
+    # workspace_id is optional from the client - resolve_workspace_for_user falls back to the
+    # caller's personal workspace, same default used by GET /users and GET /conversations.
     workspace = await resolve_workspace_for_user(db, user_a_id, workspace_id)
-    if workspace.type != "organization":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Direct conversations require an organization workspace",
-        )
-    await require_workspace_member(db, await db.get(User, user_a_id), workspace_id)
-    await _assert_workspace_participants(db, workspace_id, {user_a_id, user_b_id})
+    if workspace.type == "organization":
+        await require_workspace_member(db, await db.get(User, user_a_id), workspace.id)
+        await _assert_workspace_participants(db, workspace.id, {user_a_id, user_b_id})
+    else:
+        # Personal workspaces have no membership roster to scope by - plain 1:1 chat between
+        # any two active users. workspace.id is stored on the Conversation row only because
+        # workspace_id is a required FK slot; it does not restrict who can see the conversation
+        # (see list_conversations, which does not filter personal-workspace results by it).
+        other = await db.get(User, user_b_id)
+        if other is None or not other.is_active:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active user not found")
 
-    candidate_ids = (
-        (
-            await db.execute(
-                select(ConversationParticipant.conversation_id)
-                .join(Conversation, Conversation.id == ConversationParticipant.conversation_id)
-                .where(
-                    Conversation.workspace_id == workspace_id,
-                    Conversation.type == "direct",
-                    ConversationParticipant.user_id == user_a_id,
-                    ConversationParticipant.revoked_at.is_(None),
-                )
-            )
+    # Personal-workspace conversations aren't anchored to a single shared workspace_id (each
+    # side's own personal workspace differs), so dedup by participant pair across all of the
+    # caller's direct conversations rather than scoping the search to one workspace_id.
+    candidate_query = (
+        select(ConversationParticipant.conversation_id)
+        .join(Conversation, Conversation.id == ConversationParticipant.conversation_id)
+        .where(
+            Conversation.type == "direct",
+            ConversationParticipant.user_id == user_a_id,
+            ConversationParticipant.revoked_at.is_(None),
         )
-        .scalars()
-        .all()
     )
+    if workspace.type == "organization":
+        candidate_query = candidate_query.where(Conversation.workspace_id == workspace.id)
+    candidate_ids = (await db.execute(candidate_query)).scalars().all()
     for cid in candidate_ids:
         participant_ids = (
             (
@@ -372,7 +375,7 @@ async def get_or_create_direct_conversation(
         if set(participant_ids) == {user_a_id, user_b_id}:
             return await db.get(Conversation, cid)
 
-    conversation = Conversation(workspace_id=workspace_id, type="direct", name=None, created_by=user_a_id)
+    conversation = Conversation(workspace_id=workspace.id, type="direct", name=None, created_by=user_a_id)
     db.add(conversation)
     await db.flush()
     db.add_all(
@@ -405,16 +408,17 @@ async def create_group_conversation(
     name: str,
     workspace_id: str | None = None,
 ) -> Conversation:
-    if workspace_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="workspace_id is required")
     workspace = await resolve_workspace_for_user(db, creator_id, workspace_id)
-    if workspace.type != "organization":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Group conversations require an organization workspace",
-        )
-    await _assert_workspace_participants(db, workspace_id, {creator_id, *member_ids})
-    conversation = Conversation(workspace_id=workspace_id, type="group", name=name, created_by=creator_id)
+    if workspace.type == "organization":
+        await _assert_workspace_participants(db, workspace.id, {creator_id, *member_ids})
+    else:
+        # Personal workspace: no membership roster - any active user can be added directly.
+        rows = (
+            await db.execute(select(User.id).where(User.id.in_(member_ids), User.is_active.is_(True)))
+        ).scalars().all()
+        if set(rows) != set(member_ids):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active user not found")
+    conversation = Conversation(workspace_id=workspace.id, type="group", name=name, created_by=creator_id)
     db.add(conversation)
     await db.flush()
     all_member_ids = {creator_id, *member_ids}

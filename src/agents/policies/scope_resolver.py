@@ -60,6 +60,54 @@ async def _has_organization_access(db: AsyncSession, user_id: str, workspace_id:
     ).scalar_one_or_none() is not None
 
 
+class InvalidAttendeeError(ValueError):
+    """Raised by validate_attendee_ids - one or more attendee_ids do not resolve to an active
+    member of the proposing agent's own organization. Callers turn this into a clean
+    ToolResult(status=ERROR) / ActionProposalRejectedError, never let it become a raw 500."""
+
+    def __init__(self, missing_ids: tuple[str, ...]):
+        super().__init__(f"attendee_ids outside this organization: {', '.join(missing_ids)}")
+        self.missing_ids = missing_ids
+
+
+async def validate_attendee_ids(
+    db: AsyncSession,
+    *,
+    organization_workspace_id: str,
+    attendee_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    """A specialist meeting proposal (propose_delivery_meeting/propose_executive_meeting/the
+    future propose_quality_meeting) must never be able to invite an arbitrary User.id - only an
+    active member of the SAME organization (Company Root boundary, docs/BRIEF.md #6 "server tự
+    xác định... không tin các trường quyền do client gửi") the proposing agent's own context
+    belongs to. Cross-department invites (e.g. a Delivery meeting inviting a QA lead) are
+    legitimate and allowed - the boundary enforced here is the company, not the single
+    AgentWorkspace, matching how a real meeting invite works.
+
+    Returns the attendees' emails in `attendee_ids` order (deduplicated) - never a partial list;
+    raises InvalidAttendeeError if even one id doesn't resolve to an active org member, so the
+    caller can reject the whole proposal rather than silently drop invalid invitees."""
+    if not attendee_ids:
+        return ()
+    rows = (
+        await db.execute(
+            select(User.id, User.email)
+            .join(WorkspaceMembership, WorkspaceMembership.user_id == User.id)
+            .where(
+                WorkspaceMembership.workspace_id == organization_workspace_id,
+                WorkspaceMembership.status == "active",
+                User.id.in_(attendee_ids),
+                User.is_active.is_(True),
+            )
+        )
+    ).all()
+    emails_by_id = {row.id: row.email for row in rows}
+    missing = tuple(attendee_id for attendee_id in attendee_ids if attendee_id not in emails_by_id)
+    if missing:
+        raise InvalidAttendeeError(missing)
+    return tuple(emails_by_id[attendee_id] for attendee_id in dict.fromkeys(attendee_ids))
+
+
 async def list_active_agent_workspace_memberships(
     db: AsyncSession,
     *,

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -23,10 +23,11 @@ from src.agents.contracts import (
     ToolResultStatus,
 )
 from src.agents.hitl_executor import ActionProposalRejectedError, execute_action_proposal
+from src.agents.policies.scope_resolver import InvalidAttendeeError, resolve_agent_scope, validate_attendee_ids
 from src.agents.tools import delivery_tool, executive_tool
 from src.auth.dependencies import get_current_user
 from src.config import get_settings
-from src.db.models import AgentWorkspace, Conversation, User, Workspace, WorkspaceMembership
+from src.db.models import AgentActionProposal, AgentWorkspace, Conversation, User, Workspace, WorkspaceMembership
 from src.db.session import get_db
 from src.models.schemas import (
     AuthorizedContextMetadata,
@@ -103,13 +104,60 @@ _SPECIALIST_DENY_TEXT = {
     ),
 }
 
-# thread_id -> the ActionProposal a specialist propose_* tool drafted, awaiting confirm/reject via
-# POST /chat/resume (src.agents.hitl_executor.execute_action_proposal does the actual binding/
-# expiry/idempotency checks at confirm time - this dict is only "where do we find the proposal
-# again", the LangGraph checkpointer's equivalent role for the Personal agent's own interrupt()).
-# In-memory only - bounded by ActionProposal's own 15-minute expires_at, so losing this on a
-# restart just means "ask the agent again", not silent data loss.
-_pending_specialist_proposals: dict[str, ActionProposal] = {}
+# AgentActionProposal (src.db.models) is the durable store for the ActionProposal a specialist
+# propose_* tool drafted, awaiting confirm/reject via POST /chat/resume
+# (src.agents.hitl_executor.execute_action_proposal does the actual binding/expiry/idempotency
+# checks at confirm time - this table is only "where do we find the proposal again, and what
+# scope was it drafted under", the LangGraph checkpointer's equivalent role for the Personal
+# agent's own interrupt()). Previously an in-memory dict - replaced because losing a pending
+# proposal on restart/across workers used to mean a confusing 404 instead of a real "ask again".
+
+
+async def _store_pending_proposal(
+    db: AsyncSession,
+    *,
+    thread_id: str,
+    proposal: ActionProposal,
+    organization_workspace_id: str,
+    agent_profile: AgentProfile,
+    requested_scope: RequestedScope,
+    target_agent_workspace_id: str | None,
+) -> None:
+    db.add(
+        AgentActionProposal(
+            thread_id=thread_id,
+            proposal_id=proposal.proposal_id,
+            trace_id=proposal.trace_id,
+            actor_user_id=proposal.actor_user_id,
+            action=proposal.action,
+            payload=proposal.payload,
+            payload_hash=proposal.payload_hash,
+            idempotency_key=proposal.idempotency_key,
+            status="pending",
+            organization_workspace_id=organization_workspace_id,
+            agent_profile=agent_profile.value,
+            requested_scope=requested_scope.value,
+            target_agent_workspace_id=target_agent_workspace_id,
+            created_at=proposal.created_at,
+            expires_at=proposal.expires_at,
+        )
+    )
+    await db.commit()
+
+
+async def _load_pending_proposal(db: AsyncSession, thread_id: str) -> AgentActionProposal | None:
+    row = await db.get(AgentActionProposal, thread_id)
+    if row is None or row.status != "pending":
+        return None
+    return row
+
+
+async def _close_pending_proposal(db: AsyncSession, row: AgentActionProposal, *, status: str) -> None:
+    """Transition a pending proposal to a terminal state (reject / re-auth denial / unusable).
+    Deliberately never called on a successful confirm - see _resume_specialist_action's own
+    docstring for why the row must stay "pending" in that case."""
+    row.status = status
+    await db.commit()
 
 
 async def _persistent_thread_state(thread_id: str, current_user: User) -> dict:
@@ -205,7 +253,7 @@ async def _run_specialist_chat(body: ChatRequest, current_user: User, db: AsyncS
     build_executive_brief). body.specialist_action set -> dispatch to the matching
     propose_*_reminder/propose_*_meeting tool instead, returning status="interrupted" for the
     caller to confirm/reject via POST /chat/resume - the real HITL loop
-    (_pending_specialist_proposals + hitl_executor.execute_action_proposal), not just a preview
+    (AgentActionProposal persistence + hitl_executor.execute_action_proposal), not just a preview
     nobody could ever confirm.
 
     Gated by MULTI_AGENT_ENABLED (checked here, before any DB work) and then by the resolved
@@ -313,7 +361,15 @@ async def _run_specialist_chat(body: ChatRequest, current_user: User, db: AsyncS
 
     if body.specialist_action is not None:
         proposal = ActionProposal.model_validate(result.payload["proposal"])
-        _pending_specialist_proposals[thread_id] = proposal
+        await _store_pending_proposal(
+            db,
+            thread_id=thread_id,
+            proposal=proposal,
+            organization_workspace_id=organization_workspace_id,
+            agent_profile=route.profile,
+            requested_scope=route.requested_scope,
+            target_agent_workspace_id=route.target_agent_workspace_id,
+        )
         interrupt_type = _INTERRUPT_TYPE_BY_PROPOSAL_ACTION[proposal.action]
         return ChatResponse(
             response="Vui lòng xác nhận hành động được đề xuất.",
@@ -356,7 +412,9 @@ async def _propose_specialist_action(
     )
 
 
-def _build_specialist_action_fn(db: AsyncSession, proposal: ActionProposal, confirming_user_id: str):
+def _build_specialist_action_fn(
+    db: AsyncSession, proposal: ActionProposal, confirming_user_id: str, organization_workspace_id: str
+):
     """The real side effect for a confirmed specialist ActionProposal - reuses the exact same
     already-shipped, already-tested services the Personal agent's own calendar/reminder tools call
     (reminder_service.schedule_reminder / calendar_service.create_event), never a parallel
@@ -384,12 +442,19 @@ def _build_specialist_action_fn(db: AsyncSession, proposal: ActionProposal, conf
         return _create_reminder
 
     async def _create_meeting() -> dict:
-        attendee_ids = payload.get("attendee_ids") or []
-        emails: list[str] = []
-        if attendee_ids:
+        attendee_ids = tuple(payload.get("attendee_ids") or ())
+        # Re-validated here, not just at propose time (delivery_tool.py/executive_tool.py already
+        # call the same check before drafting) - membership can change in the window between a
+        # proposal being drafted and confirmed, same "stale HITL" reasoning as the re-auth check
+        # in _resume_specialist_action below. Never falls back to a raw User lookup.
+        try:
             emails = list(
-                (await db.execute(select(User.email).where(User.id.in_(attendee_ids)))).scalars()
+                await validate_attendee_ids(
+                    db, organization_workspace_id=organization_workspace_id, attendee_ids=attendee_ids
+                )
             )
+        except InvalidAttendeeError as exc:
+            raise ActionProposalRejectedError(str(exc)) from exc
         start_dt = datetime.fromisoformat(payload["starts_at"])
         end_dt = start_dt + _DEFAULT_MEETING_DURATION
         event = await calendar_service.create_event(
@@ -410,29 +475,67 @@ async def _resume_specialist_action(request: ResumeRequest, current_user: User, 
     """Confirms/rejects a specialist propose_*_reminder/meeting - the real HITL completion for
     _run_specialist_chat's status="interrupted" responses. Same shape as resume_chat's LangGraph
     branch (approve/reject, one final ChatResponse) but for a proposal tracked in
-    _pending_specialist_proposals instead of a checkpointer thread.
+    AgentActionProposal (src.db.models) instead of a checkpointer thread.
 
-    Deliberately does NOT pop the proposal on a successful approve (only on reject, or once
-    hitl_executor itself says the proposal is unusable) - execute_action_proposal's own
-    idempotency_key check already makes a second "confirm" on the same thread_id safe (it returns
-    the same stored result instead of creating a second reminder/meeting), so a double-click just
-    replays the same success message instead of hitting a 500 from falling through to the
-    LangGraph branch below with a thread_id that was never a real checkpointer thread."""
-    proposal = _pending_specialist_proposals.get(request.thread_id)
-    if proposal is None:
+    Re-resolves authorization (scope_resolver.resolve_agent_scope) before executing, not just at
+    propose time - the same "stale HITL" principle enforce_agent_workspace_access already applies
+    at every specialist tool boundary (src/agents/policies/resource_guard.py) applies here too: a
+    lead removed from the workspace, or consent revoked, between propose and confirm must not
+    still be able to trigger the real side effect just because an old proposal is sitting around.
+
+    Deliberately does NOT close the proposal row on a successful approve (only on reject, a
+    re-auth denial, or once hitl_executor itself says the proposal is unusable) -
+    execute_action_proposal's own idempotency_key check already makes a second "confirm" on the
+    same thread_id safe (it returns the same stored result instead of creating a second
+    reminder/meeting), so a double-click just replays the same success message instead of hitting
+    a 500 from falling through to the LangGraph branch below with a thread_id that was never a
+    real checkpointer thread."""
+    row = await _load_pending_proposal(db, request.thread_id)
+    if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This proposal was already resolved or has expired")
-    if proposal.actor_user_id != current_user.id:
+    if row.actor_user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your conversation")
 
     if not request.approved:
-        del _pending_specialist_proposals[request.thread_id]
+        await _close_pending_proposal(db, row, status="rejected")
         return ChatResponse(response="Đã huỷ đề xuất.", thread_id=request.thread_id, status="completed")
 
-    action_fn = _build_specialist_action_fn(db, proposal, current_user.id)
+    resolution = await resolve_agent_scope(
+        db,
+        user_id=current_user.id,
+        organization_workspace_id=row.organization_workspace_id,
+        agent_profile=AgentProfile(row.agent_profile),
+        requested_scope=RequestedScope(row.requested_scope),
+        target_agent_workspace_id=row.target_agent_workspace_id,
+    )
+    if resolution.decision != PolicyDecision.ALLOW:
+        await _close_pending_proposal(db, row, status="rejected")
+        return ChatResponse(
+            response=_SPECIALIST_DENY_TEXT.get(resolution.reason, "Quyền của bạn đã thay đổi, không thể thực hiện."),
+            thread_id=request.thread_id,
+            status="error",
+        )
+
+    proposal = ActionProposal(
+        proposal_id=row.proposal_id,
+        trace_id=row.trace_id,
+        actor_user_id=row.actor_user_id,
+        action=row.action,
+        payload=row.payload,
+        payload_hash=row.payload_hash,
+        idempotency_key=row.idempotency_key,
+        # SQLite (unit tests) doesn't round-trip DateTime(timezone=True) as tz-aware - values
+        # written as UTC (_utcnow(), everywhere this table is ever written) come back naive on
+        # read there, though Postgres (real dev/prod) preserves the offset correctly. Since every
+        # write path is UTC, a naive read is always UTC, never an unknown offset.
+        created_at=row.created_at if row.created_at.tzinfo is not None else row.created_at.replace(tzinfo=UTC),
+        expires_at=row.expires_at if row.expires_at.tzinfo is not None else row.expires_at.replace(tzinfo=UTC),
+    )
+    action_fn = _build_specialist_action_fn(db, proposal, current_user.id, row.organization_workspace_id)
     try:
         result = await execute_action_proposal(db, proposal=proposal, confirming_user_id=current_user.id, action_fn=action_fn)
     except ActionProposalRejectedError as exc:
-        _pending_specialist_proposals.pop(request.thread_id, None)  # unusable - nothing left to be idempotent about
+        await _close_pending_proposal(db, row, status="rejected")  # unusable - nothing left to be idempotent about
         return ChatResponse(response=str(exc), thread_id=request.thread_id, status="error")
     except CalendarNotConnectedError:
         return ChatResponse(
@@ -525,10 +628,22 @@ async def chat(
         if conversation is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
         if request.workspace_id is not None and request.workspace_id != conversation.workspace_id:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="conversation_id does not belong to workspace_id",
-            )
+            # For an `organization`-anchored conversation this really is a client-state bug worth
+            # rejecting. For a `personal`-anchored one it's expected and harmless: a direct/group
+            # conversation between two personal-workspace users is stored under whichever side's
+            # personal workspace created it first (see chat_service.get_or_create_direct_conversation),
+            # but the OTHER participant's own default `workspace_id` (WorkspaceContext, sent on
+            # every /chat call) is their own, different, personal workspace - not the
+            # conversation's anchor. `require_conversation_access` above already fully authorizes
+            # this request via the real ConversationParticipant row, and `workspace_id` below is
+            # always taken from the conversation regardless of what the client sent, so the mismatch
+            # carries no security meaning here.
+            anchor_workspace = await db.get(Workspace, conversation.workspace_id)
+            if anchor_workspace is not None and anchor_workspace.type == "organization":
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="conversation_id does not belong to workspace_id",
+                )
         workspace_id = conversation.workspace_id
     else:
         workspace = await resolve_workspace_for_user(db, current_user.id, request.workspace_id)
@@ -641,9 +756,13 @@ async def resume_chat(
     db: AsyncSession = Depends(get_db),
 ) -> ChatResponse:
     """Resume an interrupted agent run with the user's confirm/reject decision."""
-    if request.thread_id in _pending_specialist_proposals:
+    if await db.get(AgentActionProposal, request.thread_id) is not None:
         # A specialist propose_*_reminder/meeting confirmation - not a LangGraph checkpointer
-        # thread at all, see _pending_specialist_proposals's own docstring.
+        # thread at all, see _resume_specialist_action's own docstring. Checked by raw existence
+        # (not status=="pending") so a *closed* proposal replayed still routes here and gets the
+        # clean 404 "already resolved" from _load_pending_proposal, instead of falling through to
+        # thread_memory_service.require_resumable_thread with a thread_id that was never a real
+        # checkpointer thread.
         return await _resume_specialist_action(request, current_user, db)
 
     thread = await thread_memory_service.require_resumable_thread(

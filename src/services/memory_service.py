@@ -11,7 +11,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import session as db_session
-from src.db.models import Conversation, Memory, MemoryEpisode, User
+from src.db.models import Conversation, Memory, MemoryEpisode, User, Workspace
 from src.models.memory_schemas import MemoryCreateRequest
 from src.services import chat_service, consent_service
 from src.services.authorization_service import require_conversation_access
@@ -38,11 +38,19 @@ async def validate_memory_source(
     await require_conversation_access(db, user, conversation_id, "viewer")
     await chat_service.assert_ai_permission(db, conversation_id, user.id)
     conversation = await db.get(Conversation, conversation_id)
-    if conversation is None or conversation.workspace_id != workspace_id:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Memory source does not belong to the selected workspace",
-        )
+    if conversation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    # Same reasoning as src/api/routes.py's /chat handler and task_routes.create_task: a
+    # personal-workspace direct/group conversation is anchored to whichever participant's
+    # personal workspace created it first, so the OTHER participant's own `workspace_id` here is
+    # legitimately a different personal workspace. Only reject when it would actually matter.
+    if conversation.workspace_id != workspace_id:
+        target_workspace = await db.get(Workspace, workspace_id)
+        if target_workspace is not None and target_workspace.type == "organization":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Memory source does not belong to the selected workspace",
+            )
     current_hash = await consent_service.get_consent_scope_hash(db, conversation_id)
     if current_hash != consent_scope_hash:
         raise HTTPException(

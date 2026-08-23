@@ -33,9 +33,26 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
 ) -> list[UserPublic]:
     workspace = await resolve_workspace_for_user(db, current_user.id, workspace_id)
-    # Directory visibility is workspace-scoped; guests do not receive a global user list.
+    # Personal workspaces have no memberships to scope by, so fall back to the
+    # global active-user directory - this is what powers plain 1:1 chat between
+    # any two registered users (independent of the organization/agent-workspace
+    # features, which keep their own membership-scoped visibility below).
     if workspace.type == "personal":
-        return []
+        stmt = select(User).where(User.id != current_user.id, User.is_active.is_(True))
+        if search:
+            pattern = f"%{search}%"
+            stmt = stmt.where(or_(User.display_name.ilike(pattern), User.email.ilike(pattern)))
+        users = (await db.execute(stmt)).scalars().all()
+        return [
+            UserPublic(
+                id=u.id,
+                email=u.email,
+                display_name=u.display_name,
+                role=u.role,
+                platform_role=u.platform_role,
+            )
+            for u in users
+        ]
 
     current_membership = (
         await db.execute(
@@ -76,37 +93,27 @@ async def list_conversations(
     db: AsyncSession = Depends(get_db),
 ) -> ConversationListResponse:
     workspace = await resolve_workspace_for_user(db, current_user.id, workspace_id)
-    conversation_ids = (
-        (
-            await db.execute(
-                select(ConversationParticipant.conversation_id)
-                .join(
-                    WorkspaceMembership,
-                    (WorkspaceMembership.workspace_id == workspace.id)
-                    & (WorkspaceMembership.user_id == current_user.id),
-                )
-                .where(
-                    ConversationParticipant.user_id == current_user.id,
-                    ConversationParticipant.revoked_at.is_(None),
-                    ConversationParticipant.hidden_at.is_(None),
-                    WorkspaceMembership.status == "active",
-                )
-            )
-        )
-        .scalars()
-        .all()
+    participant_stmt = select(ConversationParticipant.conversation_id).where(
+        ConversationParticipant.user_id == current_user.id,
+        ConversationParticipant.revoked_at.is_(None),
+        ConversationParticipant.hidden_at.is_(None),
     )
-    conversations = (
-        (
-            await db.execute(
-                select(Conversation)
-                .where(Conversation.id.in_(conversation_ids), Conversation.workspace_id == workspace.id)
-                .order_by(Conversation.updated_at.desc())
-            )
-        )
-        .scalars()
-        .all()
+    if workspace.type == "organization":
+        # Organization workspaces scope visibility to active membership in that workspace.
+        participant_stmt = participant_stmt.join(
+            WorkspaceMembership,
+            (WorkspaceMembership.workspace_id == workspace.id) & (WorkspaceMembership.user_id == current_user.id),
+        ).where(WorkspaceMembership.status == "active")
+    # Personal workspaces have no membership roster, so every conversation the user actually
+    # participates in counts - regardless of which side's personal workspace anchored it at
+    # creation time (see chat_service.get_or_create_direct_conversation).
+    conversation_ids = (await db.execute(participant_stmt)).scalars().all()
+    conversations_stmt = select(Conversation).where(Conversation.id.in_(conversation_ids)).order_by(
+        Conversation.updated_at.desc()
     )
+    if workspace.type == "organization":
+        conversations_stmt = conversations_stmt.where(Conversation.workspace_id == workspace.id)
+    conversations = (await db.execute(conversations_stmt)).scalars().all()
     summaries = [await chat_service.build_conversation_summary(db, c, current_user.id) for c in conversations]
     return ConversationListResponse(conversations=summaries)
 

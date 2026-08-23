@@ -910,3 +910,44 @@ class AgentActionExecution(Base):
     status: Mapped[str]  # "success" | "error"
     result_json: Mapped[dict] = mapped_column(JSON, default=dict)
     executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class AgentActionProposal(Base):
+    """Durable store for a specialist ActionProposal awaiting human confirmation
+    (src/api/routes.py's _run_specialist_chat drafts one, _resume_specialist_action confirms or
+    rejects it). Replaces an earlier in-memory dict keyed by thread_id, which lost every pending
+    proposal on an app restart and wasn't shared across multiple worker processes - a confirm
+    against a lost proposal used to just 404 as "expired", silently.
+
+    Also carries the routing metadata (organization_workspace_id, agent_profile,
+    requested_scope, target_agent_workspace_id) needed to re-run
+    src.agents.policies.scope_resolver.resolve_agent_scope at confirm time, not only at propose
+    time - membership/consent can be revoked in between, and ActionProposal itself (src.agents.
+    contracts) is intentionally profile-agnostic/locked and does not carry this context.
+
+    thread_id (not proposal_id) is the primary key: it's what POST /chat/resume looks the
+    proposal up by, and the existing invariant is at most one pending specialist proposal per
+    thread. Rows are never deleted, only transitioned - agent_action_proposals doubles as an
+    audit trail of every proposal drafted, confirmed, rejected or superseded by a re-auth denial."""
+
+    __tablename__ = "agent_action_proposals"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'approved', 'rejected')", name="ck_agent_action_proposal_status"),
+        Index("ix_agent_action_proposals_actor_created", "actor_user_id", "created_at"),
+    )
+
+    thread_id: Mapped[str] = mapped_column(primary_key=True)
+    proposal_id: Mapped[str] = mapped_column(index=True)
+    trace_id: Mapped[str] = mapped_column(index=True)
+    actor_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    action: Mapped[str]
+    payload: Mapped[dict] = mapped_column(JSON)
+    payload_hash: Mapped[str]
+    idempotency_key: Mapped[str]
+    status: Mapped[str] = mapped_column(default="pending")
+    organization_workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"))
+    agent_profile: Mapped[str]
+    requested_scope: Mapped[str]
+    target_agent_workspace_id: Mapped[str | None] = mapped_column(ForeignKey("agent_workspaces.id"), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

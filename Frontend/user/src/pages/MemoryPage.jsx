@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import MemoryModal from '../components/memory/MemoryModal'
+import EmptyState from '../components/fx/EmptyState'
 import { useAuth } from '../context/AuthContext'
 import { listMemories, deleteMemory, updateMemory } from '../api/memories'
 import { formatDateShort } from '../utils/datetime'
@@ -54,7 +55,7 @@ export default function MemoryPage() {
       const style = CATEGORY_STYLE[m.category] || DEFAULT_STYLE
       return <div className="memory-card" key={m.id}><div className="memory-card-top"><div className="memory-icon" style={{background:`${style.color}12`,color:style.color}}><i className={`bi ${style.icon}`}/></div><span>{m.category} · {m.memory_type}</span>{m.status==='pending_review'&&<span className="badge text-bg-warning">Review</span>}<div className="dropdown ms-auto"><button className="icon-btn" data-bs-toggle="dropdown"><i className="bi bi-three-dots"/></button><ul className="dropdown-menu dropdown-menu-end"><li><button className="dropdown-item" onClick={()=>openEdit(m)}><i className="bi bi-pencil me-2"/>Edit</button></li><li><button className="dropdown-item text-danger" onClick={()=>remove(m)}><i className="bi bi-trash me-2"/>Delete</button></li></ul></div></div><h3>{m.title}</h3><p>{m.detail}</p>{m.status==='pending_review'&&<div className="d-flex gap-2 mb-2"><button className="btn btn-sm btn-primary" onClick={()=>approve(m)}>Keep</button><button className="btn btn-sm btn-light" onClick={()=>remove(m)}>Dismiss</button></div>}<div className="memory-footer"><span><i className="bi bi-clock"/> {m.source_type} · {Math.round(m.confidence*100)}% · {formatDateShort(m.updated_at||m.created_at)}</span><i className="bi bi-stars"/></div></div>
     })}
-      {!shown.length && <p className="text-muted small mb-0">No memories yet. Add one, or explicitly ask Orbit to remember a durable work detail.</p>}
+      {!shown.length && <EmptyState variant="pulse" icon="bi-stars" title="No memories yet" description="Add one, or explicitly ask Orbit to remember a durable work detail." />}
     </div>}
     <div className="memory-info"><i className="bi bi-shield-check"/><div><strong>Your memory is private</strong><p>You control what Orbit remembers. Edit or delete anything at any time.</p></div></div>
     <MemoryModal open={modalOpen} onClose={()=>setModalOpen(false)} onSaved={onSaved} memory={editing}/>

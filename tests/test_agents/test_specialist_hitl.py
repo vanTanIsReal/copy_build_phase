@@ -10,7 +10,15 @@ import pytest
 from sqlalchemy import select
 
 import src.db.session as db_session
-from src.db.models import AgentWorkspace, AgentWorkspaceMembership, Reminder, User, Workspace, WorkspaceMembership
+from src.db.models import (
+    AgentActionProposal,
+    AgentWorkspace,
+    AgentWorkspaceMembership,
+    Reminder,
+    User,
+    Workspace,
+    WorkspaceMembership,
+)
 
 _ORG_ID = "hitl-test-org"
 _DELIVERY_WS_ID = "hitl-test-delivery"
@@ -217,3 +225,160 @@ async def test_executive_profile_rejects_propose_reminder_cleanly(client, auth_h
     )
     assert resp.status_code == 200
     assert resp.json()["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_pending_proposal_is_persisted_to_the_database(client, auth_headers, monkeypatch):
+    """The 3 hardening fixes below all depend on a pending proposal being real, queryable DB
+    state (src.db.models.AgentActionProposal) instead of the old in-memory dict - this proves the
+    write actually happens and carries the routing metadata resume-time re-auth needs."""
+    _enable_flags(monkeypatch)
+    await _seed_delivery_lead()
+
+    propose_resp = await client.post(
+        "/api/v1/chat",
+        json={
+            "message": "Nhắc tôi",
+            "requested_scope": "workspace",
+            "target_agent_workspace_id": _DELIVERY_WS_ID,
+            "specialist_action": {"kind": "propose_reminder", "title": "Durable", "due_at": "2026-09-01T09:00:00+07:00"},
+        },
+        headers=auth_headers,
+    )
+    thread_id = propose_resp.json()["thread_id"]
+
+    async with db_session.async_session_maker() as db:
+        row = await db.get(AgentActionProposal, thread_id)
+    assert row is not None
+    assert row.status == "pending"
+    assert row.organization_workspace_id == _ORG_ID
+    assert row.agent_profile == "product_delivery"
+    assert row.requested_scope == "workspace"
+    assert row.target_agent_workspace_id == _DELIVERY_WS_ID
+
+
+@pytest.mark.asyncio
+async def test_revoked_membership_between_propose_and_confirm_is_rejected(client, auth_headers, monkeypatch):
+    """Re-authorization at resume (not just at propose time): alice's AgentWorkspace membership is
+    revoked *after* the proposal was drafted but *before* she confirms it - the confirm must be
+    denied and must not create the reminder, proving _resume_specialist_action re-resolves scope
+    instead of trusting the snapshot from when the proposal was drafted."""
+    _enable_flags(monkeypatch)
+    await _seed_delivery_lead()
+
+    propose_resp = await client.post(
+        "/api/v1/chat",
+        json={
+            "message": "Nhắc tôi",
+            "requested_scope": "workspace",
+            "target_agent_workspace_id": _DELIVERY_WS_ID,
+            "specialist_action": {"kind": "propose_reminder", "title": "Revoke me", "due_at": "2026-09-01T09:00:00+07:00"},
+        },
+        headers=auth_headers,
+    )
+    thread_id = propose_resp.json()["thread_id"]
+
+    async with db_session.async_session_maker() as db:
+        membership = (
+            await db.execute(
+                select(AgentWorkspaceMembership).where(AgentWorkspaceMembership.agent_workspace_id == _DELIVERY_WS_ID)
+            )
+        ).scalar_one()
+        membership.status = "revoked"
+        await db.commit()
+
+    resume_resp = await client.post("/api/v1/chat/resume", json={"thread_id": thread_id, "approved": True}, headers=auth_headers)
+    assert resume_resp.status_code == 200
+    assert resume_resp.json()["status"] == "error"
+
+    async with db_session.async_session_maker() as db:
+        assert (await db.execute(select(Reminder))).scalars().all() == []
+        row = await db.get(AgentActionProposal, thread_id)
+    assert row.status == "rejected"  # closed, not left "pending" for a retry to slip through
+
+    # A retry against the same (now-closed) thread_id must not resurrect it either.
+    retry_resp = await client.post("/api/v1/chat/resume", json={"thread_id": thread_id, "approved": True}, headers=auth_headers)
+    assert retry_resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_propose_meeting_rejects_attendee_outside_the_organization(client, auth_headers, other_auth_headers, monkeypatch):
+    """attendee_ids must be restricted to active members of the SAME organization - bob is never
+    added to _ORG_ID, so inviting him must fail the proposal outright (not silently drop him, and
+    not create a calendar event with an unscoped invitee)."""
+    from src.services import calendar_service
+
+    _enable_flags(monkeypatch)
+    await _seed_delivery_lead()
+    # other_auth_headers registers bob's account without adding him to _ORG_ID - that's the point.
+    _ = other_auth_headers
+    async with db_session.async_session_maker() as db:
+        bob_id = (await db.execute(select(User.id).where(User.email == "bob@example.com"))).scalar_one()
+
+    fake_service = MagicMock()
+    fake_service.events.return_value.insert.return_value.execute.return_value = {"id": "evt-should-not-happen"}
+    monkeypatch.setattr(calendar_service, "_service", AsyncMock(return_value=fake_service))
+
+    propose_resp = await client.post(
+        "/api/v1/chat",
+        json={
+            "message": "Đặt lịch họp",
+            "requested_scope": "workspace",
+            "target_agent_workspace_id": _DELIVERY_WS_ID,
+            "specialist_action": {
+                "kind": "propose_meeting",
+                "title": "Should be blocked",
+                "starts_at": "2026-09-01T10:00:00+07:00",
+                "attendee_ids": [bob_id],
+            },
+        },
+        headers=auth_headers,
+    )
+    assert propose_resp.status_code == 200
+    body = propose_resp.json()
+    assert body["status"] == "error"
+    fake_service.events.return_value.insert.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_propose_meeting_allows_attendee_inside_the_organization(client, auth_headers, other_auth_headers, monkeypatch):
+    """Positive case for the same scoping rule - once bob is a real active member of _ORG_ID
+    (cross-department invites are legitimate, see validate_attendee_ids's own docstring), inviting
+    him must succeed end-to-end."""
+    from src.services import calendar_service
+
+    _enable_flags(monkeypatch)
+    await _seed_delivery_lead()
+    _ = other_auth_headers
+    async with db_session.async_session_maker() as db:
+        bob_id = (await db.execute(select(User.id).where(User.email == "bob@example.com"))).scalar_one()
+        db.add(WorkspaceMembership(workspace_id=_ORG_ID, user_id=bob_id, role="member", status="active"))
+        await db.commit()
+
+    fake_service = MagicMock()
+    fake_service.events.return_value.insert.return_value.execute.return_value = {"id": "evt-attendee-ok"}
+    monkeypatch.setattr(calendar_service, "_service", AsyncMock(return_value=fake_service))
+
+    propose_resp = await client.post(
+        "/api/v1/chat",
+        json={
+            "message": "Đặt lịch họp",
+            "requested_scope": "workspace",
+            "target_agent_workspace_id": _DELIVERY_WS_ID,
+            "specialist_action": {
+                "kind": "propose_meeting",
+                "title": "Cross-team sync",
+                "starts_at": "2026-09-01T10:00:00+07:00",
+                "attendee_ids": [bob_id],
+            },
+        },
+        headers=auth_headers,
+    )
+    assert propose_resp.status_code == 200
+    thread_id = propose_resp.json()["thread_id"]
+    assert propose_resp.json()["status"] == "interrupted"
+
+    resume_resp = await client.post("/api/v1/chat/resume", json={"thread_id": thread_id, "approved": True}, headers=auth_headers)
+    assert resume_resp.status_code == 200
+    assert resume_resp.json()["status"] == "completed"
+    fake_service.events.return_value.insert.assert_called_once()

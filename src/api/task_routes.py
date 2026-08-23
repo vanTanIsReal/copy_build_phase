@@ -121,7 +121,14 @@ async def create_task(
     if request.conversation_id is not None:
         await require_conversation_access(db, current_user, request.conversation_id, "viewer")
         conversation = await db.get(Conversation, request.conversation_id)
-        if conversation is None or conversation.workspace_id != workspace.id:
+        if conversation is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+        # Same reasoning as src/api/routes.py's /chat handler: a personal-workspace direct/group
+        # conversation is anchored to whichever participant's personal workspace created it first
+        # (see chat_service.get_or_create_direct_conversation) - the OTHER participant's own
+        # resolved `workspace` here is legitimately a different personal workspace. Only reject
+        # the mismatch when it would actually matter, i.e. an organization workspace.
+        if conversation.workspace_id != workspace.id and workspace.type == "organization":
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="conversation_id does not belong to the selected workspace",

@@ -34,7 +34,7 @@ from src.agents.contracts import (
     action_payload_hash,
 )
 from src.agents.policies.resource_guard import AgentResourceDeniedError
-from src.agents.policies.scope_resolver import resolve_agent_scope
+from src.agents.policies.scope_resolver import InvalidAttendeeError, resolve_agent_scope, validate_attendee_ids
 from src.agents.tools.registry import assert_tool_allowed
 from src.db.models import AgentWorkspace
 from src.services import calendar_service, workspace_brief_service
@@ -308,6 +308,14 @@ async def propose_executive_meeting(
     """Preview-only: draft an ActionProposal for an executive meeting. Never creates a calendar
     event - a human must confirm via src.agents.hitl_executor before this has any real effect."""
     await _reverify(db, context)
+    try:
+        await validate_attendee_ids(
+            db, organization_workspace_id=context.actor.organization_workspace_id, attendee_ids=attendee_ids
+        )
+    except InvalidAttendeeError as exc:
+        return ToolResult(
+            status=ToolResultStatus.ERROR, error_code="INVALID_ATTENDEE", error_message=str(exc)
+        )
 
     now = datetime.now(UTC)
     draft_payload = {"title": title, "starts_at": starts_at.isoformat(), "attendee_ids": list(attendee_ids)}
