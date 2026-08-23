@@ -258,7 +258,7 @@ async def test_heartbeat_compaction_is_idempotent_and_rejects_injected_durable_n
     async with db_session.async_session_maker() as db:
         episodes = (await db.execute(select(MemoryEpisode).where(MemoryEpisode.thread_id == thread.thread_id))).scalars().all()
         notes = (await db.execute(select(Memory).where(Memory.owner_id == owner_id))).scalars().all()
-        current = await db.get(AssistantThread, thread.thread_id)
+        current = await db.get(AssistantThread, (thread.thread_id, owner_id))
     assert len(episodes) == 1
     assert episodes[0].source_ids == [f"message-{index}" for index in range(8)]
     assert episodes[0].started_at is not None and episodes[0].ended_at is not None

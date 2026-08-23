@@ -46,7 +46,15 @@ async def list_memories(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ) -> list[MemoryOut]:
     workspace = await resolve_workspace_for_user(db, current_user.id, workspace_id)
-    stmt = select(Memory).where(Memory.owner_id == current_user.id, Memory.workspace_id == workspace.id)
+    # Same reasoning as task_routes.py's list_tasks: an AI-extracted memory from a shared
+    # personal-workspace conversation gets workspace_id = conversation.workspace_id, anchored to
+    # whichever participant's personal workspace created the conversation first - a different
+    # personal workspace than this owner's own. Requiring an exact match here silently hid every
+    # such memory from its own owner. Only enforce the match for an organization workspace.
+    filters = [Memory.owner_id == current_user.id]
+    if workspace.type == "organization":
+        filters.append(Memory.workspace_id == workspace.id)
+    stmt = select(Memory).where(*filters)
     if not include_expired:
         now = datetime.now(UTC)
         stmt = stmt.where(or_(Memory.expires_at.is_(None), Memory.expires_at > now))

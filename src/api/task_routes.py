@@ -94,10 +94,21 @@ async def list_tasks(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ) -> list[TaskOut]:
     workspace = await resolve_workspace_for_user(db, current_user.id, workspace_id)
+    # Same reasoning as create_task below and src/api/routes.py's /chat handler: a task the
+    # proactive detector suggests to a participant of a personal-workspace direct/group
+    # conversation gets workspace_id = conversation.workspace_id, anchored to whichever
+    # participant's personal workspace created the conversation first - which is legitimately a
+    # *different* personal workspace than this owner's own. Requiring an exact match here silently
+    # hid every such task from its own owner's Task list. Only enforce the match for an
+    # organization workspace, where it's a real multi-tenant boundary; a personal workspace's
+    # boundary is ownership itself (Task.owner_id), not which conversation happened to spawn it.
+    filters = [Task.owner_id == current_user.id]
+    if workspace.type == "organization":
+        filters.append(Task.workspace_id == workspace.id)
     tasks = (
         await db.execute(
             select(Task)
-            .where(Task.owner_id == current_user.id, Task.workspace_id == workspace.id)
+            .where(*filters)
             .order_by(
                 Task.due_at.is_(None),
                 Task.due_at.asc(),
@@ -157,19 +168,23 @@ async def create_task(
                 detail="Candidate provenance includes a message that AI is not allowed to process",
             )
 
+        # Same workspace_id caveat as list_tasks above - this idempotency lookup must find the
+        # candidate by ownership, not by matching the caller's own resolved workspace, or a
+        # personal-workspace participant retrying this call would never see their own earlier
+        # candidate and would create a duplicate every time instead of returning the existing one.
+        dedup_filters = [
+            Task.owner_id == current_user.id,
+            Task.conversation_id == request.conversation_id,
+            Task.source == "ai_extracted",
+            Task.status == "suggested",
+            Task.title == request.title,
+            Task.consent_scope_hash == request.consent_scope_hash,
+            Task.source_message_ids == request.source_message_ids,
+        ]
+        if workspace.type == "organization":
+            dedup_filters.append(Task.workspace_id == workspace.id)
         existing = (
-            await db.execute(
-                select(Task).where(
-                    Task.owner_id == current_user.id,
-                    Task.workspace_id == workspace.id,
-                    Task.conversation_id == request.conversation_id,
-                    Task.source == "ai_extracted",
-                    Task.status == "suggested",
-                    Task.title == request.title,
-                    Task.consent_scope_hash == request.consent_scope_hash,
-                    Task.source_message_ids == request.source_message_ids,
-                )
-            )
+            await db.execute(select(Task).where(*dedup_filters))
         ).scalar_one_or_none()
         if existing is not None:
             return _to_out(existing)

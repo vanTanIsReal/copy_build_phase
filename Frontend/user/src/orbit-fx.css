@@ -128,8 +128,17 @@
 .orbit-fx .suggestion-meta { color: var(--ofx-muted); }
 
 /* ---------- Global shell (pillar 1: unified dark theme, whole app) ---------- */
-.app-shell.orbit-fx { --sidebar: 258px; background: var(--ofx-bg); }
+.app-shell.orbit-fx { --sidebar: 258px; background: var(--ofx-bg); color: var(--ofx-ink); }
 @media (max-width: 992px) { .app-shell.orbit-fx { --sidebar: 231px; } }
+
+/* Contrast safety net: the page-by-page rules below only recolor text wrapped in a specific
+   container class (e.g. `.card-toolbar h3`). Anything else - a bare heading with no wrapper
+   (ConnectCalendarCard's <h3>), or Bootstrap's `.text-muted` utility, which ships its own
+   `color: var(--bs-secondary-color) !important` and so ignores the inherited color above no
+   matter what - keeps Bootstrap's light-theme text color, unreadable on the new dark background.
+   Catch both globally instead of chasing every call site. */
+.orbit-fx h1, .orbit-fx h2, .orbit-fx h3, .orbit-fx h4, .orbit-fx h5, .orbit-fx h6 { color: var(--ofx-ink); }
+.orbit-fx .text-muted, .orbit-fx .text-secondary { color: var(--ofx-muted) !important; }
 
 /* Floating sidebar (pillar 4): structural sizing only - the glass surface itself (rounded
    corners, blur, border, shadow) is authored directly as Tailwind utility classes on the

@@ -234,7 +234,7 @@ def _relevance(query: str, text: str, vector: list | None, query_vector: list | 
     query_words, text_words = _words(query), _words(text)
     lexical = len(query_words & text_words) / max(1, len(query_words))
     semantic = max(0.0, _cosine(vector, query_vector))
-    age_days = max(0.0, (datetime.now(UTC) - created_at).total_seconds() / 86_400)
+    age_days = max(0.0, (datetime.now(UTC) - _utc(created_at)).total_seconds() / 86_400)
     recency = 1 / (1 + age_days / 30)
     return 0.45 * semantic + 0.30 * lexical + 0.15 * float(importance) + 0.10 * recency
 
