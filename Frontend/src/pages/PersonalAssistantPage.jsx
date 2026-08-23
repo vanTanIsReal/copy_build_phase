@@ -2,6 +2,7 @@ import { useState } from 'react'
 import AssistantSessionList from '../components/ai/AssistantSessionList'
 import PersonalAIChat from '../components/ai/PersonalAIChat'
 import AssistantContextPanel from '../components/ai/AssistantContextPanel'
+import ExecutiveBriefCard from '../../user/src/components/agents/executive/ExecutiveBriefCard'
 
 export default function PersonalAssistantPage(){
   const [contextOpen,setContextOpen]=useState(false)
@@ -19,12 +20,15 @@ export default function PersonalAssistantPage(){
       onNewThread={()=>setActiveThreadId(null)}
       refreshSignal={threadsVersion}
     />
-    <PersonalAIChat
-      onContext={()=>setContextOpen(true)}
-      threadId={activeThreadId}
-      onThreadIdChange={setActiveThreadId}
-      onActivity={()=>setThreadsVersion(v=>v+1)}
-    />
+    <main className="personal-assistant-center">
+      <ExecutiveBriefCard />
+      <PersonalAIChat
+        onContext={()=>setContextOpen(true)}
+        threadId={activeThreadId}
+        onThreadIdChange={setActiveThreadId}
+        onActivity={()=>setThreadsVersion(v=>v+1)}
+      />
+    </main>
     <AssistantContextPanel open={contextOpen} onClose={()=>setContextOpen(false)}/>
   </div>
 }
