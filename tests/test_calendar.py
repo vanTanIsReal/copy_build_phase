@@ -401,3 +401,73 @@ async def test_poll_calendar_changes_one_user_failure_does_not_block_another(cli
         await calendar_service.poll_calendar_changes()  # must not raise
 
     assert polled == [good_id]
+
+
+# ---------------------------------------------------------------------------
+# notify_event_deleted - cascades to the Task/Reminder behind a Calendar event, if any
+# (task_routes.py::_add_to_calendar_and_reminder is the other direction of this same link)
+# ---------------------------------------------------------------------------
+
+
+async def _accept_linked_task(client, auth_headers, monkeypatch, *, event_id: str, title: str) -> dict:
+    """Seeds a Task Accepted with a due date, so it gets a real (faked) Calendar event + Reminder
+    behind it, linked via calendar_event_id/reminder_id - the state _delete_linked_task acts on."""
+    fake_service = MagicMock()
+    fake_service.events.return_value.insert.return_value.execute.return_value = {
+        "id": event_id, "htmlLink": f"https://calendar.google.com/event?eid={event_id}",
+    }
+    fake_service.events.return_value.list.return_value.execute.return_value = {"items": []}
+
+    async def _fake_service(user_id):
+        return fake_service
+
+    monkeypatch.setattr(calendar_service, "_service", _fake_service)
+
+    created = (
+        await client.post(
+            "/api/v1/tasks", json={"title": title, "due_at": "2026-08-10T15:00:00", "source": "proactive"},
+            headers=auth_headers,
+        )
+    ).json()
+    await client.post(f"/api/v1/tasks/{created['id']}/accept", json={}, headers=auth_headers)
+    return created
+
+
+@pytest.mark.asyncio
+async def test_delete_event_cascades_to_linked_task(client, auth_headers, monkeypatch):
+    """The other direction of test_tasks.py's cascade test: deleting the Calendar event through
+    DELETE /calendar/events must also remove the Task that was Accepted into it."""
+    task = await _accept_linked_task(client, auth_headers, monkeypatch, event_id="evt-linked", title="Linked task")
+
+    resp = await client.delete("/api/v1/calendar/events/evt-linked", headers=auth_headers)
+    assert resp.status_code == 204
+
+    tasks = (await client.get("/api/v1/tasks", headers=auth_headers)).json()
+    assert task["id"] not in [t["id"] for t in tasks]
+
+
+@pytest.mark.asyncio
+async def test_poll_detected_deletion_cascades_to_linked_task(client, auth_headers, monkeypatch):
+    """Same cascade, but for an event deleted directly in Google Calendar itself (not through this
+    app) - picked up by the next poll as a cancelled item, same as
+    test_poll_one_user_incremental_handles_deletion above."""
+    task = await _accept_linked_task(client, auth_headers, monkeypatch, event_id="evt-external", title="External delete")
+    user_id = await _user_id(client, auth_headers)
+    await _seed_credential(user_id)
+    await google_credentials.set_sync_token(user_id, "old-token")
+
+    fake_service = MagicMock()
+    fake_service.events.return_value.list.return_value.execute.return_value = {
+        "items": [{"id": "evt-external", "status": "cancelled"}],
+        "nextSyncToken": "new-token",
+    }
+
+    async def _fake_service(uid):
+        return fake_service
+
+    monkeypatch.setattr(calendar_service, "_service", _fake_service)
+
+    await calendar_service._poll_one_user(user_id)
+
+    tasks = (await client.get("/api/v1/tasks", headers=auth_headers)).json()
+    assert task["id"] not in [t["id"] for t in tasks]

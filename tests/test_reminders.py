@@ -1,4 +1,8 @@
+from datetime import datetime
+
 import pytest
+
+from src.services import reminder_service
 
 
 @pytest.mark.asyncio
@@ -65,3 +69,64 @@ async def test_reminder_not_visible_to_other_user(client, auth_headers, other_au
 
     resp = await client.delete(f"/api/v1/reminders/{created['id']}", headers=other_auth_headers)
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------- realtime sync (ReminderPage.jsx)
+
+
+@pytest.mark.asyncio
+async def test_create_reminder_pushes_reminder_created(client, auth_headers, monkeypatch):
+    """Regression test: every open tab's ReminderPage.jsx must see a new reminder without a
+    manual reload, same as CalendarPage.jsx already gets for calendar_event_created."""
+    pushed = []
+
+    async def fake_broadcast(user_ids, payload):
+        pushed.append((user_ids, payload))
+
+    monkeypatch.setattr(reminder_service.manager, "broadcast_to_users", fake_broadcast)
+    owner_id = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()["id"]
+
+    resp = await client.post(
+        "/api/v1/reminders", json={"title": "Send report", "due_at_iso": "2026-08-10T15:00:00"}, headers=auth_headers
+    )
+    created = resp.json()
+
+    assert len(pushed) == 1
+    ids, payload = pushed[0]
+    assert ids == [owner_id]
+    assert payload["type"] == "reminder_created"
+    # Same instant, not necessarily the same string - the REST response (Pydantic JSON mode)
+    # renders UTC as "...Z" while the service's own dict uses "...+00:00".
+    reminder = payload["reminder"]
+    assert reminder["id"] == created["id"]
+    assert reminder["title"] == created["title"]
+    assert reminder["status"] == created["status"] == "scheduled"
+    assert datetime.fromisoformat(reminder["due_at"]) == datetime.fromisoformat(created["due_at"])
+    assert datetime.fromisoformat(reminder["fire_at"]) == datetime.fromisoformat(created["fire_at"])
+
+
+@pytest.mark.asyncio
+async def test_cancel_reminder_pushes_reminder_updated(client, auth_headers, monkeypatch):
+    owner_id = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()["id"]
+    created = (
+        await client.post(
+            "/api/v1/reminders", json={"title": "Throwaway", "due_at_iso": "2026-08-10T15:00:00"}, headers=auth_headers
+        )
+    ).json()
+
+    pushed = []
+
+    async def fake_broadcast(user_ids, payload):
+        pushed.append((user_ids, payload))
+
+    monkeypatch.setattr(reminder_service.manager, "broadcast_to_users", fake_broadcast)
+
+    resp = await client.delete(f"/api/v1/reminders/{created['id']}", headers=auth_headers)
+    assert resp.status_code == 204
+
+    assert len(pushed) == 1
+    ids, payload = pushed[0]
+    assert ids == [owner_id]
+    assert payload["type"] == "reminder_updated"
+    assert payload["reminder"]["id"] == created["id"]
+    assert payload["reminder"]["status"] == "cancelled"

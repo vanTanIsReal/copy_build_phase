@@ -91,8 +91,18 @@ async def test_fire_reminder_marks_status_and_pushes_to_owner(client, auth_heade
 
     reminders = await reminder_service.list_reminders(owner_id=owner_id)
     assert reminders[0].status == "fired"
+    # First push is schedule_reminder's own "reminder_created" (realtime sync for other open
+    # tabs/pages - see ReminderPage.jsx), second is _fire_reminder_job's "reminder_fired".
     assert pushed == [
-        ([owner_id], {"type": "reminder_fired", "reminder": {"id": reminder.id, "title": "Test", "message": ""}})
+        ([owner_id], {
+            "type": "reminder_created",
+            "reminder": {
+                "id": reminder.id, "title": "Test", "message": "",
+                "due_at": reminder.due_at.isoformat(), "fire_at": reminder.fire_at.isoformat(),
+                "status": "scheduled", "source": "manual", "created_at": reminder.created_at.isoformat(),
+            },
+        }),
+        ([owner_id], {"type": "reminder_fired", "reminder": {"id": reminder.id, "title": "Test", "message": ""}}),
     ]
 
 

@@ -13,6 +13,19 @@ from src.websocket.manager import manager
 logger = logging.getLogger(__name__)
 
 
+def _reminder_payload(reminder: Reminder) -> dict:
+    return {
+        "id": reminder.id,
+        "title": reminder.title,
+        "message": reminder.message,
+        "due_at": reminder.due_at.isoformat(),
+        "fire_at": reminder.fire_at.isoformat(),
+        "status": reminder.status,
+        "source": reminder.source,
+        "created_at": reminder.created_at.isoformat(),
+    }
+
+
 async def schedule_reminder(
     *,
     owner_id: str | None,
@@ -38,6 +51,14 @@ async def schedule_reminder(
         await db.refresh(reminder)
 
     scheduler.add_job(_fire_reminder_job, "date", run_date=fire_at, args=[reminder.id], id=reminder.id)
+    # Realtime: pushed regardless of who/what created it (this UI's "New reminder", the agent's
+    # create_reminder tool, or an Accepted proactive task auto-creating one) - same reasoning as
+    # calendar_service.broadcast_change, so ReminderPage.jsx reflects it live in every open tab,
+    # not just the one that made the request.
+    if owner_id:
+        await manager.broadcast_to_users(
+            [owner_id], {"type": "reminder_created", "reminder": _reminder_payload(reminder)}
+        )
     return reminder
 
 
@@ -87,6 +108,11 @@ async def cancel_reminder(reminder_id: str, owner_id: str) -> bool:
             _safe_remove_job(reminder_id)
         reminder.status = "cancelled"
         await db.commit()
+        await db.refresh(reminder)
+    # "reminder_updated" (not a distinct event type) - ReminderPage.jsx keeps a cancelled row
+    # visible with its badge changed, the same upsert-in-place treatment task_updated gets for a
+    # dismissed/completed Task, rather than removing it from the list.
+    await manager.broadcast_to_users([owner_id], {"type": "reminder_updated", "reminder": _reminder_payload(reminder)})
     return True
 
 
@@ -99,6 +125,9 @@ async def admin_delete_reminder(reminder_id: str) -> bool:
             return False
         if reminder.status == "scheduled":
             _safe_remove_job(reminder_id)
+        owner_id = reminder.owner_id
         await db.delete(reminder)
         await db.commit()
+    if owner_id:
+        await manager.broadcast_to_users([owner_id], {"type": "reminder_deleted", "reminder_id": reminder_id})
     return True

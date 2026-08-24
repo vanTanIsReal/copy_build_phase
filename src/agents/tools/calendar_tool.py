@@ -179,5 +179,7 @@ async def delete_calendar_event(
         await calendar_service.delete_event(user_id, event_id)
     except CalendarNotConnected:
         return _NOT_CONNECTED_MSG
-    await calendar_service.broadcast_change(user_id, "calendar_event_deleted", {"event_id": event_id})
+    # notify_event_deleted (not a plain broadcast_change): also cascades to delete the Task/
+    # Reminder behind this event, if the Accept flow in Tasks created it.
+    await calendar_service.notify_event_deleted(user_id, event_id)
     return "Event deleted."

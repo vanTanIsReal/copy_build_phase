@@ -4,10 +4,13 @@ from zoneinfo import ZoneInfo
 
 from googleapiclient.discovery import Resource, build
 from googleapiclient.errors import HttpError
+from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
 
 from src.config import get_settings
-from src.services import google_credentials
+from src.db import session as db_session
+from src.db.models import Task
+from src.services import google_credentials, reminder_service
 from src.websocket.manager import manager
 
 logger = logging.getLogger(__name__)
@@ -226,6 +229,41 @@ async def broadcast_change(user_id: str, event_type: str, payload: dict) -> None
     await manager.broadcast_to_users([user_id], {"type": event_type, **payload})
 
 
+async def _delete_linked_task(user_id: str, event_id: str) -> None:
+    """The other half of task_routes.py::delete_task's cascade: a Calendar event that was
+    auto-created behind an Accepted proactive task (task_routes.py::_add_to_calendar_and_reminder,
+    Task.calendar_event_id) must not leave that Task and its Reminder behind pointing at a
+    Calendar event that no longer exists. Best-effort, and a no-op when the deleted event was never
+    linked to a Task in the first place (a manual "New event", most events)."""
+    async with db_session.async_session_maker() as db:
+        task = (
+            await db.execute(select(Task).where(Task.owner_id == user_id, Task.calendar_event_id == event_id))
+        ).scalar_one_or_none()
+        if task is None:
+            return
+        task_id, reminder_id = task.id, task.reminder_id
+        await db.delete(task)
+        await db.commit()
+
+    if reminder_id:
+        try:
+            await reminder_service.cancel_reminder(reminder_id, owner_id=user_id)
+        except Exception:  # noqa: BLE001 - best-effort, the Task is already deleted
+            logger.exception("Failed to cancel reminder linked to deleted task %s", task_id)
+    await manager.broadcast_to_users([user_id], {"type": "task_deleted", "task_id": task_id})
+
+
+async def notify_event_deleted(user_id: str, event_id: str) -> None:
+    """Single choke point for "this Calendar event no longer exists" - called from the DELETE
+    /calendar/events endpoint, the agent's delete_calendar_event tool, and _poll_one_user (an
+    event deleted directly in Google Calendar itself, outside this app). Tidies up the local
+    Task/Reminder behind it first (see _delete_linked_task) before pushing the usual
+    calendar_event_deleted, so every entry point behaves the same regardless of where the deletion
+    came from."""
+    await _delete_linked_task(user_id, event_id)
+    await broadcast_change(user_id, "calendar_event_deleted", {"event_id": event_id})
+
+
 def to_out_dict(event: dict) -> dict:
     """Shared shape for a Google Calendar event, used by both the REST response (CalendarEventOut)
     and the WebSocket push (REST route + agent tool both need to notify the same way)."""
@@ -293,7 +331,7 @@ async def _poll_one_user(user_id: str) -> None:
 
     for event in items:
         if event.get("status") == "cancelled":
-            await broadcast_change(user_id, "calendar_event_deleted", {"event_id": event["id"]})
+            await notify_event_deleted(user_id, event["id"])
         else:
             await broadcast_change(user_id, "calendar_event_updated", {"event": to_out_dict(event)})
 

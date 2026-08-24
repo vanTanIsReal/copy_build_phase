@@ -30,3 +30,13 @@ class CalendarConnectionStatusOut(BaseModel):
     connected: bool
     google_email: str | None = None
     connected_at: datetime | None = None
+
+
+class CalendarSlotOut(BaseModel):
+    """A free slot suggested in place of a conflicting time - calendar_service.suggest_alternative_slots'
+    output shape (naive ISO datetime strings, no UTC offset - interpreted as calendar_timezone by
+    whoever consumes them, same as an accepted alternative round-tripped back through the agent's
+    calendar_event interrupt)."""
+
+    start: str
+    end: str

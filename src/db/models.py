@@ -128,7 +128,19 @@ class Task(Base):
     source_message_id: Mapped[str | None] = mapped_column(
         ForeignKey("messages.id", ondelete="SET NULL"), default=None, index=True
     )
+    # Set once, right after task_routes.py::_add_to_calendar_and_reminder auto-creates them behind
+    # an Accepted proactive task with a due date - NULL for any task that was never Accepted (still
+    # "suggested"), a manual task, or one with no due_at. What lets deleting the Task cascade to
+    # delete these, and what lets deleting the Calendar event (this app's own Delete button, the
+    # agent's delete_calendar_event tool, or a direct edit in Google Calendar itself) find and
+    # remove this same Task - see task_routes.py::delete_task and
+    # calendar_service.notify_event_deleted.
+    calendar_event_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    reminder_id: Mapped[str | None] = mapped_column(
+        ForeignKey("reminders.id", ondelete="SET NULL"), default=None, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     owner: Mapped["User"] = relationship()
     conversation: Mapped["Conversation | None"] = relationship()
@@ -337,5 +349,6 @@ class Reminder(Base):
     status: Mapped[str] = mapped_column(default="scheduled")  # "scheduled" | "fired" | "cancelled"
     source: Mapped[str] = mapped_column(default="manual")  # "manual" | "agent" | "proactive"
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     owner: Mapped["User | None"] = relationship()

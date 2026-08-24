@@ -179,4 +179,7 @@ async def delete_event(event_id: str, current_user: User = Depends(get_current_u
         raise _not_connected() from None
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Google Calendar error: {e}") from None
-    await calendar_service.broadcast_change(current_user.id, "calendar_event_deleted", {"event_id": event_id})
+    # notify_event_deleted (not a plain broadcast_change): also cascades to delete the Task/
+    # Reminder behind this event, if this app's own Accept flow created it - see
+    # calendar_service.notify_event_deleted / task_routes.py::_add_to_calendar_and_reminder.
+    await calendar_service.notify_event_deleted(current_user.id, event_id)
