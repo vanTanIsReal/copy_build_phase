@@ -23,6 +23,8 @@ export default defineConfig({
       // LoginPage.jsx/RegisterPage.jsx, CalendarPage.jsx).
       'react-hook-form': path.resolve(rootDir, 'node_modules/react-hook-form'),
       'framer-motion': path.resolve(rootDir, 'node_modules/framer-motion'),
+      'react-router-dom': path.resolve(rootDir, 'node_modules/react-router-dom'),
+      '@react-oauth/google': path.resolve(rootDir, 'node_modules/@react-oauth/google'),
       '@fullcalendar/react': path.resolve(rootDir, 'node_modules/@fullcalendar/react'),
       '@fullcalendar/daygrid': path.resolve(rootDir, 'node_modules/@fullcalendar/daygrid'),
       '@fullcalendar/timegrid': path.resolve(rootDir, 'node_modules/@fullcalendar/timegrid'),
