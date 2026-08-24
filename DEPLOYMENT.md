@@ -4,16 +4,10 @@
 đó — không phải cho một hệ thống chạy nhiều tháng. Phần [Cố tình KHÔNG làm](#cố-tình-không-làm) giải
 thích những gì bị lược bỏ và lý do, để sau này ai đọc lại không tưởng là thiếu sót.
 
-Tài liệu này là **kế hoạch + quyết định**. Bản hướng dẫn bấm dashboard chi tiết từng bước
-(`docs/deploy.md`) từng tồn tại nhưng đã bị xoá khỏi repo (2026-08-12, không rõ lý do trong commit
-message) và **chưa được viết lại** — mục 4 "Lộ trình" bên dưới vẫn tham chiếu tới các bước của nó
-(D-1 → "Theo docs/deploy.md bước 1→13") để giữ ý định ban đầu, nhưng người thực hiện deploy cần tự
-suy ra thao tác dashboard cụ thể từ [render.yaml](render.yaml)/[Frontend/vercel.json](Frontend/vercel.json)
-và phần "Kiến trúc production" + "Phải sửa trước khi deploy" dưới đây, hoặc viết lại file đó trước.
-Ngoài ra bản hướng dẫn cũ được viết **trước** khi frontend tách thành 2 app Vite riêng
-(`Frontend/user/`, `Frontend/admin/`, 2026-08-14) nên bước Vercel của nó (1 project trỏ Root
-Directory = `Frontend`) không còn đúng nguyên trạng — cần quyết định deploy cả 2 app hay chỉ app
-user cho bản demo trước khi viết lại.
+Tài liệu này là **kế hoạch + quyết định**. Bản hướng dẫn bấm dashboard chi tiết từng bước sống ở
+[docs/deploy.md](docs/deploy.md) — đã viết lại (2026-08-17) cho đúng cấu trúc hiện tại (2 app Vite
+riêng `Frontend/user/`/`Frontend/admin/`, mỗi app 1 Vercel project). Quyết định: deploy **cả 2 app**,
+nhưng docs/deploy.md ghi rõ chỗ có thể bỏ qua app admin nếu demo chỉ cần phía user.
 
 ---
 
@@ -50,7 +44,7 @@ HTTPS và WSS.
 ```
    Trình duyệt
         │  HTTPS + WSS
-        ├──────────────────────────► Vercel  (SPA tĩnh, Frontend/vercel.json rewrite)
+        ├──────────────────────────► Vercel  (2 SPA tĩnh: app user + app admin, mỗi app vercel.json riêng)
         │
         └──────────────────────────► Render  (1 instance Docker, KHÔNG scale)
                                         │        ├─ FastAPI + WebSocket in-memory
@@ -159,16 +153,10 @@ tạo lại DB (mất dữ liệu demo), hoặc chạy `ALTER TABLE` tay trên S
 
 ### D-1 — Dựng hạ tầng
 
-Theo bước 1→13 của `docs/deploy.md` (đã xoá khỏi repo, xem cảnh báo ở đầu tài liệu này — cần viết
-lại hoặc tự suy ra từ [render.yaml](render.yaml)/Google Cloud Console/Vercel dashboard trước khi làm
-mục này), với **3 điểm khác** so với bản đó:
-
-1. Bước 5 — trong Render Blueprint đổi **`plan: free` → `plan: starter`** (hoặc apply free rồi
-   Settings → Instance Type → Starter). [render.yaml](render.yaml) hiện vẫn ghi `free`, sửa dòng đó
-   trước khi apply nếu muốn Blueprint tự đúng.
-2. Đặt `CALENDAR_POLL_INTERVAL_SECONDS=60` thay vì 20 (giá trị dev). 20s × nhiều user đã kết nối là
-   lượng gọi Calendar API vô ích trong suốt 2 tuần.
-3. Sau khi Starter đã chạy: **disable `keep-alive.yml`**.
+Theo [docs/deploy.md](docs/deploy.md) bước 1→8 (Supabase → Google Cloud Console → Render → Vercel
+user/admin → GitHub Actions → tắt keep-alive). File đó đã gộp sẵn các điểm khác biệt so với cấu hình
+mặc định trong repo (đổi `plan: free` → `starter` trong render.yaml, `CALENDAR_POLL_INTERVAL_SECONDS=60`,
+disable `keep-alive.yml` sau khi Starter chạy).
 
 Đối chiếu biến môi trường với [.env.production.example](.env.production.example) — file này ghi rõ
 những chỗ production khác dev, đặc biệt: `CORS_ORIGINS` không được có khoảng trắng (`main.py` dùng
@@ -286,5 +274,5 @@ còn nằm trong danh sách này.)
 | [.github/workflows/ci.yml](.github/workflows/ci.yml) | Lint + test, có Postgres service | Có sẵn |
 | [.github/workflows/deploy.yml](.github/workflows/deploy.yml) | CD qua Deploy Hook, gate sau CI | Có sẵn |
 | [.github/workflows/keep-alive.yml](.github/workflows/keep-alive.yml) | Chống sleep gói free | **Disable sau khi lên Starter** |
-| [Frontend/vercel.json](Frontend/vercel.json) | SPA rewrite — viết cho 1 project duy nhất, chưa cập nhật cho 2 app `Frontend/user/`+`Frontend/admin/` | Cần rà lại trước khi dùng |
-| `docs/deploy.md` | Hướng dẫn bấm dashboard từng bước | **Đã xoá khỏi repo** (2026-08-12) — cần viết lại, xem cảnh báo đầu tài liệu này |
+| [Frontend/user/vercel.json](Frontend/user/vercel.json), [Frontend/admin/vercel.json](Frontend/admin/vercel.json) | SPA rewrite, 1 file/app | **Mới** (2026-08-17) — `Frontend/vercel.json` cũ (viết cho 1 project Root Directory = `Frontend`) đã lỗi thời: khi Root Directory trỏ vào `Frontend/user`/`Frontend/admin`, Vercel coi thư mục đó là gốc và không đọc `vercel.json` ở cấp cha — thiếu file mới thì F5 vào route con sẽ 404 |
+| [docs/deploy.md](docs/deploy.md) | Hướng dẫn bấm dashboard từng bước | **Viết lại** (2026-08-17) |

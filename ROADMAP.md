@@ -33,15 +33,16 @@ thành.
 
 ## Còn lại — theo độ ưu tiên
 
-1. **Deploy online thật** — hạng mục lớn nhất còn thiếu. Stack đã chốt: backend lên Render, Postgres
-   quản lý trên Supabase, frontend lên Vercel; CD qua `.github/workflows/deploy.yml`, gate sau khi CI
-   pass trên `main`. Code (Dockerfile, `render.yaml`, workflows) đã sẵn sàng — quyết định + rủi ro chi
-   tiết xem [DEPLOYMENT.md](DEPLOYMENT.md). Bản hướng dẫn bấm dashboard từng bước (`docs/deploy.md`)
-   đã bị xoá khỏi repo (2026-08-12) và **chưa được viết lại** — cần làm trước khi deploy thật, và giờ
-   phải tính thêm cho **2 app Vite riêng** (`Frontend/user/`, `Frontend/admin/`, tách từ 2026-08-14)
-   thay vì 1 `Frontend/vercel.json` duy nhất như bản hướng dẫn cũ giả định — chưa quyết định deploy cả
-   2 app lên Vercel hay chỉ app user cho bản demo. Đây cũng là điều kiện để nâng cấp đồng bộ Calendar
-   từ polling lên webhook `events.watch` thật của Google (cần domain public HTTPS).
+1. **Deploy online thật** — hạng mục lớn nhất còn thiếu, nhưng kế hoạch + hướng dẫn nay đã đầy đủ,
+   còn lại là thực thi. Stack đã chốt: backend lên Render, Postgres quản lý trên Supabase, 2 app
+   frontend (`Frontend/user/`, `Frontend/admin/`) lên 2 Vercel project riêng; CD qua
+   `.github/workflows/deploy.yml`, gate sau khi CI pass trên `main`. Code (Dockerfile, `render.yaml`,
+   workflows, `Frontend/user/vercel.json` + `Frontend/admin/vercel.json`) đã sẵn sàng — quyết định +
+   rủi ro chi tiết xem [DEPLOYMENT.md](DEPLOYMENT.md), hướng dẫn bấm dashboard từng bước xem
+   [docs/deploy.md](docs/deploy.md) (viết lại 2026-08-17). Việc còn lại: **thực thi thật** theo D-2 →
+   D-1 → D-day trong DEPLOYMENT.md — chưa ai chạy qua checklist đó trên hạ tầng thật. Deploy xong (kể
+   cả chỉ app user) cũng là điều kiện để nâng cấp đồng bộ Calendar từ polling lên webhook
+   `events.watch` thật của Google (cần domain public HTTPS).
 2. **Batch LLM call — gộp thật Summarize+Extract tasks thành 1 lệnh** (ưu tiên thấp) — fast-path
    hiện tại (xem bảng trên) đã giảm mỗi Quick Action từ 2 lệnh LLM xuống 1, nhưng bấm Summarize rồi
    Extract tasks vẫn là 2 request/2 lệnh riêng (AIPanel chưa có UI "làm cả 2 cùng lúc"). Gộp thật

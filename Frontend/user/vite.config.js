@@ -19,6 +19,15 @@ export default defineConfig({
       // matter how correctly it's listed in this app's package.json. Alias forces it explicitly.
       'react-markdown': path.resolve(rootDir, 'node_modules/react-markdown'),
       'remark-gfm': path.resolve(rootDir, 'node_modules/remark-gfm'),
+      // Same reason - used only from ../src (StatCard.jsx, AIPanel.jsx, PersonalAIChat.jsx,
+      // LoginPage.jsx/RegisterPage.jsx, CalendarPage.jsx).
+      'react-hook-form': path.resolve(rootDir, 'node_modules/react-hook-form'),
+      'framer-motion': path.resolve(rootDir, 'node_modules/framer-motion'),
+      '@fullcalendar/react': path.resolve(rootDir, 'node_modules/@fullcalendar/react'),
+      '@fullcalendar/daygrid': path.resolve(rootDir, 'node_modules/@fullcalendar/daygrid'),
+      '@fullcalendar/timegrid': path.resolve(rootDir, 'node_modules/@fullcalendar/timegrid'),
+      '@fullcalendar/interaction': path.resolve(rootDir, 'node_modules/@fullcalendar/interaction'),
+      '@fullcalendar/moment-timezone': path.resolve(rootDir, 'node_modules/@fullcalendar/moment-timezone'),
     },
   },
   server: {

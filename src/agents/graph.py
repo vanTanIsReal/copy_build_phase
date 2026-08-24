@@ -63,7 +63,9 @@ async def init_checkpointer() -> None:
 
     scheme, _, rest = _settings.database_url.partition("://")
     conninfo = f"{scheme.split('+')[0]}://{rest}"
-    pool = AsyncConnectionPool(conninfo=conninfo, max_size=10, open=False, kwargs={"autocommit": True})
+    # max_size kept small - this pool shares a managed Postgres pooler's total-client budget
+    # (e.g. Supabase Session pooler caps ~15) with session.py's engine and scheduler.py's jobstore.
+    pool = AsyncConnectionPool(conninfo=conninfo, min_size=1, max_size=4, open=False, kwargs={"autocommit": True})
     await pool.open()
     saver = AsyncPostgresSaver(pool)
     await saver.setup()
