@@ -44,7 +44,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Fix Windows console encoding so VN diacritics in prompts print cleanly.
@@ -211,9 +211,10 @@ def iter_user_inputs(brain_dirs: list[Path], cutoff: datetime | None,
                 continue
             if only_conv and conv_dir.name != only_conv:
                 continue
-            transcript = (
-                conv_dir / ".system_generated" / "logs" / "transcript.jsonl"
-            )
+            logs_dir = conv_dir / ".system_generated" / "logs"
+            transcript = logs_dir / "overview.txt"
+            if not transcript.exists():
+                transcript = logs_dir / "transcript.jsonl"
             if not transcript.exists() or transcript.stat().st_size == 0:
                 continue
 

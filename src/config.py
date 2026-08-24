@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     # Database — PostgreSQL only, no SQLite fallback. Required: no default, so a missing/misconfigured
     # DATABASE_URL fails fast at startup instead of silently falling back to a file-based DB.
     database_url: str
+
+    @field_validator("database_url")
+    @classmethod
+    def validate_postgres_url(cls, value: str) -> str:
+        if not value.startswith(("postgresql://", "postgresql+asyncpg://")):
+            raise ValueError("DATABASE_URL must be a PostgreSQL connection URL")
+        return value
 
     # Auth
     secret_key: str = "dev-insecure-secret-change-me"
