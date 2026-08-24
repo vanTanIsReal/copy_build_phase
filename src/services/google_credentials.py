@@ -115,7 +115,10 @@ def build_authorization_url(user_id: str) -> str:
     url, _ = flow.authorization_url(
         access_type="offline",
         prompt="consent",
-        include_granted_scopes="true",
+        # Keep this Calendar-only flow isolated from scopes granted to other OAuth clients in the
+        # same Google Cloud project (notably Sign in with Google). Merging those grants can make
+        # oauthlib reject the token response with "Scope has changed" during code exchange.
+        include_granted_scopes="false",
     )
     return url
 

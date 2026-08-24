@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from google.oauth2.credentials import Credentials
@@ -161,6 +162,20 @@ async def test_oauth_url_requires_auth(client):
     assert resp.status_code in (401, 403)
 
 
+def test_oauth_url_keeps_calendar_scope_isolated():
+    """Do not merge Sign-in-with-Google grants into the Calendar-only authorization flow.
+
+    Google may return those additional scopes during token exchange, which oauthlib rejects as
+    "Scope has changed" because this Flow requested only the Calendar scope.
+    """
+    url = google_credentials.build_authorization_url("user-123")
+    params = parse_qs(urlparse(url).query)
+
+    assert params["include_granted_scopes"] == ["false"]
+    assert params["access_type"] == ["offline"]
+    assert params["prompt"] == ["consent"]
+
+
 @pytest.mark.asyncio
 async def test_callback_rejects_bad_state(client):
     resp = await client.get("/api/v1/calendar/oauth/callback", params={"code": "x", "state": "not-a-jwt"})
@@ -185,6 +200,8 @@ async def test_callback_rejects_app_access_token_as_state(client, auth_headers):
 async def test_callback_missing_params_fails(client):
     resp = await client.get("/api/v1/calendar/oauth/callback", params={"error": "access_denied"})
     assert resp.status_code == 400
+    assert "Connection failed: access_denied." in resp.text
+    assert 'message:"Connection failed: access_denied."' in resp.text
 
 
 @pytest.mark.asyncio

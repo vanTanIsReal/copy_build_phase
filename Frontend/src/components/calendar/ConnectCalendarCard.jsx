@@ -24,7 +24,7 @@ export default function ConnectCalendarCard({ onConnected }) {
         window.removeEventListener('message', onMessage)
         setBusy(false)
         if (e.data.ok) onConnected?.()
-        else setError('Could not connect Google Calendar.')
+        else setError(e.data.message || 'Could not connect Google Calendar.')
       }
       window.addEventListener('message', onMessage)
 
