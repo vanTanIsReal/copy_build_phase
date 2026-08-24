@@ -539,6 +539,11 @@ class Task(Base):
     source_sender_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), default=None, index=True)
     consent_scope_hash: Mapped[str | None] = mapped_column(default=None, index=True)
     invalidated_reason: Mapped[str | None] = mapped_column(default=None)
+    # Google Calendar event created when an AI-suggested task (proactive/ai_extracted) is
+    # accepted - see task_routes._sync_task_to_calendar. NULL for manual tasks and for any
+    # AI-suggested task that had no due_at, wasn't accepted yet, or whose owner isn't connected
+    # to Google Calendar (sync is best-effort and never blocks Accept).
+    calendar_event_id: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 

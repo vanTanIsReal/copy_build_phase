@@ -19,6 +19,7 @@ class TaskOut(BaseModel):
     source_message_ids: list[str] | None = None
     consent_scope_hash: str | None = None
     invalidated_reason: str | None = None
+    calendar_event_id: str | None = None
     created_at: datetime
     updated_at: datetime
 

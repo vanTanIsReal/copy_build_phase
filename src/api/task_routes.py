@@ -1,3 +1,5 @@
+import logging
+from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -9,14 +11,20 @@ from src.config import get_settings
 from src.db.models import Conversation, Task, User, Workspace
 from src.db.session import get_db
 from src.models.task_schemas import TaskCreateRequest, TaskOut, UpdateTaskStatusRequest
-from src.services import consent_service
+from src.services import calendar_service, consent_service
 from src.services.authorization_service import require_conversation_access
+from src.services.google_credentials import CalendarNotConnectedError
 from src.services.workspace_service import resolve_workspace_for_user
 from src.websocket.manager import manager
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _PRIORITY_RANK = {"High": 0, "Medium": 1, "Low": 2}
+# Task only carries a single due_at, not a start/end range, so an accepted AI suggestion gets a
+# fixed-length placeholder event on Google Calendar - same convention as a quick manual add. The
+# user can always resize/edit it afterwards from the Calendar page.
+_ACCEPTED_TASK_EVENT_DURATION = timedelta(minutes=30)
 
 def _to_out(task: Task, *, due_at_override=None) -> TaskOut:
     due_at = due_at_override if due_at_override is not None else task.due_at
@@ -34,6 +42,7 @@ def _to_out(task: Task, *, due_at_override=None) -> TaskOut:
         source_message_ids=task.source_message_ids,
         consent_scope_hash=task.consent_scope_hash,
         invalidated_reason=task.invalidated_reason,
+        calendar_event_id=task.calendar_event_id,
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
@@ -92,6 +101,39 @@ async def _require_current_ai_provenance(task: Task, db: AsyncSession) -> None:
             status_code=status.HTTP_409_CONFLICT,
             detail="This AI candidate is stale because its source consent changed",
         )
+
+
+async def _sync_task_to_calendar(task: Task, current_user: User) -> None:
+    """Accepting an AI-suggested task auto-creates the matching Google Calendar event - the
+    Accept click itself is the human confirmation this product's human-in-the-loop rule
+    requires before writing to Calendar (product decision: Accept = confirm-and-sync, no
+    separate dialog). Never blocks Accept though: if the task has no due_at, already has an
+    event, the user hasn't connected Google Calendar, or the API call fails, the task is still
+    accepted and the failure is only logged.
+    """
+    if task.source not in {"proactive", "ai_extracted"} or task.due_at is None or task.calendar_event_id:
+        return
+    due_at = task.due_at
+    if due_at.tzinfo is None:
+        due_at = due_at.replace(tzinfo=ZoneInfo(get_settings().calendar_timezone))
+    end_at = due_at + _ACCEPTED_TASK_EVENT_DURATION
+    try:
+        created = await calendar_service.create_event(
+            current_user.id,
+            task.title,
+            due_at.isoformat(),
+            end_at.isoformat(),
+            "Automatically synced from an accepted Orbit task suggestion.",
+        )
+    except CalendarNotConnectedError:
+        return
+    except Exception:  # noqa: BLE001 - accepting the task must never fail because Calendar did
+        logger.exception("Could not auto-sync accepted task %s to Google Calendar", task.id)
+        return
+    task.calendar_event_id = created.get("id")
+    await calendar_service.broadcast_change(
+        current_user.id, "calendar_event_created", {"event": calendar_service.to_out_dict(created)}
+    )
 
 
 @router.get("/tasks", response_model=list[TaskOut])
@@ -238,9 +280,14 @@ async def update_task_status(
             status_code=status.HTTP_409_CONFLICT,
             detail="This AI candidate is no longer valid because its source consent changed",
         )
+    # "Accept" is specifically suggested -> pending (see TaskPage.jsx/TaskInboxPage.jsx accept()) -
+    # that's the explicit human confirmation that should trigger the Calendar auto-sync below.
+    is_accept = task.status == "suggested" and request.status == "pending"
     if task.status == "suggested" and request.status in {"pending", "in_progress", "completed"}:
         await _require_current_ai_provenance(task, db)
     task.status = request.status
+    if is_accept:
+        await _sync_task_to_calendar(task, current_user)
     await db.commit()
     await db.refresh(task)
     out = _to_out(task)

@@ -4,9 +4,13 @@ from zoneinfo import ZoneInfo
 
 from googleapiclient.discovery import Resource, build
 from googleapiclient.errors import HttpError
+from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
 
 from src.config import get_settings
+from src.db import session as db_session
+from src.db.models import Task
+from src.models.task_schemas import TaskOut
 from src.services import google_credentials
 from src.websocket.manager import manager
 
@@ -219,7 +223,52 @@ async def delete_event(user_id: str, event_id: str) -> None:
 
 
 async def broadcast_change(user_id: str, event_type: str, payload: dict) -> None:
+    if event_type == "calendar_event_deleted":
+        # Single funnel for every delete path (app's own "Delete event", a group AI candidate
+        # delete confirmation, and poll_calendar_changes noticing the event was deleted directly
+        # in Google Calendar) - keeps the Task that auto-synced this event (see
+        # task_routes._sync_task_to_calendar) from staying stuck showing as still needing
+        # attention once its calendar event is gone.
+        await _release_tasks_linked_to_event(user_id, payload.get("event_id"))
     await manager.broadcast_to_users([user_id], {"type": event_type, **payload})
+
+
+async def _release_tasks_linked_to_event(user_id: str, event_id: str | None) -> None:
+    if not event_id:
+        return
+    async with db_session.async_session_maker() as db:
+        tasks = (
+            await db.execute(select(Task).where(Task.owner_id == user_id, Task.calendar_event_id == event_id))
+        ).scalars().all()
+        if not tasks:
+            return
+        for task in tasks:
+            task.calendar_event_id = None
+            if task.status not in {"completed", "dismissed", "invalidated"}:
+                task.status = "dismissed"
+        await db.commit()
+        for task in tasks:
+            await db.refresh(task)
+            due_at = task.due_at
+            if due_at is not None and due_at.tzinfo is None:
+                due_at = due_at.replace(tzinfo=ZoneInfo(get_settings().calendar_timezone))
+            out = TaskOut(
+                id=task.id,
+                workspace_id=task.workspace_id,
+                conversation_id=task.conversation_id,
+                title=task.title,
+                due_at=due_at,
+                priority=task.priority,
+                status=task.status,
+                source=task.source,
+                source_message_ids=task.source_message_ids,
+                consent_scope_hash=task.consent_scope_hash,
+                invalidated_reason=task.invalidated_reason,
+                calendar_event_id=task.calendar_event_id,
+                created_at=task.created_at,
+                updated_at=task.updated_at,
+            )
+            await manager.broadcast_to_users([user_id], {"type": "task_updated", "task": out.model_dump(mode="json")})
 
 
 def to_out_dict(event: dict) -> dict:

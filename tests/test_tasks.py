@@ -151,10 +151,12 @@ async def test_tasks_sorted_by_due_date_then_priority(client, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_accepting_proactive_task_only_accepts_task_without_hidden_side_effects(
+async def test_accepting_proactive_task_auto_syncs_calendar_but_not_reminder(
     client, auth_headers, monkeypatch
 ):
-    """A button labelled Accept task cannot silently confirm calendar/reminder writes too."""
+    """Product decision: Accept on an AI-suggested task IS the human confirmation to write the
+    matching Google Calendar event (no separate dialog) - but it still must not silently create
+    a Reminder, which has its own distinct confirmation flow."""
     fake_service = MagicMock()
     fake_service.events.return_value.insert.return_value.execute.return_value = {
         "id": "evt-1", "htmlLink": "https://calendar.google.com/event?eid=evt1",
@@ -170,9 +172,15 @@ async def test_accepting_proactive_task_only_accepts_task_without_hidden_side_ef
         f"/api/v1/tasks/{created['id']}/status", json={"status": "pending"}, headers=auth_headers
     )
     assert resp.status_code == 200
-    assert resp.json()["status"] == "pending"
+    body = resp.json()
+    assert body["status"] == "pending"
+    assert body["calendar_event_id"] == "evt-1"
 
-    fake_service.events.return_value.insert.assert_not_called()
+    fake_service.events.return_value.insert.assert_called_once()
+    call_kwargs = fake_service.events.return_value.insert.call_args.kwargs
+    assert call_kwargs["body"]["summary"] == "Product launch call"
+    assert call_kwargs["body"]["start"]["dateTime"] == "2026-08-10T15:00:00+07:00"
+    assert call_kwargs["body"]["end"]["dateTime"] == "2026-08-10T15:30:00+07:00"
 
     reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
     assert not any(r["title"] == "Product launch call" for r in reminders)
@@ -216,7 +224,9 @@ async def test_accepting_proactive_task_without_due_date_does_not_touch_calendar
 
 
 @pytest.mark.asyncio
-async def test_accepting_proactive_task_never_calls_calendar(client, auth_headers, monkeypatch):
+async def test_accepting_proactive_task_survives_calendar_sync_failure(client, auth_headers, monkeypatch):
+    """The calendar auto-sync from the test above is best-effort: a broken Google API must not
+    stop Accept from succeeding, and must not fall back to creating a Reminder instead."""
 
     def _broken_get_calendar_service():
         raise RuntimeError("Google API unreachable")
@@ -235,3 +245,36 @@ async def test_accepting_proactive_task_never_calls_calendar(client, auth_header
 
     reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
     assert not any(r["title"] == "Flaky calendar" for r in reminders)
+
+
+@pytest.mark.asyncio
+async def test_deleting_synced_calendar_event_dismisses_the_linked_task(client, auth_headers, monkeypatch):
+    """Task <-> Calendar sync is two-way: once Accept auto-created a Calendar event for a task
+    (see the accept test above), deleting that event - from the app's own Delete event button, or
+    detected from Google Calendar itself via poll_calendar_changes - must not leave the task
+    looking like it's still awaiting the user's attention."""
+    fake_service = MagicMock()
+    fake_service.events.return_value.insert.return_value.execute.return_value = {
+        "id": "evt-linked", "htmlLink": "https://calendar.google.com/event?eid=evtlinked",
+    }
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
+
+    created = await _create_proactive_task(
+        client, auth_headers, title="Họp ngày mai", due_at="2026-08-25T09:00:00"
+    )
+    accepted = (
+        await client.patch(
+            f"/api/v1/tasks/{created['id']}/status", json={"status": "pending"}, headers=auth_headers
+        )
+    ).json()
+    assert accepted["calendar_event_id"] == "evt-linked"
+
+    user_id = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()["id"]
+    # Exercises exactly what calendar_routes.delete_event and poll_calendar_changes both call once
+    # Google confirms the event is gone - no need to re-mock the Google client for this part.
+    await calendar_service.broadcast_change(user_id, "calendar_event_deleted", {"event_id": "evt-linked"})
+
+    tasks = (await client.get("/api/v1/tasks", headers=auth_headers)).json()
+    task = next(t for t in tasks if t["id"] == created["id"])
+    assert task["status"] == "dismissed"
+    assert task["calendar_event_id"] is None
