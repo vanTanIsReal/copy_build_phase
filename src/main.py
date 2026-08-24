@@ -21,7 +21,8 @@ from src.api.routes import router
 from src.api.task_routes import router as task_router
 from src.config import get_settings
 from src.db.session import init_db
-from src.services import ai_config_service, calendar_service
+from src.logging_config import install_sensitive_log_filter
+from src.services import ai_config_service, calendar_service, memory_maintenance_service
 from src.services.scheduler import scheduler
 from src.websocket.routes import router as ws_router
 
@@ -34,6 +35,10 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+# The WebSocket endpoint takes its JWT as a `?token=` query parameter (src/websocket/routes.py) -
+# without this, uvicorn's own access/error log lines print that token in plaintext on every
+# connection attempt, accepted or rejected.
+install_sensitive_log_filter()
 
 
 @asynccontextmanager
@@ -52,6 +57,15 @@ async def lifespan(app: FastAPI):
         seconds=settings.calendar_poll_interval_seconds,
         id="calendar_poll",
         replace_existing=True,
+    )
+    scheduler.add_job(
+        memory_maintenance_service.heartbeat,
+        "interval",
+        seconds=settings.memory_heartbeat_interval_seconds,
+        id="memory_heartbeat",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
     )
     yield
     scheduler.shutdown(wait=False)

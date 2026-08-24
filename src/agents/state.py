@@ -45,5 +45,6 @@ class AgentState(TypedDict, total=False):
     # back to the old behavior otherwise so a run that skips context_node (e.g. a test that calls
     # planner_node directly) still works unchanged.
     memory_context: str
+    episodic_context: str  # rendered MemoryEpisode summaries (memory_maintenance_service.py)
     prompt_messages: list
     context_metadata: dict

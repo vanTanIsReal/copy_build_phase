@@ -29,12 +29,21 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     daily_token_budget: int = Field(default=200_000, ge=0)
 
-    # Agent context budgeting (context_node.py) - the planner's prompt is built from three
-    # layers (recent turns, saved memories, retrieved conversation excerpt) sized as fractions
-    # of one overall token budget, so none of them can silently crowd out the others.
-    agent_context_window_tokens: int = Field(default=8_000, ge=512)
-    memory_short_term_fraction: float = Field(default=0.5, ge=0.0, le=1.0)  # recent chat turns
-    memory_long_term_fraction: float = Field(default=0.2, ge=0.0, le=1.0)  # saved Memory notes
+    # Agent context engineering (context_node.py). Fractions are budgets for optional/retrieved
+    # layers, not a claim that every model or turn must consume exactly these percentages - system/
+    # policy content and the model's own output are unaffected by this and always take priority;
+    # lower-value retrieval (episodic > long-term > conversation excerpt) is trimmed first.
+    agent_context_window_tokens: int = Field(default=32_768, ge=8_192)
+    memory_short_term_fraction: float = Field(default=0.10, ge=0.02, le=0.50)  # recent chat turns
+    memory_long_term_fraction: float = Field(default=0.04, ge=0.01, le=0.20)  # saved Memory notes
+    memory_episodic_fraction: float = Field(default=0.03, ge=0.0, le=0.20)  # MemoryEpisode summaries
+
+    # memory_maintenance_service.py's periodic consolidation heartbeat (registered in
+    # src/main.py's lifespan) - how often it runs, and how it decides a thread is due for
+    # compaction: at least this many uncompacted messages, keeping the most recent N verbatim.
+    memory_heartbeat_interval_seconds: int = Field(default=900, ge=60)
+    memory_compaction_message_threshold: int = Field(default=24, ge=8)
+    memory_recent_messages_to_keep: int = Field(default=12, ge=4)
 
     # Database — PostgreSQL only, no SQLite fallback. Required: no default, so a missing/misconfigured
     # DATABASE_URL fails fast at startup instead of silently falling back to a file-based DB.

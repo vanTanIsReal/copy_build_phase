@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base
@@ -194,6 +194,31 @@ class Memory(Base):
     category: Mapped[str] = mapped_column(default="Preference")  # "Work" | "Preference" | "People" | ...
     title: Mapped[str]
     detail: Mapped[str] = mapped_column(default="")
+    # Structured, user-scoped declarative memory (added for memory_maintenance_service.py's
+    # background consolidation - see WORKLOG). Legacy `category` above remains the UI grouping;
+    # these columns are additive on an existing table - see db/session.py's
+    # _apply_memory_schema_compatibility for how they get backfilled on a pre-existing database.
+    memory_type: Mapped[str] = mapped_column(default="fact", index=True)
+    status: Mapped[str] = mapped_column(default="active", index=True)  # active|pending_review|superseded|revoked
+    source_type: Mapped[str] = mapped_column(default="manual")  # manual|episode
+    source_id: Mapped[str | None] = mapped_column(default=None)  # MemoryEpisode.id, when source_type="episode"
+    source_thread_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    source_conversation_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict)
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    importance: Mapped[float] = mapped_column(Float, default=0.5)
+    sensitivity: Mapped[str] = mapped_column(default="normal")
+    user_confirmed: Mapped[bool] = mapped_column(default=True)  # False for an unreviewed episode candidate
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+    last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    access_count: Mapped[int] = mapped_column(Integer, default=0)
+    content_hash: Mapped[str] = mapped_column(default="", index=True)  # dedup key, see memory_service.content_hash
+    # JSON keeps the deployment PostgreSQL-only without making pgvector a hard dependency -
+    # retrieval (memory_service.retrieve_memories) can move this to pgvector later without an API
+    # change. None when no embedding provider is configured; recall then falls back to lexical only.
+    embedding: Mapped[list | None] = mapped_column(JSON, default=None)
+    embedding_model: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     owner: Mapped["User"] = relationship()
@@ -216,6 +241,49 @@ class AssistantThread(Base):
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     title: Mapped[str]  # fixed at creation from the first message - like a conversation name, never edited after
     preview: Mapped[str] = mapped_column(default="")
+    # Tracked by memory_maintenance_service.py's periodic consolidation (heartbeat) - which slice
+    # of this thread's checkpointer messages has already been folded into a MemoryEpisode, and a
+    # short rolling summary of the whole thread so far, kept independent of the raw message log.
+    session_summary: Mapped[str] = mapped_column(Text, default="")
+    compacted_message_count: Mapped[int] = mapped_column(Integer, default=0)
+    summary_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    last_memory_maintenance_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    owner: Mapped["User"] = relationship()
+
+
+class MemoryEpisode(Base):
+    """A compact, chronological account of one completed slice of an assistant thread.
+
+    Written by memory_maintenance_service.py's heartbeat, never directly by a user or the planner.
+    Episodes are evidence-backed summaries, not instructions - durable facts extracted from one are
+    written as Memory(status="pending_review"), not applied directly.
+    """
+
+    __tablename__ = "memory_episodes"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    thread_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    conversation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"), default=None, index=True
+    )
+    summary: Mapped[str] = mapped_column(Text)
+    decisions: Mapped[list] = mapped_column(JSON, default=list)
+    open_loops: Mapped[list] = mapped_column(JSON, default=list)
+    source_ids: Mapped[list] = mapped_column(JSON, default=list)  # checkpointer message ids this episode covers
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict)
+    confidence: Mapped[float] = mapped_column(Float, default=0.8)
+    importance: Mapped[float] = mapped_column(Float, default=0.5)
+    message_count: Mapped[int] = mapped_column(Integer, default=0)
+    sequence: Mapped[int] = mapped_column(Integer, default=0)  # AssistantThread.compacted_message_count at creation
+    embedding: Mapped[list | None] = mapped_column(JSON, default=None)
+    embedding_model: Mapped[str | None] = mapped_column(default=None)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
