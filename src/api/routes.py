@@ -716,7 +716,9 @@ async def chat(
                 response=blocked.response, thread_id=thread_id, status="completed", context_scope=context_scope
             )
         try:
-            text = await quick_action_service.run_quick_action(request.quick_action, context_text)
+            text = await quick_action_service.run_quick_action(
+                request.quick_action, context_text, user_id=current_user.id, workspace_id=workspace_id
+            )
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
         output_decision = guardrail_service.evaluate_output(text)

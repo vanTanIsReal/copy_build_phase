@@ -159,8 +159,10 @@ export default function AIPanel({
       const items = parseJsonArray(res.response)
       // source: 'proactive' (not 'manual') even though a person clicked the button - these titles
       // came from the LLM reading the conversation, same provenance as the background detector, so
-      // they get the same treatment: Accept in Tasks auto-creates the Calendar event + Reminder
-      // (task_routes.py::_add_to_calendar_and_reminder gates on source == "proactive").
+      // they get the same treatment: Accept in Tasks auto-creates the matching Calendar event when
+      // due_at is set (task_routes.py::_sync_task_to_calendar gates on source in
+      // {"proactive", "ai_extracted"}). No Reminder side effect - that still needs its own
+      // confirmation, see the P0 AI consent/action-safety boundary in ROADMAP.md.
       const settled = await Promise.allSettled(items.map(item => createTask(token, {
         title: item.title, due_at: item.due_at || null, priority: item.priority || 'Medium',
         conversation_id: conversationId, source: 'proactive',

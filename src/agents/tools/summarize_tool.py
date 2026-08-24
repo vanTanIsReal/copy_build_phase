@@ -17,7 +17,13 @@ _STYLE_INSTRUCTIONS = {
 }
 
 
-async def generate_summary(context: str, style: Literal["brief", "detailed", "bullet_points"] = "brief") -> str:
+async def generate_summary(
+    context: str,
+    style: Literal["brief", "detailed", "bullet_points"] = "brief",
+    *,
+    user_id: str | None = None,
+    workspace_id: str | None = None,
+) -> str:
     """Build the prompt, call the LLM once, log usage, and return the summary text. This is the
     real logic - `summarize_conversation` below is a thin @tool wrapper around it for the
     LangGraph path (planner decides to call it); `quick_action_service` calls this directly for
@@ -50,7 +56,11 @@ async def generate_summary(context: str, style: Literal["brief", "detailed", "bu
     )
     result = await llm.ainvoke(prompt)
     await usage_service.log_usage(
-        provider=settings.llm_provider, model=settings.model_name, usage_metadata=result.usage_metadata
+        provider=settings.llm_provider,
+        model=settings.model_name,
+        usage_metadata=result.usage_metadata,
+        user_id=user_id,
+        workspace_id=workspace_id,
     )
     return result.content
 
@@ -65,4 +75,9 @@ async def summarize_conversation(
     Args:
         style: Level of detail for the summary - "brief", "detailed", or "bullet_points".
     """
-    return await generate_summary((state or {}).get("context", ""), style)
+    return await generate_summary(
+        (state or {}).get("context", ""),
+        style,
+        user_id=(state or {}).get("user_id"),
+        workspace_id=(state or {}).get("workspace_id"),
+    )
