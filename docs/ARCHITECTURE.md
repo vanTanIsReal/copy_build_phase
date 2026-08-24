@@ -2,7 +2,9 @@
 
 > **Trạng thái:** Canonical v1.0
 >
-> **Cập nhật:** 2026-08-19
+> **Cập nhật:** 2026-08-23 — §5.2/§12.2/§16 sửa lại cho khớp code thật sau các đợt Sprint 2/Sprint 3
+> và merge `feature/delivery-agent-tools` (bản 2026-08-19 trước đó mô tả các phần này là "chưa có",
+> trong khi code đã triển khai xong từ trước ngày cập nhật này — xem bằng chứng ở §16.1/§16.4)
 >
 > **Phạm vi:** Kiến trúc mục tiêu MVP và trạng thái code hiện tại
 >
@@ -168,7 +170,10 @@ erDiagram
     USER ||--o{ ACTION_PROPOSAL : proposes_or_approves
 ```
 
-`WORKSPACE_BRIEF`, `EXECUTIVE_BRIEF` và durable `ACTION_PROPOSAL` trong sơ đồ là **target persistence**; code hiện tại mới có contract in-memory cho brief/proposal, chưa có đầy đủ table/service/API.
+`WORKSPACE_BRIEF` và durable `ACTION_PROPOSAL` trong sơ đồ **đã là persistence thật** (không còn chỉ
+in-memory contract như bản trước của tài liệu này ghi) — xem §5.2. `EXECUTIVE_BRIEF` là ngoại lệ còn
+lại: hợp đồng Pydantic đã khoá nhưng **chưa có bảng lưu riêng**, Executive Agent tính lại theo yêu
+cầu từ các `WorkspaceBrief` đã publish mỗi lần được hỏi, không cache kết quả tổng hợp.
 
 ### 5.1 Existing tables
 
@@ -181,29 +186,25 @@ erDiagram
 | `agent_workspace_conversations` | Source binding | conversation unique toàn mapping; delivery/quality classification |
 | `audit_logs` | Security/operation history | actor, target, workspace, metadata |
 
-### 5.2 Target tables
+### 5.2 Bảng đã có (trước đây gọi là "target tables" — nay đã triển khai)
 
-`workspace_briefs` tối thiểu:
+`workspace_briefs` (model `WorkspaceBriefRecord`, `src/db/models.py`) — một dòng mỗi brief
+Delivery/Quality đã publish, `brief_json` giữ nguyên payload Pydantic để đọc lại đúng contract
+(`WorkspaceBrief.model_validate`); ghi/đọc qua `src/services/workspace_brief_service.py`
+(`save_brief`/`get_latest_brief`). Staleness không lọc ngầm ở tầng đọc — brief cũ vẫn trả về kèm
+`generated_at`/`expires_at` để caller tự quyết định báo `data_gaps` hay từ chối dùng.
 
-- `id`, `schema_version`, `trace_id`
-- `organization_workspace_id`, `agent_workspace_id`
-- `brief_type`, `producer_profile`, `status`
-- `period_start`, `period_end`, `generated_at`, `expires_at`
-- structured `headline/facts/risks/dependencies/decisions_needed/data_gaps`
-- `release_readiness` nullable
-- `source_snapshot`, `content_hash`, `supersedes_id`
+`agent_action_proposals` (model `AgentActionProposal`) + `agent_action_executions` (model
+`AgentActionExecution`) thay cho `action_proposals` in-memory cũ — durable store thật cho vòng đời
+HITL của specialist agent (`proposed → approved/rejected → executing → executed`), executor dùng
+chung tại `src/agents/hitl_executor.py::execute_action_proposal`, kiểm tra payload hash + actor +
+expiry + idempotency key trước khi cho chạy side effect thật.
 
-`executive_briefs` tối thiểu:
+`agent_runs` (model `AgentRun`) — audit/trace record mỗi lần agent chạy (profile, prompt_version,
+policy_decision, latency, token usage), không log raw message/PII.
 
-- `id`, `schema_version`, `trace_id`, `organization_workspace_id`
-- `generated_at`, structured output, `content_hash`
-- join table hoặc immutable list cho `workspace_brief_ids`
-
-`action_proposals` tối thiểu:
-
-- actor, profile, Workspace, action, payload/hash
-- idempotency key, status, created/expiry/decided/executed timestamps
-- approver, policy snapshot, result/error
+**Chưa có** (đúng như mô tả "target" ban đầu): bảng riêng cho `ExecutiveBrief` — Executive Agent
+tính lại theo yêu cầu từ các `WorkspaceBrief` đã publish, không cache/persist bản tổng hợp.
 
 ## 6. Agent contract
 
@@ -454,9 +455,25 @@ POST/GET/DELETE .../{id}/conversations
 
 Admin routes kiểm tra Platform Admin và exact Company Root ID. Route `available` kiểm tra membership server-side.
 
-### 12.2 Target runtime boundary
+### 12.2 Runtime boundary đã triển khai (khác đề xuất ban đầu ở trên)
 
-Đề xuất API surface:
+Bản đề xuất API surface riêng (`POST /api/v1/agent/invocations`, `.../briefs/generate`,
+`.../action-proposals/{id}/approve`...) bên dưới **không được dựng thành endpoint riêng** — thay
+vào đó nhóm chọn cách đơn giản hơn: mở rộng ngay `POST /api/v1/chat`/`POST /api/v1/chat/resume` đã
+có sẵn để tự nhận thêm `requested_scope=workspace|aggregate` (thay vì mặc định `personal`):
+
+- `requested_scope=workspace|aggregate` → `src/api/routes.py::_run_specialist_chat` tự
+  `route_agent_request` (router G0-G2) → build `AgentContext` → gọi tool profile tương ứng
+  (`delivery_tool.build_delivery_brief` / `executive_tool.build_executive_brief`), trả brief hoặc
+  — nếu request có `specialist_action` — trả `status="interrupted"` chờ xác nhận.
+- Xác nhận qua đúng `POST /api/v1/chat/resume` đã có, không phải endpoint approve/reject riêng —
+  route vào `hitl_executor.execute_action_proposal` thật.
+- Gate 2 lớp: `MULTI_AGENT_ENABLED` (master kill switch) rồi tới flag riêng từng profile
+  (`PRODUCT_DELIVERY_AGENT_ENABLED`/`QUALITY_ASSURANCE_AGENT_ENABLED`/`EXECUTIVE_AGENT_ENABLED`,
+  mặc định cả 4 đều `False`).
+
+Đề xuất API surface gốc bên dưới giữ lại chỉ để tham khảo lịch sử thiết kế — **không phản ánh route
+thật hiện có**:
 
 ```text
 POST /api/v1/agent/invocations
@@ -472,8 +489,6 @@ GET  /api/v1/executive/briefs/{brief_id}
 POST /api/v1/action-proposals/{proposal_id}/approve
 POST /api/v1/action-proposals/{proposal_id}/reject
 ```
-
-Tên URL có thể được điều chỉnh khi implement; invariant auth và contract không thay đổi.
 
 ## 13. Security threat model
 
@@ -566,20 +581,65 @@ Dataset chuẩn: [Multi-Agent Test Dataset](MULTI_AGENT_TEST_DATASET.md).
 - Deterministic router, profile registry, scope resolver, resource guard.
 - Global/per-profile feature flags.
 - Unit/integration tests cho foundation/router/contracts.
+- **API invocation tích hợp router + context builder + profile graph** — không phải endpoint
+  `/agent/invocations` riêng như đề xuất ở §12.2, mà mở rộng `/chat`+`/chat/resume` sẵn có
+  (`src/api/routes.py::_run_specialist_chat`) để nhận `requested_scope=workspace|aggregate`.
+- **Prompt/tool implementation cho Product Delivery** — `src/agents/tools/delivery_tool.py`
+  (`build_delivery_brief`, `propose_delivery_reminder`, `propose_delivery_meeting`), test riêng
+  tại `tests/test_agents/test_tools/test_delivery_tool.py`.
+- **Executive aggregation runtime** — `src/agents/tools/executive_tool.py`
+  (`build_executive_brief`, `propose_executive_meeting`), chỉ đọc `WorkspaceBrief` đã publish,
+  test tại `tests/test_agents/test_tools/test_executive_tool.py`.
+- **Durable WorkspaceBrief store + publish/validate** — `workspace_briefs` table
+  (`WorkspaceBriefRecord`) + `src/services/workspace_brief_service.py`; validate qua chính
+  Pydantic contract strict lúc lưu và đọc lại (§5.2).
+- **Durable ActionProposal approval/executor** — `agent_action_proposals` +
+  `agent_action_executions` table, executor dùng chung `src/agents/hitl_executor.py`
+  (payload-hash + actor + expiry + idempotency-key check trước khi chạy side effect thật; xác
+  nhận qua `/chat/resume` sẵn có, không phải endpoint approve/reject riêng).
+- QA có phần đọc dữ liệu (`src/agents/tools/quality_evidence.py`, `quality_snapshot.py`,
+  `src/services/quality_workspace_service.py`) và có test riêng (`test_quality_assurance.py`,
+  `test_quality_security.py`, `test_quality_tools.py`) — nhưng theo thiết kế repository/evidence-
+  based khác Delivery/Executive (không sinh `WorkspaceBrief` qua LLM), xem 16.2.
 
-### 16.2 Chưa hoàn chỉnh
+### 16.2 Chưa hoàn chỉnh (đã thu hẹp nhiều so với bản trước của tài liệu này)
 
-- API invocation tích hợp router + context builder + profile graph.
-- Prompt/node/tool implementation cho Delivery và QA.
-- Durable WorkspaceBrief/ExecutiveBrief store, validator service và publication flow.
-- Executive aggregation runtime chỉ dùng brief.
-- Durable ActionProposal approval/executor cho Workspace Agent.
-- Workspace Agent chat/brief UI, citation/freshness/data-gap states.
-- End-to-end eval, observability dashboard và operational runbook cho multi-agent.
+- **QA chưa nối vào bảng dispatch của `_run_specialist_chat`** (`_SPECIALIST_BRIEF_TOOL` trong
+  `src/api/routes.py`) — cố ý bỏ trống vì QA đang đi theo thiết kế repository-based riêng
+  (`quality_workspace_service.py`), chưa tương thích trực tiếp với contract `WorkspaceBrief` mà
+  Delivery/Executive dùng chung. Gọi `/chat` với workspace QA hiện trả về thông báo "chưa sẵn
+  sàng cho luồng chat này" thay vì đoán API không tương thích.
+- **Chưa có bảng lưu riêng cho `ExecutiveBrief`** — tính lại theo yêu cầu mỗi lần, không cache.
+- **Chưa có UI thật cho Delivery/QA/Executive** — `Frontend/src/pages/WorkspaceBriefsPage.jsx` tồn
+  tại nhưng tự khai là render **sample data hardcode**, không gọi API thật, và **không có route**
+  nào trỏ tới trong `AppRouter.jsx` (chỉ vào được bằng gõ thẳng URL, không có trong Sidebar) —
+  khác hẳn `WorkspaceManagementPage.jsx` (trang quản trị Agent Workspace của Admin, đã nối API
+  thật, đang dùng được).
+- Feature flag `MULTI_AGENT_ENABLED` và 3 flag theo profile vẫn mặc định `False` trên mọi môi
+  trường — phần đã xong ở trên chưa "sống" với người dùng thật cho tới khi bật cờ + có UI.
+- End-to-end eval sống (không chỉ structural contract test), observability dashboard và
+  operational runbook cho multi-agent vẫn chưa có.
 
 ### 16.3 Readiness conclusion
 
-Nền hiện tại **đủ để phát triển song song** ba Agent vì contract, profile, scope và Workspace ownership đã khóa. Nó **chưa đủ để tuyên bố multi-agent hoàn thiện**, vì các specialist tool/runtime, brief pipeline, Executive aggregation và UI execution path vẫn còn thiếu.
+Phần specialist runtime cho **Product Delivery và Executive đã triển khai xong và có test pass**
+(không còn ở giai đoạn "nền tảng sẵn sàng để bắt đầu" như bản trước của tài liệu này mô tả) —
+nhưng vẫn **chưa bật cho người dùng thật**: cờ tính năng còn tắt và chưa có UI thật để gọi tới.
+**Quality Assurance** còn khoảng cách thật rõ ràng hơn: có tool đọc dữ liệu riêng nhưng chưa nối
+vào cùng pipeline `WorkspaceBrief`/dispatch `/chat` mà Delivery/Executive đang dùng. Vì vậy multi-
+agent **chưa đủ để tuyên bố hoàn thiện với người dùng cuối** — nhưng vì lý do khác bản trước của
+tài liệu: không phải vì thiếu runtime, mà vì thiếu UI + QA chưa nối + cờ tính năng còn tắt.
+
+### 16.4 Bằng chứng đối chiếu (khi cập nhật §16 lần này, 2026-08-23)
+
+`pytest tests/test_agents/test_quality_assurance.py tests/test_agents/test_quality_security.py
+tests/test_agents/test_quality_tools.py tests/test_agents/test_tools/test_delivery_tool.py
+tests/test_agents/test_tools/test_executive_tool.py tests/test_agent_workspaces.py
+tests/test_multi_agent_dataset.py` → **56/56 pass** trên nhánh `develop`/`tuan`
+(`git log --oneline -- src/agents/` cho thấy các commit "Phase 3: specialist agents", "Sprint 2
+Phase 1: cross-workspace dependency", "Sprint 3 Phase 2+3: deterministic Router hookup into real
+/chat", "Sprint 3 follow-up: ... real HITL for specialist agents" — tất cả sau ngày cập nhật trước
+đó của tài liệu này, 2026-08-19).
 
 ## 17. Code ownership map
 

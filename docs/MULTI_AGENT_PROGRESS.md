@@ -5,6 +5,13 @@
 > Nhánh: `G19-T132-Lương-Trí-Tuệ`
 >
 > Trạng thái: hoàn thành cục bộ **Giai đoạn 0 — Foundation/Contract Baseline**; thay đổi chưa commit/merge lên remote.
+>
+> ⚠️ **Cập nhật 2026-08-23 — báo cáo dưới đây là snapshot lịch sử tại thời điểm Giai đoạn 0 vừa
+> xong, giữ nguyên không sửa để làm bằng chứng công việc.** Kể từ đó, Delivery Agent và Executive
+> Agent (mục 2, hàng "Chưa triển khai") **đã được xây xong và merge vào `develop`** qua các đợt
+> Sprint 2/Sprint 3 + `feature/delivery-agent-tools`, kèm test pass thật. Xem trạng thái hiện tại
+> chính xác tại **`docs/ARCHITECTURE.md` §16** (mục "Current state và target gaps", đã cập nhật
+> cùng ngày) thay vì coi báo cáo này là hiện trạng mới nhất.
 
 ## 1. Tóm tắt điều hành
 
