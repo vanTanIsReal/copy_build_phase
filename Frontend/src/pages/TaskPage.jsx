@@ -4,9 +4,11 @@ import PageHeader from '../components/common/PageHeader'
 import StatCard from '../components/common/StatCard'
 import TaskTable, { formatDue } from '../components/task/TaskTable'
 import NewTaskModal from '../components/task/NewTaskModal'
+import TaskConflictModal from '../components/task/TaskConflictModal'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { listTasks, updateTaskStatus, deleteTask } from '../api/tasks'
+import { useTaskAccept } from '../hooks/useTaskAccept'
 
 const sourceLabel = { manual: 'Manual', proactive: 'AI suggestion' }
 const ACTION_FAILED = 'Không thực hiện được, thử lại sau.'
@@ -45,10 +47,16 @@ export default function TaskPage() {
   const overdue = mainTasks.filter(t => t.status === 'pending' && t.due_at && new Date(t.due_at) < new Date()).length
   const pending = mainTasks.length - completed - overdue
 
-  const accept = (task) => updateTaskStatus(token, task.id, 'pending').then(upsertTask).catch(err => pushToast(err.detail || ACTION_FAILED))
   const dismiss = (task) => updateTaskStatus(token, task.id, 'dismissed').then(upsertTask).catch(err => pushToast(err.detail || ACTION_FAILED))
   const complete = (task) => updateTaskStatus(token, task.id, 'completed').then(upsertTask).catch(err => pushToast(err.detail || ACTION_FAILED))
   const remove = (task) => deleteTask(token, task.id).then(() => removeTask(task.id)).catch(err => pushToast(err.detail || ACTION_FAILED))
+
+  // Accept may come back reporting a schedule conflict instead of accepting - the modal below lets
+  // the user pick an alternative/custom time, keep the original anyway, or dismiss instead.
+  const { conflict, busy, accept, pickTime, acceptAnyway, close } = useTaskAccept({
+    token, onUpdate: upsertTask, onError: err => pushToast(err.detail || ACTION_FAILED),
+  })
+  const dismissConflicted = (task) => { dismiss(task); close() }
 
   return <div className="page-container">
     <PageHeader eyebrow="Workspace" title="My Tasks" description="Stay on top of work, including action items found by Orbit." action={<div className="d-flex gap-2"><Link to="/tasks/inbox" className="btn btn-light rounded-3"><i className="bi bi-inbox me-2"/>Priority inbox</Link><button className="btn btn-primary rounded-3" onClick={() => setModalOpen(true)}><i className="bi bi-plus-lg me-2"/>Add task</button></div>}/>
@@ -58,5 +66,6 @@ export default function TaskPage() {
       {!loading && !suggestions.length && <p className="text-muted small mb-0">No new suggestions right now — try "Extract tasks" in a conversation's AI panel.</p>}
     </div></section>
     <NewTaskModal open={modalOpen} onClose={() => setModalOpen(false)} onCreated={upsertTask} />
+    <TaskConflictModal conflict={conflict} busy={busy} onPickTime={pickTime} onAcceptAnyway={acceptAnyway} onDismiss={dismissConflicted} onClose={close} />
   </div>
 }

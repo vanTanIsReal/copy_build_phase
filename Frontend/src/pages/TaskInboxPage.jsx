@@ -3,9 +3,11 @@ import { Link, useOutletContext } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import StatCard from '../components/common/StatCard'
 import { formatDue } from '../components/task/TaskTable'
+import TaskConflictModal from '../components/task/TaskConflictModal'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { listTasks, updateTaskStatus } from '../api/tasks'
+import { useTaskAccept } from '../hooks/useTaskAccept'
 import { groupTasks } from '../utils/taskGrouping'
 
 const sourceLabel = { manual: 'Manual', proactive: 'AI suggestion' }
@@ -37,9 +39,15 @@ export default function TaskInboxPage() {
 
   const { needsDecision, overdue, dueSoon, highPriority } = groupTasks(tasks)
 
-  const accept = (task) => updateTaskStatus(token, task.id, 'pending').then(upsertTask).catch(err => pushToast(err.detail || ACTION_FAILED))
   const dismiss = (task) => updateTaskStatus(token, task.id, 'dismissed').then(upsertTask).catch(err => pushToast(err.detail || ACTION_FAILED))
   const complete = (task) => updateTaskStatus(token, task.id, 'completed').then(upsertTask).catch(err => pushToast(err.detail || ACTION_FAILED))
+
+  // Accept may come back reporting a schedule conflict instead of accepting - the modal below
+  // lets the user pick an alternative/custom time, keep the original anyway, or dismiss instead.
+  const { conflict, busy, accept, pickTime, acceptAnyway, close } = useTaskAccept({
+    token, onUpdate: upsertTask, onError: err => pushToast(err.detail || ACTION_FAILED),
+  })
+  const dismissConflicted = (task) => { dismiss(task); close() }
 
   const totalInboxCount = needsDecision.length + overdue.length + dueSoon.length + highPriority.length
 
@@ -116,6 +124,7 @@ export default function TaskInboxPage() {
         icon="bi-flag" title="High priority" items={highPriority} tone="warning"
         actions={(task) => <button className="btn btn-sm btn-primary" onClick={() => complete(task)}>Complete</button>}
       />
+      <TaskConflictModal conflict={conflict} busy={busy} onPickTime={pickTime} onAcceptAnyway={acceptAnyway} onDismiss={dismissConflicted} onClose={close} />
     </div>
   )
 }

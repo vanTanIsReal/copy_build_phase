@@ -24,12 +24,18 @@ export default function ReminderPage() {
 
   useEffect(() => { refresh() }, [token])
 
+  const upsertReminder = (reminder) => setReminders(prev => [...prev.filter(r => r.id !== reminder.id), reminder])
+
+  // Realtime: a reminder can be created from this page's own "New reminder", another tab, the
+  // agent's create_reminder tool, or auto-created behind an Accepted proactive task - same
+  // upsert-on-push pattern CalendarPage.jsx uses for calendar_event_* so every open tab agrees.
   useEffect(() => subscribe((data) => {
-    if (data.type !== 'reminder_fired') return
-    setReminders(prev => prev.map(r => r.id === data.reminder.id ? { ...r, status: 'fired' } : r))
+    if (data.type === 'reminder_created' || data.type === 'reminder_updated') upsertReminder(data.reminder)
+    if (data.type === 'reminder_fired') setReminders(prev => prev.map(r => r.id === data.reminder.id ? { ...r, status: 'fired' } : r))
+    if (data.type === 'reminder_deleted') setReminders(prev => prev.filter(r => r.id !== data.reminder_id))
   }), [subscribe])
 
-  const onCreated = (reminder) => setReminders(prev => [...prev, reminder])
+  const onCreated = upsertReminder
   const onCancel = (reminder) => cancelReminder(token, reminder.id).then(refresh)
 
   return <div className="page-container">
