@@ -4,11 +4,15 @@
    Frontend/shared/styles.css (also used by Frontend/user) or admin.css/workspace-admin.css
    directly; it layers on top via higher-specificity/later-loaded overrides instead.
 
-   Scoping rule, same as orbit-fx.css: every rule is scoped under `.admin-shell`, the single root
-   wrapper AdminLayout.jsx renders (see AdminLayout.jsx). AdminLoginPage.jsx/AccessDeniedPage.jsx
-   render *outside* that wrapper (their own `.admin-login-page`/`.admin-auth-state` root), so they
-   are untouched by this file and stay on the light theme - deliberately the same convention
-   orbit-fx.css uses for Login/Register on the user app.
+   Scoping rule, same as orbit-fx.css: every rule is scoped under `.admin-shell`. AdminLayout.jsx
+   renders it as the main dashboard's root wrapper; AdminLoginPage.jsx/AccessDeniedPage.jsx render
+   *outside* that layout (their own `.admin-login-page`/`.admin-auth-state` root) but now also
+   carry `.admin-shell` directly on that same root so the "Auth (Login/Access denied)" section
+   below activates for them too - matching orbit-fx.css doing the same for Login/Register on the
+   user app. `.admin-shell` itself (admin.css) already sets `background:var(--admin-bg);
+   color:var(--admin-ink)`, and this file redeclares those two custom properties on the same
+   selector, so any element carrying the class picks up the dark values automatically - only the
+   auth-page-specific classes below need their own explicit overrides.
 
    No GSAP/Framer effects layer here (unlike orbit-fx.css's components/fx/) - those are tied to
    the user app's chat/AI surfaces and don't fit an admin data-table shell. This file is palette +
@@ -27,6 +31,30 @@
   --admin-glow-a: #526ff5;
   --admin-glow-b: #8b5cf6;
   --admin-shadow: 0 10px 40px rgba(5, 8, 20, 0.45);
+}
+
+/* Contrast safety net: Frontend/shared/styles.css sets a hardcoded `h1,h2,h3,h4{color:var(--ink)}`
+   (its own light-only --ink, no dark counterpart) - an explicit color on the element itself always
+   wins over inherited `.admin-shell{color:var(--admin-ink)}` regardless of specificity, so any
+   heading here that isn't individually overridden below stays dark-on-dark. Catch every heading
+   once here (same fix orbit-fx.css already applies for Frontend/user, see its own "Contrast safety
+   net" comment) instead of only patching contexts noticed by testing. */
+.admin-shell h1, .admin-shell h2, .admin-shell h3, .admin-shell h4, .admin-shell h5, .admin-shell h6 { color: var(--admin-ink); }
+
+/* Same gap as the heading one above: Frontend/shared/styles.css's `input:-webkit-autofill` fix
+   uses `var(--card)` (that file's own hardcoded white, no dark counterpart) to repaint what Chrome
+   paints over an autofilled field - correct on every light page, but still paints white here now
+   that Admin Login/Access-denied are dark. Re-declare with this file's own dark tokens so the
+   higher-specificity `.admin-shell` version wins (mirrors `.orbit-fx input:-webkit-autofill` in
+   Frontend/user/src/orbit-fx.css). */
+.admin-shell input:-webkit-autofill,
+.admin-shell input:-webkit-autofill:hover,
+.admin-shell input:-webkit-autofill:focus,
+.admin-shell input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px var(--admin-panel-2) inset;
+  -webkit-text-fill-color: var(--admin-ink);
+  caret-color: var(--admin-ink);
+  transition: background-color 5000s ease-in-out 0s;
 }
 
 /* ---------- Sidebar - already dark in the base styles.css, just re-tinted to match the same
@@ -180,6 +208,20 @@
 .admin-shell .admin-model-option h3 { color: var(--admin-ink); }
 .admin-shell .admin-model-option > small { color: var(--admin-muted); }
 .admin-shell .admin-usage-bar, .admin-shell .admin-usage-chart > div > i { background: var(--admin-panel); }
+
+/* ---------- Auth (Login/Access denied) - see this file's header comment for why these carry
+   .admin-shell directly instead of inheriting it from AdminLayout. ---------- */
+.admin-shell.admin-login-page, .admin-shell.admin-auth-state { background: var(--admin-bg); }
+.admin-shell .admin-login-card { background: var(--admin-panel-2); border-color: var(--admin-line); box-shadow: var(--admin-shadow); }
+.admin-shell .admin-login-brand small { color: var(--admin-muted); }
+.admin-shell .admin-login-heading p { color: var(--admin-muted); }
+.admin-shell .admin-login-card form > label { color: var(--admin-muted); }
+.admin-shell .admin-login-input { border-color: var(--admin-line); color: var(--admin-muted); }
+.admin-shell .admin-login-input:focus-within { border-color: var(--admin-glow-a); box-shadow: 0 0 0 3px rgba(82, 111, 245, .18); }
+.admin-shell .admin-login-input input { background: transparent; color: var(--admin-ink); }
+.admin-shell .admin-login-note { color: var(--admin-muted); }
+.admin-shell .admin-inline-alert { background: rgba(239, 86, 117, .14); border-color: rgba(239, 86, 117, .32); color: #ff8fa3; }
+.admin-shell .admin-auth-state.denied p { color: var(--admin-muted); }
 
 @media (max-width: 760px) {
   .admin-shell .admin-backdrop.show { background: rgba(5, 8, 20, .55); }
