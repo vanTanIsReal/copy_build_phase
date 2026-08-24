@@ -5,7 +5,7 @@ from langchain_core.messages.utils import count_tokens_approximately, trim_messa
 
 from src.agents.state import AgentState
 from src.config import get_settings
-from src.services import guardrail_service, memory_service
+from src.services import conversation_summary_service, guardrail_service, memory_service
 
 
 def _last_user_text(state: AgentState) -> str:
@@ -65,9 +65,20 @@ async def context_node(state: AgentState) -> dict:
     long_budget = int(settings.agent_context_window_tokens * settings.memory_long_term_fraction)
     episode_budget = int(settings.agent_context_window_tokens * settings.memory_episodic_fraction)
     retrieval_budget = int(settings.agent_context_window_tokens * settings.memory_retrieval_fraction)
+    summary_budget = int(settings.agent_context_window_tokens * settings.memory_conversation_summary_fraction)
+
+    conversation_id = state.get("conversation_id")
+    rolling_summary = ""
+    if conversation_id:
+        # Consent-scoped rolling summary of this same Conversation's older history (see
+        # conversation_summary_service.py) - distinct from memory_context/episodic_context, which
+        # come from the user's cross-conversation Memory/MemoryEpisode store.
+        rolling_summary = await conversation_summary_service.get_summary_text(conversation_id)
+
     return {
         "memory_context": _fit("\n".join(memory_lines), long_budget),
         "episodic_context": _fit("\n".join(episode_lines), episode_budget),
+        "conversation_summary_context": _fit(rolling_summary, summary_budget),
         "context": _fit(state.get("context", ""), retrieval_budget),
         "prompt_messages": list(budgeted_messages(state)),
         "context_metadata": {
@@ -75,5 +86,6 @@ async def context_node(state: AgentState) -> dict:
             "long_term_memories": len(memories),
             "episodes": len(episodes),
             "conversation_context": bool(state.get("context", "").strip()),
+            "rolling_summary_present": bool(rolling_summary.strip()),
         },
     }

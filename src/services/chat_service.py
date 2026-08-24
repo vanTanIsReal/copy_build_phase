@@ -8,6 +8,7 @@ from src.db.models import (
     AIPermission,
     Conversation,
     ConversationParticipant,
+    ConversationRollingSummary,
     EventCandidate,
     EventExtractionCursor,
     Message,
@@ -122,6 +123,15 @@ async def set_ai_permission(
                 Task.source_sender_id == user_id,
             )
             .values(status="invalidated", invalidated_reason="source_consent_revoked")
+        )
+        # The rolling conversation summary is a persisted artifact re-injected into every future
+        # agent turn - unlike a live per-request read, it can't just stop selecting this sender's
+        # messages going forward. Flag it for a full rebuild so already-baked prose from the
+        # revoked sender doesn't keep circulating. No-op if no row exists yet.
+        await db.execute(
+            update(ConversationRollingSummary)
+            .where(ConversationRollingSummary.conversation_id == conversation_id)
+            .values(needs_reset=True)
         )
     await db.commit()
     await db.refresh(permission)
@@ -269,6 +279,15 @@ async def leave_group_conversation(
         update(EventCandidate)
         .where(EventCandidate.conversation_id == conversation_id, EventCandidate.status == "suggested")
         .values(status="invalidated", invalidated_reason="conversation_membership_changed")
+    )
+    # A group's readable/eligible set is all-or-nothing while ai_enabled stays on (see
+    # proactive_service._permission_scope) - a participant leaving is the only way that roster can
+    # shrink without also flipping ai_enabled off. Same rebuild-on-shrink reasoning as
+    # set_ai_permission's contribution_revoked branch.
+    await db.execute(
+        update(ConversationRollingSummary)
+        .where(ConversationRollingSummary.conversation_id == conversation_id)
+        .values(needs_reset=True)
     )
     await db.commit()
     return [row.user_id for row in remaining if row.user_id], False

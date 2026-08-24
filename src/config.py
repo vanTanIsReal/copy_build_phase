@@ -55,6 +55,18 @@ class Settings(BaseSettings):
     memory_heartbeat_interval_seconds: int = Field(default=900, ge=60)
     memory_compaction_message_threshold: int = Field(default=24, ge=8)
     memory_recent_messages_to_keep: int = Field(default=12, ge=4)
+    # Token budget for injecting a Conversation's rolling summary into the prompt (see
+    # conversation_summary_service.py) - separate from conversation_summary_max_chars below, which
+    # caps what's stored in the DB, not what's re-fit into any one prompt.
+    memory_conversation_summary_fraction: float = Field(default=0.03, ge=0.0, le=0.20)
+
+    # Consent-scoped rolling summary for 1-1/group Conversation chats (conversation_summary_service.py).
+    conversation_summary_enabled: bool = True
+    conversation_summary_threshold_messages: int = Field(default=30, ge=1)
+    conversation_summary_batch_size: int = Field(default=60, ge=1, le=500)
+    conversation_summary_max_chars: int = Field(default=12_000, ge=500)
+    conversation_summary_interval_seconds: int = Field(default=900, ge=60)
+    conversation_summary_sweep_limit: int = Field(default=10, ge=1, le=100)
 
     # Database
     database_url: str = "sqlite:///./data/app.db"

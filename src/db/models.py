@@ -629,6 +629,37 @@ class EventExtractionCursor(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
 
+class ConversationRollingSummary(Base):
+    """Consent-scoped, incrementally-maintained cumulative summary of one Conversation (1-1 or
+    group human chat), so the agent can answer free-form questions spanning months even though the
+    live per-request context window (consent_service.build_authorized_message_view) only covers
+    the most recent request.context_limit messages. Built by conversation_summary_service.heartbeat
+    from messages whose sender is currently in the conversation's readable set
+    (proactive_service._permission_scope) - never from a participant who hasn't consented.
+
+    Distinct from AssistantThread.session_summary/MemoryEpisode, which cover the standalone
+    /assistant page (conversation_id=None) and already existed before this table.
+    """
+
+    __tablename__ = "conversation_rolling_summaries"
+
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), primary_key=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    last_message_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    last_message_id: Mapped[str | None] = mapped_column(default=None)
+    processed_message_count: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(default="idle")  # idle|running|failed
+    last_error: Mapped[str | None] = mapped_column(Text, default=None)
+    # Set whenever a participant's contribution_allowed is revoked (or they leave/are removed from
+    # an AI-enabled group) so the next heartbeat pass rebuilds the summary from scratch using only
+    # currently-consenting senders, instead of letting already-baked prose from a revoked
+    # participant keep being replayed into every future agent turn indefinitely. See
+    # chat_service.set_ai_permission and the group participant-removal path.
+    needs_reset: Mapped[bool] = mapped_column(default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class UsageLog(Base):
     __tablename__ = "usage_logs"
 

@@ -45,6 +45,7 @@ class AgentState(TypedDict, total=False):
     user_context: dict
     memory_context: str
     episodic_context: str
+    conversation_summary_context: str
     prompt_messages: list[AnyMessage]
     context_metadata: dict
 
