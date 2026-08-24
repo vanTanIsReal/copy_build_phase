@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant", "system"] = "user"
     sender: str | None = None
-    content: str
+    content: str = Field(..., max_length=10_000)
     timestamp: str | None = Field(default=None, description="ISO 8601 datetime, optional")
 
 
@@ -36,6 +36,7 @@ class ChatRequest(BaseModel):
     )
     messages: list[ChatMessage] | None = Field(
         default=None,
+        max_length=200,
         description="Raw message history to summarize (read by summarize_conversation via state)",
     )
     conversation_id: str | None = Field(

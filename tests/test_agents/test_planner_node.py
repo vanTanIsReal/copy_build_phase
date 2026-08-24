@@ -43,9 +43,12 @@ def test_route_after_planner_routes_to_tools_on_tool_call():
     assert route_after_planner(state) == "tools"
 
 
-def test_route_after_planner_ends_on_plain_reply():
+def test_route_after_planner_sends_plain_reply_to_output_guardrail():
+    # A plain (non-tool-call) reply goes through output_guardrail before the run ends - guardrail
+    # nodes were added in graph.py to check every generated response for leaked secrets/prompts
+    # before it reaches the API. See test_guardrails.py for output_guardrail_node's own behavior.
     state = {"messages": [HumanMessage(content="hi"), AIMessage(content="done")]}
-    assert route_after_planner(state) == "__end__"
+    assert route_after_planner(state) == "output_guardrail"
 
 
 def test_system_prompt_mentions_search_messages_tool():

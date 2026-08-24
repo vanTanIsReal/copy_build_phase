@@ -5,6 +5,7 @@ from src.agents.tools.calendar_tool import (
     update_calendar_event,
 )
 from src.agents.tools.memory_tool import list_memories
+from src.agents.tools.policy_tool import check_request_policy
 from src.agents.tools.reminder_tool import create_reminder, list_reminders
 from src.agents.tools.search_tool import search_messages
 from src.agents.tools.summarize_tool import summarize_conversation
@@ -26,6 +27,7 @@ ALL_TOOLS = [
     list_reminders,
     list_memories,
     search_messages,
+    check_request_policy,
 ]
 
 __all__ = [
@@ -41,4 +43,5 @@ __all__ = [
     "list_reminders",
     "list_memories",
     "search_messages",
+    "check_request_policy",
 ]

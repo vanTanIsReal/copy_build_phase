@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     daily_token_budget: int = Field(default=200_000, ge=0)
 
+    # Agent context budgeting (context_node.py) - the planner's prompt is built from three
+    # layers (recent turns, saved memories, retrieved conversation excerpt) sized as fractions
+    # of one overall token budget, so none of them can silently crowd out the others.
+    agent_context_window_tokens: int = Field(default=8_000, ge=512)
+    memory_short_term_fraction: float = Field(default=0.5, ge=0.0, le=1.0)  # recent chat turns
+    memory_long_term_fraction: float = Field(default=0.2, ge=0.0, le=1.0)  # saved Memory notes
+
     # Database — PostgreSQL only, no SQLite fallback. Required: no default, so a missing/misconfigured
     # DATABASE_URL fails fast at startup instead of silently falling back to a file-based DB.
     database_url: str

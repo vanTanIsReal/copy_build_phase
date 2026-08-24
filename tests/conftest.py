@@ -29,6 +29,28 @@ from src.agents import graph as agent_graph
 from src.db.base import Base
 from src.db.models import User
 from src.main import app
+from src.services import domain_classifier_service
+
+
+@pytest.fixture(autouse=True)
+def _neutral_domain_classifier(monkeypatch):
+    """input_guardrail_node (src/agents/nodes/guardrail_node.py) falls back to
+    domain_classifier_service.classify_domain_request - a real LLM call - only for a message the
+    deterministic guardrail_service regexes didn't already resolve as work/small-talk/unsafe. Most
+    existing test fixtures use placeholder text ("Câu hỏi thật", generic tool-test prompts) that
+    doesn't match any of those keyword patterns, so without this they'd hit a real, unmocked LLM
+    call in every test run - slow, flaky, and unrelated to what each test actually verifies.
+    Default to "allow" here so an unrelated test's placeholder message reaches the planner exactly
+    as before this node existed; a test that specifically exercises the semantic classifier (see
+    tests/test_guardrails.py) overrides this again with its own monkeypatch, which simply wins for
+    that test."""
+
+    async def _allow(*args, **kwargs):
+        return domain_classifier_service.DomainAssessment(
+            decision="allow", intent="task_management", confidence=1.0, reason="test default"
+        )
+
+    monkeypatch.setattr(domain_classifier_service, "classify_domain_request", _allow)
 
 
 @pytest.fixture(scope="session")

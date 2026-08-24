@@ -3,44 +3,67 @@ from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 from psycopg_pool import AsyncConnectionPool
 
+from src.agents.nodes.context_node import context_node
+from src.agents.nodes.guardrail_node import input_guardrail_node, output_guardrail_node
 from src.agents.nodes.planner_node import planner_node
 from src.agents.state import AgentState
 from src.agents.tools import ALL_TOOLS
 from src.config import get_settings
 
 # Tools whose own output is already the final answer - no confirmation needed and no benefit
-# from a second LLM pass to "relay" it. Routing straight to END after these avoids that second
-# pass, which some models handle poorly (observed: hallucinating a bogus repeat tool-call instead
-# of plain text). Calendar/reminder tools still go back through planner - their raw output isn't
-# user-facing prose, and human-in-the-loop confirmation flows need that turn.
+# from a second LLM pass to "relay" it. Routing straight to output_guardrail after these avoids
+# that second planner pass, which some models handle poorly (observed: hallucinating a bogus
+# repeat tool-call instead of plain text). Calendar/reminder tools still go back through planner -
+# their raw output isn't user-facing prose, and human-in-the-loop confirmation flows need that turn.
 TERMINAL_TOOLS = {"summarize_conversation", "extract_tasks"}
 
 
+def route_after_input_guardrail(state: AgentState) -> str:
+    """A blocked or clarification-needed request ends the run right here - no tokens spent on the
+    planner, no tool ever sees a rejected/unclear request."""
+    if state.get("guardrail_blocked") or state.get("guardrail_requires_clarification"):
+        return END
+    return "context_builder"
+
+
 def route_after_planner(state: AgentState) -> str:
-    """Route to tool execution, or end the run if the planner errored or has a final reply."""
+    """Route to tool execution, or to output validation if the planner errored or has a final
+    reply (an error still gets a real END-bound reply shape, just skips the guardrail check)."""
     if state.get("error"):
         return END
-    return tools_condition(state)
+    return "tools" if tools_condition(state) == "tools" else "output_guardrail"
 
 
 def route_after_tools(state: AgentState) -> str:
-    """End immediately after a terminal tool (its output is the final answer); otherwise loop
-    back to the planner so it can phrase a reply or decide on further tool calls."""
+    """Send a terminal tool's output through output validation (it's the final answer);
+    otherwise loop back to the planner so it can phrase a reply or decide on further tool calls."""
     last = state["messages"][-1]
     if isinstance(last, ToolMessage) and last.name in TERMINAL_TOOLS:
-        return END
+        return "output_guardrail"
     return "planner"
 
 
 def build_graph(checkpointer):
     graph = StateGraph(AgentState)
 
+    graph.add_node("input_guardrail", input_guardrail_node)
+    graph.add_node("context_builder", context_node)
     graph.add_node("planner", planner_node)
     graph.add_node("tools", ToolNode(ALL_TOOLS))
+    graph.add_node("output_guardrail", output_guardrail_node)
 
-    graph.set_entry_point("planner")
-    graph.add_conditional_edges("planner", route_after_planner, {"tools": "tools", END: END})
-    graph.add_conditional_edges("tools", route_after_tools, {"planner": "planner", END: END})
+    graph.set_entry_point("input_guardrail")
+    graph.add_conditional_edges(
+        "input_guardrail", route_after_input_guardrail, {"context_builder": "context_builder", END: END}
+    )
+    graph.add_edge("context_builder", "planner")
+    graph.add_conditional_edges(
+        "planner", route_after_planner, {"tools": "tools", "output_guardrail": "output_guardrail", END: END}
+    )
+    graph.add_conditional_edges(
+        "tools", route_after_tools, {"planner": "planner", "output_guardrail": "output_guardrail"}
+    )
+    graph.add_edge("output_guardrail", END)
 
     return graph.compile(checkpointer=checkpointer)
 

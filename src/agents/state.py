@@ -32,3 +32,18 @@ class AgentState(TypedDict, total=False):
     summary: str
     calendar_event_draft: dict | None
     reminder_draft: dict | None
+
+    # Guardrail (input_guardrail_node/output_guardrail_node in guardrail_node.py) - a blocked or
+    # clarification-needed request ends the run right after input_guardrail without reaching the
+    # planner, so no tokens are spent and no tool ever sees a rejected request.
+    guardrail_blocked: bool
+    guardrail_requires_clarification: bool
+
+    # context_node.py's output: a token-budgeted view of recent turns (prompt_messages) plus a
+    # rendered summary of the user's saved Memory notes (memory_context) - planner_node.py prefers
+    # these over the raw `messages`/no-memory system prompt when context_node has run, and falls
+    # back to the old behavior otherwise so a run that skips context_node (e.g. a test that calls
+    # planner_node directly) still works unchanged.
+    memory_context: str
+    prompt_messages: list
+    context_metadata: dict

@@ -6,22 +6,26 @@ from langchain_openai import ChatOpenAI
 from src.config import get_settings
 
 
-def get_llm() -> BaseChatModel:
+def get_llm(temperature: float | None = None) -> BaseChatModel:
+    """Build the configured chat model. `temperature` overrides settings.llm_temperature for
+    callers that need deterministic output (e.g. domain_classifier_service's structured
+    classification) without changing the default used by the planner."""
     settings = get_settings()
+    effective_temperature = settings.llm_temperature if temperature is None else temperature
     if settings.llm_provider == "groq":
         return ChatGroq(
             model=settings.model_name,
             api_key=settings.groq_api_key,
-            temperature=settings.llm_temperature,
+            temperature=effective_temperature,
         )
     if settings.llm_provider == "openai":
         return ChatOpenAI(
             model=settings.model_name,
             api_key=settings.openai_api_key,
-            temperature=settings.llm_temperature,
+            temperature=effective_temperature,
         )
     return ChatGoogleGenerativeAI(
         model=settings.model_name,
         google_api_key=settings.google_api_key,
-        temperature=settings.llm_temperature,
+        temperature=effective_temperature,
     )
