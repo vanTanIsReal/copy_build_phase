@@ -24,7 +24,7 @@ from src.agents.contracts import (
 )
 from src.agents.hitl_executor import ActionProposalRejectedError, execute_action_proposal
 from src.agents.policies.scope_resolver import InvalidAttendeeError, resolve_agent_scope, validate_attendee_ids
-from src.agents.tools import delivery_tool, executive_tool
+from src.agents.tools import delivery_tool, executive_tool, quality_tool
 from src.auth.dependencies import get_current_user
 from src.config import get_settings
 from src.db.models import AgentActionProposal, AgentWorkspace, Conversation, User, Workspace, WorkspaceMembership
@@ -57,12 +57,10 @@ from src.services.workspace_service import resolve_workspace_for_user
 router = APIRouter()
 
 # Ngày 6-7 hookup (MULTI_AGENT_IMPLEMENTATION_PLAN.md): which specialist tool builds the read-only
-# brief for a resolved route.profile. quality_assurance is intentionally absent - that profile's
-# real vertical slice (src.services.quality_workspace_service) is still under active development
-# on its own repository-based design (see that module's docstring); dispatch below degrades to a
-# clear "not available yet" response for it instead of guessing at an incompatible API.
+# brief for a resolved route.profile.
 _SPECIALIST_BRIEF_TOOL = {
     AgentProfile.PRODUCT_DELIVERY: delivery_tool.build_delivery_brief,
+    AgentProfile.QUALITY_ASSURANCE: quality_tool.build_quality_brief,
     AgentProfile.EXECUTIVE: executive_tool.build_executive_brief,
 }
 
@@ -71,15 +69,19 @@ _SPECIALIST_BRIEF_TOOL = {
 _SPECIALIST_ACTION_INTENT = {
     (AgentProfile.PRODUCT_DELIVERY, "propose_reminder"): AgentIntent.DELIVERY_PROPOSE_REMINDER,
     (AgentProfile.PRODUCT_DELIVERY, "propose_meeting"): AgentIntent.DELIVERY_PROPOSE_MEETING,
+    (AgentProfile.QUALITY_ASSURANCE, "propose_reminder"): AgentIntent.QUALITY_PROPOSE_REMINDER,
+    (AgentProfile.QUALITY_ASSURANCE, "propose_meeting"): AgentIntent.QUALITY_PROPOSE_MEETING,
     (AgentProfile.EXECUTIVE, "propose_meeting"): AgentIntent.EXECUTIVE_PROPOSE_MEETING,
 }
 
-# proposal.action (set by delivery_tool.py/executive_tool.py's propose_* functions) -> the
-# InterruptPayload.type the frontend receives - stable, short names distinct from the Personal
-# agent's own calendar_event/reminder types so a future UI can tell them apart.
+# proposal.action (set by delivery_tool.py/quality_tool.py/executive_tool.py's propose_* functions)
+# -> the InterruptPayload.type the frontend receives - stable, short names distinct from the
+# Personal agent's own calendar_event/reminder types so a future UI can tell them apart.
 _INTERRUPT_TYPE_BY_PROPOSAL_ACTION = {
     "preview_delivery_reminder": "delivery_reminder",
     "preview_delivery_meeting": "delivery_meeting",
+    "preview_quality_reminder": "quality_reminder",
+    "preview_quality_meeting": "quality_meeting",
     "preview_executive_meeting": "executive_meeting",
 }
 
@@ -318,9 +320,12 @@ async def _run_specialist_chat(body: ChatRequest, current_user: User, db: AsyncS
         )
 
     if route.profile not in _SPECIALIST_BRIEF_TOOL:
-        # quality_assurance - see _SPECIALIST_BRIEF_TOOL's own docstring.
+        # Defensive only: route_agent_request only ever resolves PRODUCT_DELIVERY/
+        # QUALITY_ASSURANCE (WORKSPACE scope) or EXECUTIVE (AGGREGATE scope), and all three are
+        # registered above - this guards against a future profile being added to the router
+        # without a matching brief tool, rather than any profile known to be missing today.
         return ChatResponse(
-            response="Quality Assurance Agent chưa sẵn sàng cho luồng chat này.", thread_id=thread_id, status="error"
+            response="Agent workspace này chưa sẵn sàng cho luồng chat này.", thread_id=thread_id, status="error"
         )
 
     if not getattr(settings, _PROFILE_ENABLED_FLAG[route.profile]):
@@ -376,20 +381,25 @@ async def _run_specialist_chat(body: ChatRequest, current_user: User, db: AsyncS
             thread_id=thread_id,
             status="interrupted",
             interrupt=InterruptPayload(type=interrupt_type, draft=proposal.payload),
+            proposal=proposal.model_dump(mode="json"),
         )
 
     if route.profile == AgentProfile.EXECUTIVE:
-        text = _format_executive_brief_text(result.payload["executive_brief"])
+        brief_json = result.payload["executive_brief"]
+        text = _format_executive_brief_text(brief_json)
     else:
-        text = _format_workspace_brief_text(result.payload["workspace_brief"])
-    return ChatResponse(response=text, thread_id=thread_id, status="completed")
+        brief_json = result.payload["workspace_brief"]
+        text = _format_workspace_brief_text(brief_json)
+    return ChatResponse(response=text, thread_id=thread_id, status="completed", workspace_brief=brief_json)
 
 
 _REMINDER_TOOL_BY_PROFILE = {
     AgentProfile.PRODUCT_DELIVERY: delivery_tool.propose_delivery_reminder,
+    AgentProfile.QUALITY_ASSURANCE: quality_tool.propose_quality_reminder,
 }
 _MEETING_TOOL_BY_PROFILE = {
     AgentProfile.PRODUCT_DELIVERY: delivery_tool.propose_delivery_meeting,
+    AgentProfile.QUALITY_ASSURANCE: quality_tool.propose_quality_meeting,
     AgentProfile.EXECUTIVE: executive_tool.propose_executive_meeting,
 }
 
@@ -422,7 +432,7 @@ def _build_specialist_action_fn(
     Google Calendar) - a specialist "reminder"/"meeting" proposal has no separate concept of
     creating something in someone else's account."""
     payload = proposal.payload
-    if proposal.action == "preview_delivery_reminder":
+    if proposal.action in ("preview_delivery_reminder", "preview_quality_reminder"):
 
         async def _create_reminder() -> dict:
             # A specialist reminder still lives in the confirming user's own Personal workspace -
@@ -466,7 +476,7 @@ def _build_specialist_action_fn(
 
 
 def _format_specialist_action_result(proposal: ActionProposal, result_payload: dict) -> str:
-    if proposal.action == "preview_delivery_reminder":
+    if proposal.action in ("preview_delivery_reminder", "preview_quality_reminder"):
         return f"Đã tạo nhắc nhở: \"{result_payload['title']}\" (hạn {result_payload['due_at']})."
     return f"Đã tạo lịch họp: \"{result_payload['title']}\" lúc {result_payload['starts_at']}."
 

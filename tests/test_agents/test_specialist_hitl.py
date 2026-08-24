@@ -15,6 +15,7 @@ from src.db.models import (
     AgentWorkspace,
     AgentWorkspaceMembership,
     Reminder,
+    Task,
     User,
     Workspace,
     WorkspaceMembership,
@@ -22,6 +23,7 @@ from src.db.models import (
 
 _ORG_ID = "hitl-test-org"
 _DELIVERY_WS_ID = "hitl-test-delivery"
+_QUALITY_WS_ID = "hitl-test-quality"
 
 
 def _enable_flags(monkeypatch) -> None:
@@ -86,6 +88,93 @@ async def test_propose_reminder_then_confirm_creates_a_real_reminder(client, aut
     assert len(reminders) == 1
     assert reminders[0].title == "Follow up blocked task"
     assert reminders[0].source == "agent"
+
+
+async def _seed_quality_lead() -> str:
+    async with db_session.async_session_maker() as db:
+        alice = (await db.execute(select(User).where(User.email == "alice@example.com"))).scalar_one()
+        db.add(Workspace(id=_ORG_ID, type="organization", name="HITL Test Org"))
+        await db.flush()
+        db.add(WorkspaceMembership(workspace_id=_ORG_ID, user_id=alice.id, role="member", status="active"))
+        db.add(
+            AgentWorkspace(
+                id=_QUALITY_WS_ID, organization_workspace_id=_ORG_ID, key="quality", name="Quality", agent_profile="quality_assurance"
+            )
+        )
+        await db.flush()
+        db.add(AgentWorkspaceMembership(agent_workspace_id=_QUALITY_WS_ID, user_id=alice.id, business_role="lead", status="active"))
+        db.add(
+            Task(
+                owner_id=alice.id, workspace_id=_ORG_ID, agent_workspace_id=_QUALITY_WS_ID,
+                title="Login crashes", work_item_type="bug", severity="critical", quality_status="open",
+            )
+        )
+        await db.commit()
+        return alice.id
+
+
+@pytest.mark.asyncio
+async def test_quality_brief_read_via_chat_returns_not_ready(client, auth_headers, monkeypatch):
+    """Proves Quality Assurance is actually wired into _SPECIALIST_BRIEF_TOOL - previously this
+    request unconditionally returned status="error" with "chưa sẵn sàng cho luồng chat này."
+    regardless of the feature flag (see src.api.routes._run_specialist_chat's now-removed QA
+    special case)."""
+    from src.api import routes
+
+    settings = routes.get_settings().model_copy(
+        update={"multi_agent_enabled": True, "quality_assurance_agent_enabled": True}
+    )
+    monkeypatch.setattr(routes, "get_settings", lambda: settings)
+    await _seed_quality_lead()
+
+    resp = await client.post(
+        "/api/v1/chat",
+        json={"message": "Release đã sẵn sàng chưa?", "requested_scope": "workspace", "target_agent_workspace_id": _QUALITY_WS_ID},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "completed"
+    assert "NOT_READY" in data["response"]
+    assert data["workspace_brief"]["brief_type"] == "quality"
+    assert data["workspace_brief"]["release_readiness"] == "NOT_READY"
+
+
+@pytest.mark.asyncio
+async def test_quality_propose_reminder_then_confirm_creates_a_real_reminder(client, auth_headers, monkeypatch):
+    from src.api import routes
+
+    settings = routes.get_settings().model_copy(
+        update={"multi_agent_enabled": True, "quality_assurance_agent_enabled": True}
+    )
+    monkeypatch.setattr(routes, "get_settings", lambda: settings)
+    await _seed_quality_lead()
+
+    propose_resp = await client.post(
+        "/api/v1/chat",
+        json={
+            "message": "Nhắc tôi",
+            "requested_scope": "workspace",
+            "target_agent_workspace_id": _QUALITY_WS_ID,
+            "specialist_action": {"kind": "propose_reminder", "title": "Chase critical bug", "due_at": "2026-09-01T09:00:00+07:00"},
+        },
+        headers=auth_headers,
+    )
+    assert propose_resp.status_code == 200
+    propose_data = propose_resp.json()
+    assert propose_data["status"] == "interrupted"
+    assert propose_data["interrupt"]["type"] == "quality_reminder"
+    assert propose_data["proposal"]["action"] == "preview_quality_reminder"
+    thread_id = propose_data["thread_id"]
+
+    resume_resp = await client.post("/api/v1/chat/resume", json={"thread_id": thread_id, "approved": True}, headers=auth_headers)
+    assert resume_resp.status_code == 200
+    assert resume_resp.json()["status"] == "completed"
+
+    async with db_session.async_session_maker() as db:
+        reminders = (await db.execute(select(Reminder))).scalars().all()
+    assert len(reminders) == 1
+    assert reminders[0].title == "Chase critical bug"
 
 
 @pytest.mark.asyncio

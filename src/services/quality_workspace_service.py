@@ -27,7 +27,7 @@ from src.agents.schemas.quality import (
     QualityTestProgress,
     QualityWorkItemType,
 )
-from src.db.models import AgentWorkspaceConversation, Conversation, Message
+from src.db.models import AgentWorkspaceConversation, Conversation, Message, Task
 
 
 class QualityWorkspaceError(RuntimeError):
@@ -189,6 +189,30 @@ async def load_quality_snapshot(
         freshest_source_at=max((item.captured_at for item in items), default=None),
         data_gaps=gaps,
     )
+
+
+async def list_quality_work_items(db: AsyncSession, agent_workspace_id: str) -> list[Task]:
+    """Real (Postgres-backed) read of QA work items - bugs/test cases/release checks - scoped to
+    one quality_assurance AgentWorkspace. Mirrors delivery_workspace_service.list_tasks's decision
+    to reuse Task (Task.work_item_type/severity/quality_status/release_target, added specifically
+    for this purpose - see src/db/models.py's Task docstring) rather than a parallel work-item
+    table. Callers are expected to have already run
+    resource_guard.enforce_agent_workspace_access(agent_workspace_id=...) before calling this,
+    same convention as every delivery_workspace_service function (G2).
+
+    Deliberately does NOT go through QualityWorkItemRepository/load_quality_snapshot above: that
+    protocol's REPOSITORY_SCOPE_VIOLATION check requires every item's source_id to be one of
+    scope.allowed_resource_ids (linked QA *conversation* IDs - see
+    scope_resolver._resolve_conversation_resources), which fits evidence extracted from QA chat
+    but not a freestanding Task row. Task-backed work items use the coarser
+    enforce_agent_workspace_access boundary instead, exactly like Delivery's own Task reads.
+    """
+    stmt = (
+        select(Task)
+        .where(Task.agent_workspace_id == agent_workspace_id, Task.work_item_type.is_not(None))
+        .order_by(Task.updated_at.desc())
+    )
+    return list((await db.execute(stmt)).scalars().all())
 
 
 def _escape_ilike(value: str) -> str:

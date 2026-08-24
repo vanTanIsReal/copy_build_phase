@@ -15,6 +15,7 @@ const ProfilePage = lazy(() => import('../pages/ProfilePage'))
 const PersonalAssistantPage = lazy(() => import('../pages/PersonalAssistantPage'))
 const RelationshipsPage = lazy(() => import('../pages/RelationshipsPage'))
 const WorkspaceManagementPage = lazy(() => import('../pages/WorkspaceManagementPage'))
+const WorkspaceBriefsPage = lazy(() => import('../pages/WorkspaceBriefsPage'))
 
 function RouteFallback() {
   return (
@@ -38,6 +39,7 @@ export default function AppRouter() {
               <Route path="/chat" element={<ChatPage />} />
               <Route path="/relationships" element={<RelationshipsPage />} />
               <Route path="/workspaces" element={<WorkspaceManagementPage />} />
+              <Route path="/workspace-briefs" element={<WorkspaceBriefsPage />} />
               <Route path="/tasks" element={<TaskPage />} />
               <Route path="/tasks/inbox" element={<TaskInboxPage />} />
               <Route path="/calendar" element={<CalendarPage />} />

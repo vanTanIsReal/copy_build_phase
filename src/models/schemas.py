@@ -142,6 +142,24 @@ class ChatResponse(BaseModel):
     status: Literal["completed", "interrupted", "error"] = "completed"
     interrupt: InterruptPayload | None = None
     context_scope: AuthorizedContextMetadata | None = None
+    workspace_brief: dict | None = Field(
+        default=None,
+        description=(
+            "Structured src.agents.contracts.WorkspaceBrief/ExecutiveBrief.model_dump(mode='json') "
+            "when this turn built one (requested_scope=workspace|aggregate, no specialist_action). "
+            "Additive - None for every existing Personal-agent response, never breaking that shape."
+        ),
+    )
+    proposal: dict | None = Field(
+        default=None,
+        description=(
+            "Structured src.agents.contracts.ActionProposal.model_dump(mode='json') alongside "
+            "`interrupt` when status='interrupted' for a specialist (Delivery/Quality/Executive) "
+            "action - `interrupt.draft` alone omits action/expires_at/proposal_id a UI needs to "
+            "render/expire an approve-reject card. Additive - None for the Personal agent's own "
+            "interrupts, which keep using only `interrupt`."
+        ),
+    )
 
 
 class ResumeRequest(BaseModel):

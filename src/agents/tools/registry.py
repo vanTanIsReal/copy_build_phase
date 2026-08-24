@@ -82,11 +82,16 @@ _PROFILE_REGISTRY = {
             AgentIntent.QUALITY_PROPOSE_REMINDER,
             AgentIntent.QUALITY_PROPOSE_MEETING,
         ),
+        # Reduced 4-tool set per docs/ROLE_C_QUALITY_ASSURANCE_7_DAY_PLAN.md §5.2 (the previous 7
+        # names here never matched any function in the codebase - a leftover from an earlier
+        # design; see src/agents/tools/quality_tool.py, quality_snapshot.py, quality_evidence.py
+        # for the real implementations these now point at). propose_quality_reminder/
+        # propose_quality_meeting kept separate (not merged into one propose_quality_action) -
+        # bug_assignment/bug_status_update from that same doc have no side-effect service to call
+        # yet and are intentionally not implemented.
         allowed_tools=(
-            "get_quality_work_items",
-            "search_quality_messages",
-            "get_release_test_status",
-            "get_quality_people",
+            "get_quality_snapshot",
+            "search_quality_evidence",
             "build_quality_brief",
             "propose_quality_reminder",
             "propose_quality_meeting",
