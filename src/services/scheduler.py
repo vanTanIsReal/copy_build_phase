@@ -1,5 +1,6 @@
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from sqlalchemy.pool import NullPool
 
 from src.config import get_settings
 
@@ -33,5 +34,6 @@ _jobstore_url = _sync_jobstore_url(settings.database_url)
 # it, APScheduler falls back to the *system's* local timezone (often UTC on a server) for any
 # naive datetime it's given, which would fire reminders up to 7h off from Hanoi time.
 scheduler = AsyncIOScheduler(
-    jobstores={"default": SQLAlchemyJobStore(url=_jobstore_url)}, timezone=settings.scheduler_timezone
+    jobstores={"default": SQLAlchemyJobStore(url=_jobstore_url, engine_options={"poolclass": NullPool})},
+    timezone=settings.scheduler_timezone,
 )
