@@ -13,7 +13,6 @@ const ReminderPage = lazy(() => import('../pages/ReminderPage'))
 const MemoryPage = lazy(() => import('../pages/MemoryPage'))
 const ProfilePage = lazy(() => import('../pages/ProfilePage'))
 const PersonalAssistantPage = lazy(() => import('../pages/PersonalAssistantPage'))
-const RelationshipsPage = lazy(() => import('../pages/RelationshipsPage'))
 
 function RouteFallback() {
   return (
@@ -35,7 +34,6 @@ export default function AppRouter() {
             <Route element={<AppLayout />}>
               <Route path="/assistant" element={<PersonalAssistantPage />} />
               <Route path="/chat" element={<ChatPage />} />
-              <Route path="/relationships" element={<RelationshipsPage />} />
               <Route path="/tasks" element={<TaskPage />} />
               <Route path="/tasks/inbox" element={<TaskInboxPage />} />
               <Route path="/calendar" element={<CalendarPage />} />
