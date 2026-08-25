@@ -1,6 +1,7 @@
 """Small in-memory request limiter for the app's single-worker deployment."""
 
 import asyncio
+import ipaddress
 import time
 from collections import defaultdict, deque
 
@@ -42,7 +43,16 @@ class RequestRateLimiter:
                 return f"user:{decode_access_token(authorization.removeprefix('Bearer ').strip())}"
             except (jwt.PyJWTError, KeyError):
                 pass
+        # Render's public edge overwrites CF-Connecting-IP, whereas X-Forwarded-For can contain
+        # caller-supplied entries. In production use the former for unauthenticated buckets and
+        # validate it before trusting it. Local/test traffic keeps using the socket client.
         host = request.client.host if request.client else "unknown"
+        if get_settings().app_env == "production":
+            edge_ip = request.headers.get("cf-connecting-ip", "").strip()
+            try:
+                host = str(ipaddress.ip_address(edge_ip))
+            except ValueError:
+                host = "unknown"
         return f"ip:{host}"
 
     @staticmethod
@@ -53,9 +63,9 @@ class RequestRateLimiter:
             return None
         if path in {"/api/v1/chat/resume", "/api/v1/chat/status"}:
             return None
-        if path == "/api/v1/auth/register":
+        if path in {"/api/v1/auth/register", "/api/v1/auth/admin/register"}:
             return "register", settings.rate_limit_register
-        if path in {"/api/v1/auth/login", "/api/v1/auth/google"}:
+        if path in {"/api/v1/auth/login", "/api/v1/auth/google", "/api/v1/auth/admin/login"}:
             return "auth", settings.rate_limit_auth
         if path == "/api/v1/chat" and request.method == "POST":
             return "chat", settings.rate_limit_chat

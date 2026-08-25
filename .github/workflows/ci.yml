@@ -96,7 +96,7 @@ jobs:
       - name: Wait for health check
         run: |
           for attempt in $(seq 1 30); do
-            if curl -fsS "${{ vars.RENDER_URL }}/health"; then exit 0; fi
+            if curl -fsS "${{ vars.RENDER_URL }}/ready"; then exit 0; fi
             sleep 10
           done
           exit 1

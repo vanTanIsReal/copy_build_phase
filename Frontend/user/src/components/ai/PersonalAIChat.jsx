@@ -128,7 +128,7 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
 
   return <section className="personal-chat orbit-fx">
     <ScanningBorder active={sending} />
-    <header className="personal-chat-header"><div className="personal-ai-avatar"><i className="bi bi-stars"/><span/></div><div><h3>Orbit Personal AI</h3><span><i/> Sẵn sàng hỗ trợ bạn</span></div><div className="personal-header-actions"><button className="context-mobile-btn" onClick={onContext}><i className="bi bi-layout-sidebar-reverse"/> Bối cảnh</button><button className="icon-btn" aria-label="Cuộc trò chuyện mới" onClick={()=>onThreadIdChange?.(null)}><i className="bi bi-arrow-clockwise"/></button><button className="icon-btn"><i className="bi bi-three-dots"/></button></div></header>
+    <header className="personal-chat-header"><div className="personal-ai-avatar"><i className="bi bi-stars"/><span/></div><div><h3>Orbit Personal AI</h3><span><i/> Sẵn sàng hỗ trợ bạn</span></div><div className="personal-header-actions"><button className="context-mobile-btn" onClick={onContext}><i className="bi bi-layout-sidebar-reverse"/> Bối cảnh</button><button className="icon-btn" aria-label="Cuộc trò chuyện mới" onClick={()=>onThreadIdChange?.(null)}><i className="bi bi-arrow-clockwise"/></button></div></header>
     <div className="personal-messages bg-[radial-gradient(circle,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[length:22px_22px]">
       {messages.length===0 && <div className="personal-welcome"><motion.div initial={{scale:.85,opacity:0}} animate={{scale:1,opacity:1}} className="welcome-ai-mark"><i className="bi bi-stars"/></motion.div><span className="welcome-kicker">Chào {user?.display_name || 'bạn'}</span><h1>Hôm nay mình có thể<br/><em>giúp gì cho bạn?</em></h1><p>Hỏi mình về lịch, công việc, deadline hoặc thông tin từ các cuộc trò chuyện đã được cấp quyền.</p><div className="prompt-grid">{prompts.map(p=>
         // Glassmorphism prompt card: translucent fill + backdrop blur + a soft corner flare span
@@ -148,23 +148,14 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
       {sending && <div className="personal-message"><div className="message-ai-icon"><i className="bi bi-stars"/></div><div className="personal-message-bubble">Đang xử lý...</div></div>}
     </div>
     <PulseWave active={sending} />
-    <div className="personal-composer-wrap"><div className="active-sources"><span><i className="bi bi-database-check"/> Đang dùng 4 nguồn</span><button>Chats <i className="bi bi-check"/></button><button>Tasks <i className="bi bi-check"/></button><button>Calendar <i className="bi bi-check"/></button><button>Memory <i className="bi bi-check"/></button></div>{/* Floating glass composer: translucent blur + resting glow + a stronger glow ring on focus
+    <div className="personal-composer-wrap"><div className="active-sources"><span><i className="bi bi-database-check"/> Nguồn khả dụng: Chats · Tasks · Calendar · Memory</span></div>{/* Floating glass composer: translucent blur + resting glow + a stronger glow ring on focus
           (Tailwind focus-within: variant) - `.personal-composer`'s own box model/flex layout and
           the existing orbit-fx.css glow stay as-is, these classes only add the glass surface. */}
       <form
         className="personal-composer backdrop-blur-md shadow-orbit-glow transition-shadow duration-300 focus-within:shadow-orbit-glow-focus focus-within:border-orbit-glow-a"
         onSubmit={e=>{e.preventDefault();send()}}
       >
-        <button type="button" className="icon-btn"><i className="bi bi-plus-lg"/></button>
         <textarea rows="1" value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Hỏi Orbit về công việc và lịch trình của bạn..." onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}}}/>
-        {/* Mic "listening" placeholder (pillar 3): a soft pulsing ring behind the icon while a
-            request is in flight - reuses the existing `sending` state as the closest available
-            signal to "AI is actively listening/processing", since real audio input isn't wired
-            up yet. */}
-        <div className="relative">
-          {sending && <span aria-hidden className="absolute inset-0 -m-1 animate-ping rounded-full bg-orbit-glow-a/40" />}
-          <button type="button" className="icon-btn relative"><i className="bi bi-mic"/></button>
-        </div>
         <button className="personal-send" aria-label="Gửi" disabled={sending} onClick={e=>{e.preventDefault();send()}}><i className="bi bi-arrow-up"/></button>
       </form><small>Orbit có thể mắc lỗi. Hãy kiểm tra lại thông tin quan trọng.</small></div>
   </section>

@@ -20,8 +20,14 @@ export const listAuditLog = (
   return apiFetch(`/admin/audit-log?${params}`, { token })
 }
 
-export const listUsers = (token, q) =>
-  apiFetch(`/admin/users${q ? `?q=${encodeURIComponent(q)}` : ''}`, { token })
+export const listUsers = (token, q = '') => {
+  const params = new URLSearchParams({ limit: 500 })
+  if (q) params.set('q', q)
+  return apiFetch(`/admin/users?${params}`, { token })
+}
+
+export const listWorkspaces = (token, q = '') =>
+  apiFetch(`/admin/workspaces?limit=500${q ? `&q=${encodeURIComponent(q)}` : ''}`, { token })
 
 export const updateUserRole = (token, userId, role) =>
   apiFetch(`/admin/users/${userId}/role`, { method: 'PATCH', token, body: { role } })

@@ -1,3 +1,4 @@
+import logging
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -30,6 +31,7 @@ from src.services import (
 from src.services.authorization_service import require_conversation_access
 from src.services.workspace_service import resolve_workspace_for_user
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -187,8 +189,9 @@ async def chat(
             text = await quick_action_service.run_quick_action(
                 request.quick_action, context_text, user_id=current_user.id, workspace_id=workspace_id
             )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except Exception:
+            logger.exception("Quick action failed")
+            raise HTTPException(status_code=500, detail="The AI quick action failed") from None
         output_decision = guardrail_service.evaluate_output(text)
         if not output_decision.allowed:
             text = output_decision.response

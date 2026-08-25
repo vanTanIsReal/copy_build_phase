@@ -60,6 +60,19 @@ async def test_admin_can_list_users(client, admin_auth_headers, auth_headers):
     emails = {u["email"] for u in resp.json()}
     assert "admin@example.com" in emails
     assert "alice@example.com" in emails
+    alice = next(user for user in resp.json() if user["email"] == "alice@example.com")
+    assert alice["personal_workspace_id"]
+
+
+@pytest.mark.asyncio
+async def test_admin_can_list_workspace_metadata_without_private_content(client, admin_auth_headers, auth_headers):
+    workspace = await _personal_workspace(client, auth_headers)
+    response = await client.get("/api/v1/admin/workspaces", headers=admin_auth_headers)
+    assert response.status_code == 200
+    listed = next(item for item in response.json() if item["id"] == workspace["id"])
+    assert listed["type"] == "personal"
+    assert listed["owner_email"] == "alice@example.com"
+    assert "messages" not in listed
 
 
 @pytest.mark.asyncio

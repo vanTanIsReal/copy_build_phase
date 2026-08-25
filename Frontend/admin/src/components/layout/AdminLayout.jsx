@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import { useAdminSocket } from '../../api/useWebSocket'
+import BudgetAlertToast from './BudgetAlertToast'
 
 export default function AdminLayout() {
   const [open, setOpen] = useState(false)
-  const { user, logout } = useAuth()
+  const { token, user, logout } = useAuth()
+  const [budgetAlert, setBudgetAlert] = useState(null)
   const navigate = useNavigate()
   const userAppUrl = import.meta.env.VITE_USER_APP_URL || 'http://localhost:5173'
   const initials = user?.display_name?.split(/\s+/).filter(Boolean).map(part => part[0]).slice(0, 2).join('').toUpperCase() || 'PA'
@@ -17,6 +20,7 @@ export default function AdminLayout() {
     ['/admin/audit-log', 'bi-shield-check', 'Audit log'],
   ]
   const signOut = () => { logout(); navigate('/login', { replace: true }) }
+  useAdminSocket(token, data => { if (data.type === 'usage_budget_alert') setBudgetAlert(data) })
   return <div className="admin-shell">
     <div className={`admin-backdrop ${open ? 'show' : ''}`} onClick={() => setOpen(false)} />
     <aside className={`admin-sidebar ${open ? 'open' : ''}`}>
@@ -29,8 +33,9 @@ export default function AdminLayout() {
       </div>
     </aside>
     <div className="admin-column">
-      <header className="admin-topbar"><button className="admin-icon-button admin-menu-button" onClick={() => setOpen(true)} aria-label="Open navigation"><i className="bi bi-list" /></button><div className="admin-search disabled"><i className="bi bi-search" /><input placeholder="Platform administration" disabled /></div><div className="admin-top-actions"><span className="admin-system-pill"><i /> Secured admin session</span><button className="admin-icon-button" aria-label="Help"><i className="bi bi-question-circle" /></button></div></header>
+      <header className="admin-topbar"><button className="admin-icon-button admin-menu-button" onClick={() => setOpen(true)} aria-label="Open navigation"><i className="bi bi-list" /></button><div className="admin-search disabled"><i className="bi bi-search" /><input placeholder="Platform administration" disabled /></div><div className="admin-top-actions"><span className="admin-system-pill"><i /> Secured admin session</span></div></header>
       <main className="admin-main"><Outlet /></main>
     </div>
+    {budgetAlert && <BudgetAlertToast alert={budgetAlert} onClose={() => setBudgetAlert(null)} />}
   </div>
 }

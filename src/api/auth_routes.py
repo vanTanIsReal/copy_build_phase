@@ -7,7 +7,7 @@ from starlette.concurrency import run_in_threadpool
 
 from src.auth import google_oauth
 from src.auth.dependencies import get_current_user
-from src.auth.security import create_access_token, hash_password, verify_password
+from src.auth.security import create_access_token, create_websocket_ticket, hash_password, verify_password
 from src.config import get_settings
 from src.db.models import GoogleIdentity, User
 from src.db.session import get_db
@@ -20,6 +20,7 @@ from src.models.auth_schemas import (
     RegisterRequest,
     UpdateProfileRequest,
     UserPublic,
+    WebSocketTicketOut,
 )
 from src.services.audit_service import record_audit_event
 from src.services.workspace_service import create_personal_workspace
@@ -212,6 +213,11 @@ async def admin_login(body: LoginRequest, db: AsyncSession = Depends(get_db)) ->
 @router.get("/me", response_model=UserPublic)
 async def me(current_user: User = Depends(get_current_user)) -> UserPublic:
     return _to_public(current_user)
+
+
+@router.post("/ws-ticket", response_model=WebSocketTicketOut)
+async def websocket_ticket(current_user: User = Depends(get_current_user)) -> WebSocketTicketOut:
+    return WebSocketTicketOut(ticket=create_websocket_ticket(current_user.id))
 
 
 @router.patch("/me", response_model=UserPublic)

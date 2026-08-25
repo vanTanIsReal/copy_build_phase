@@ -15,6 +15,7 @@ export default function NewConversationModal({ open, onClose, onCreated }) {
 
   useEffect(() => {
     if (!open) return
+    if (search.trim().length < 2) { setUsers([]); return }
     listUsers(token, search).then(setUsers).catch(() => setUsers([]))
   }, [open, search, token])
 
@@ -61,7 +62,7 @@ export default function NewConversationModal({ open, onClose, onCreated }) {
                     <span>{u.display_name}<small className="d-block text-muted">{u.email}</small></span>
                   </label>
                 ))}
-                {!users.length && <p className="text-muted small mb-0">No matching users found.</p>}
+                {!users.length && <p className="text-muted small mb-0">{search.trim().length < 2 ? 'Type at least 2 characters to find a person.' : 'No matching users found.'}</p>}
               </div>
             </div>
             <div className="modal-footer">

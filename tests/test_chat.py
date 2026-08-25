@@ -230,6 +230,27 @@ async def test_list_users_excludes_self(client, auth_headers, other_auth_headers
 
 
 @pytest.mark.asyncio
+async def test_personal_user_directory_requires_search(client, auth_headers, other_auth_headers):
+    workspaces = (await client.get("/api/v1/workspaces", headers=auth_headers)).json()
+    personal = next(item for item in workspaces if item["type"] == "personal")
+    response = await client.get(f"/api/v1/users?workspace_id={personal['id']}", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json() == []
+
+    found = await client.get(
+        f"/api/v1/users?workspace_id={personal['id']}&search=bob", headers=auth_headers
+    )
+    assert found.status_code == 200
+    assert [user["email"] for user in found.json()] == ["bob@example.com"]
+
+    wildcard = await client.get(
+        f"/api/v1/users?workspace_id={personal['id']}&search=%25%25", headers=auth_headers
+    )
+    assert wildcard.status_code == 200
+    assert wildcard.json() == []
+
+
+@pytest.mark.asyncio
 async def test_hide_conversation_is_per_user_and_new_message_restores_it(
     client, auth_headers, other_auth_headers
 ):
@@ -294,3 +315,39 @@ async def test_leave_group_revokes_access_and_keeps_remaining_member(
         f"/api/v1/conversations/{conversation['id']}/messages", headers=auth_headers
     )
     assert remaining.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_last_group_member_can_leave_without_deleting_linked_user_data(
+    client, auth_headers, other_auth_headers
+):
+    workspace, other = await _team_workspace(client, auth_headers, other_auth_headers)
+    conversation = (
+        await client.post(
+            "/api/v1/conversations",
+            json={
+                "type": "group",
+                "participant_ids": [other["id"]],
+                "name": "Disposable group",
+                "workspace_id": workspace["id"],
+            },
+            headers=auth_headers,
+        )
+    ).json()
+    task = (
+        await client.post(
+            "/api/v1/tasks",
+            json={"title": "Keep me", "workspace_id": workspace["id"], "conversation_id": conversation["id"]},
+            headers=auth_headers,
+        )
+    ).json()
+
+    first = await client.post(f"/api/v1/conversations/{conversation['id']}/leave", headers=other_auth_headers)
+    assert first.json()["conversation_deleted"] is False
+    last = await client.post(f"/api/v1/conversations/{conversation['id']}/leave", headers=auth_headers)
+    assert last.status_code == 200
+    assert last.json()["conversation_deleted"] is True
+
+    tasks = (await client.get(f"/api/v1/tasks?workspace_id={workspace['id']}", headers=auth_headers)).json()
+    preserved = next(item for item in tasks if item["id"] == task["id"])
+    assert preserved["conversation_id"] is None

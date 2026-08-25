@@ -117,6 +117,29 @@ async def test_connection_status_and_oauth_state_are_user_bound(client, auth_hea
 
 
 @pytest.mark.asyncio
+async def test_oauth_callback_escapes_query_error_in_html_and_inline_script(client):
+    attack = "</script><script>alert('xss')</script>"
+    response = await client.get("/api/v1/calendar/oauth/callback", params={"error": attack})
+
+    assert response.status_code == 400
+    assert attack not in response.text
+    assert "<script>alert" not in response.text
+    assert "\\u003c/script\\u003e" in response.text
+
+
+@pytest.mark.asyncio
+async def test_calendar_errors_do_not_expose_upstream_exception(client, auth_headers, monkeypatch):
+    async def broken_list(*_args, **_kwargs):
+        raise RuntimeError("secret provider detail")
+
+    monkeypatch.setattr(calendar_service, "list_events", broken_list)
+    response = await client.get("/api/v1/calendar/events", headers=auth_headers)
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Google Calendar is temporarily unavailable"
+    assert "secret provider detail" not in response.text
+
+
+@pytest.mark.asyncio
 async def test_refresh_token_is_encrypted_at_rest(client, auth_headers):
     user_id = await _user_id(client, auth_headers)
     plaintext = "1//secret-refresh-token"

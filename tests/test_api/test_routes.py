@@ -42,6 +42,13 @@ async def test_health(client):
 
 
 @pytest.mark.asyncio
+async def test_readiness_checks_database_schema(client):
+    response = await client.get("/ready")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready"}
+
+
+@pytest.mark.asyncio
 async def test_chat_requires_auth(client):
     response = await client.post("/api/v1/chat", json={"message": "hello"})
     assert response.status_code == 401

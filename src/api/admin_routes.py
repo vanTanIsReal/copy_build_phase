@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -18,7 +18,9 @@ from src.db.models import (
     SystemConfig,
     Task,
     User,
+    Workspace,
 )
+from src.db.schema_health import inspect_session_schema
 from src.db.session import get_db
 from src.models.admin_schemas import (
     AdminAIManagement,
@@ -31,12 +33,13 @@ from src.models.admin_schemas import (
     AdminSystemHealth,
     AdminTaskOut,
     AdminUserOut,
+    AdminWorkspaceOut,
     UpdateAIConfigurationRequest,
     UpdateBudgetRequest,
     UpdateRoleRequest,
     UpdateStatusRequest,
 )
-from src.services import ai_config_service, reminder_service, usage_service
+from src.services import ai_config_service, reminder_service, task_calendar_service, usage_service
 from src.services.audit_service import record_audit_event
 from src.services.authorization_service import require_support_scope
 from src.services.scheduler import scheduler
@@ -92,8 +95,15 @@ async def get_system_health(db: AsyncSession = Depends(get_db)) -> AdminSystemHe
     try:
         await db.execute(select(1))
         dialect = db.get_bind().dialect.name
+        schema = await inspect_session_schema(db)
+        schema_ready = schema.compatible and (schema.revision_current or settings.app_env != "production")
         components.append(
-            {"key": "database", "label": "Database", "status": "operational", "detail": f"{dialect} connected"}
+            {
+                "key": "database",
+                "label": "Database",
+                "status": "operational" if schema_ready else "down",
+                "detail": f"{dialect} connected; schema {'ready' if schema_ready else 'out of date'}",
+            }
         )
     except Exception:  # noqa: BLE001 - health response reports dependency failure
         components.append({"key": "database", "label": "Database", "status": "down", "detail": "Connection failed"})
@@ -339,12 +349,54 @@ async def list_users(
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> list[AdminUserOut]:
-    stmt = select(User).order_by(User.created_at.desc())
+    stmt = (
+        select(User, Workspace.id)
+        .outerjoin(
+            Workspace,
+            and_(Workspace.personal_owner_user_id == User.id, Workspace.type == "personal"),
+        )
+        .order_by(User.created_at.desc())
+    )
     if q:
         pattern = f"%{q}%"
         stmt = stmt.where((User.email.ilike(pattern)) | (User.display_name.ilike(pattern)))
-    users = (await db.execute(stmt.offset(offset).limit(limit))).scalars().all()
-    return [AdminUserOut.model_validate(u, from_attributes=True) for u in users]
+    rows = (await db.execute(stmt.offset(offset).limit(limit))).all()
+    return [
+        AdminUserOut.model_validate(user, from_attributes=True).model_copy(
+            update={"personal_workspace_id": workspace_id}
+        )
+        for user, workspace_id in rows
+    ]
+
+
+@router.get("/workspaces", response_model=list[AdminWorkspaceOut])
+async def list_workspaces(
+    q: str | None = None,
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> list[AdminWorkspaceOut]:
+    owner = User.__table__.alias("workspace_owner")
+    stmt = (
+        select(Workspace, owner.c.email)
+        .outerjoin(owner, owner.c.id == Workspace.personal_owner_user_id)
+        .order_by(Workspace.created_at.desc())
+    )
+    if q:
+        pattern = f"%{q}%"
+        stmt = stmt.where(Workspace.name.ilike(pattern) | owner.c.email.ilike(pattern))
+    rows = (await db.execute(stmt.offset(offset).limit(limit))).all()
+    return [
+        AdminWorkspaceOut(
+            id=workspace.id,
+            name=workspace.name,
+            type=workspace.type,
+            status=workspace.status,
+            owner_user_id=workspace.personal_owner_user_id,
+            owner_email=owner_email,
+        )
+        for workspace, owner_email in rows
+    ]
 
 
 @router.patch("/users/{user_id}/role", response_model=AdminUserOut)
@@ -395,6 +447,8 @@ async def update_user_status(
     )
     await db.commit()
     await db.refresh(user)
+    if not user.is_active:
+        await manager.disconnect_user(user.id)
     return AdminUserOut.model_validate(user, from_attributes=True)
 
 
@@ -451,6 +505,19 @@ async def delete_task_admin(
     ).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    event_id = task.calendar_event_id
+    try:
+        await task_calendar_service.delete_linked_event(task.owner_id, event_id)
+    except task_calendar_service.LinkedCalendarNotConnectedError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The owner must reconnect Google Calendar before this synced task can be deleted",
+        ) from None
+    except task_calendar_service.LinkedCalendarDeleteError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not delete the linked Google Calendar event; the task was kept",
+        ) from None
     await record_audit_event(
         db,
         actor=current_user,
@@ -462,6 +529,11 @@ async def delete_task_admin(
     )
     await db.delete(task)
     await db.commit()
+    if event_id:
+        await manager.broadcast_to_users(
+            [task.owner_id], {"type": "calendar_event_deleted", "event_id": event_id}
+        )
+    await manager.broadcast_to_users([task.owner_id], {"type": "task_deleted", "task_id": task_id})
 
 
 @router.get("/reminders", response_model=list[AdminReminderOut])

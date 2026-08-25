@@ -11,7 +11,7 @@ from src.config import get_settings
 from src.db.models import Conversation, Task, User, Workspace
 from src.db.session import get_db
 from src.models.task_schemas import TaskCreateRequest, TaskOut, UpdateTaskStatusRequest
-from src.services import calendar_service, consent_service
+from src.services import calendar_service, consent_service, task_calendar_service
 from src.services.authorization_service import require_conversation_access
 from src.services.google_credentials import CalendarNotConnectedError
 from src.services.workspace_service import resolve_workspace_for_user
@@ -301,6 +301,23 @@ async def delete_task(
     task_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ) -> None:
     task = await _get_own_task_or_404(task_id, current_user, db)
+    event_id = task.calendar_event_id
+    try:
+        await task_calendar_service.delete_linked_event(current_user.id, event_id)
+    except task_calendar_service.LinkedCalendarNotConnectedError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Reconnect Google Calendar before deleting this synced task",
+        ) from None
+    except task_calendar_service.LinkedCalendarDeleteError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not delete the linked Google Calendar event; the task was kept",
+        ) from None
     await db.delete(task)
     await db.commit()
+    if event_id:
+        await manager.broadcast_to_users(
+            [current_user.id], {"type": "calendar_event_deleted", "event_id": event_id}
+        )
     await manager.broadcast_to_users([current_user.id], {"type": "task_deleted", "task_id": task_id})

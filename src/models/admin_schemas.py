@@ -16,6 +16,16 @@ class AdminUserOut(BaseModel):
     platform_role: Literal["user", "platform_admin"]
     is_active: bool
     created_at: datetime
+    personal_workspace_id: str | None = None
+
+
+class AdminWorkspaceOut(BaseModel):
+    id: str
+    name: str
+    type: Literal["personal", "organization"]
+    status: Literal["active", "suspended", "deleting"]
+    owner_user_id: str | None
+    owner_email: str | None
 
 
 class AdminStats(BaseModel):

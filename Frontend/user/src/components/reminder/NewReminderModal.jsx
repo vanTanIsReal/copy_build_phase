@@ -3,10 +3,11 @@ import { useAuth } from '../../context/AuthContext'
 import { createReminder } from '../../api/reminders'
 
 export default function NewReminderModal({ open, onClose, onCreated }) {
-  const { token } = useAuth()
+  const { token, user } = useAuth()
+  const defaultLead = Number(user?.preferences?.default_reminder_lead_minutes) || 30
   const [title, setTitle] = useState('')
   const [dueAt, setDueAt] = useState('')
-  const [leadMinutes, setLeadMinutes] = useState(30)
+  const [leadMinutes, setLeadMinutes] = useState(defaultLead)
   const [message, setMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -26,7 +27,7 @@ export default function NewReminderModal({ open, onClose, onCreated }) {
       })
       onCreated(reminder)
       onClose()
-      setTitle(''); setDueAt(''); setLeadMinutes(30); setMessage('')
+      setTitle(''); setDueAt(''); setLeadMinutes(defaultLead); setMessage('')
     } catch (err) { setError(err.detail || 'Could not create reminder') }
     finally { setSubmitting(false) }
   }

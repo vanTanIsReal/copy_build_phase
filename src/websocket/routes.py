@@ -4,7 +4,7 @@ import jwt
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import HTTPException
 
-from src.auth.security import decode_access_token
+from src.auth.security import decode_websocket_ticket
 from src.db import session as db_session
 from src.db.models import User
 from src.services import chat_service, event_extraction_service, proactive_service
@@ -27,12 +27,12 @@ def _run_in_background(coro) -> None:
 
 @router.websocket("/ws")
 async def chat_websocket(websocket: WebSocket) -> None:
-    token = websocket.query_params.get("token")
-    if not token:
+    ticket = websocket.query_params.get("ticket")
+    if not ticket:
         await websocket.close(code=4001)
         return
     try:
-        user_id = decode_access_token(token)
+        user_id = decode_websocket_ticket(ticket)
     except jwt.PyJWTError:
         await websocket.close(code=4001)
         return

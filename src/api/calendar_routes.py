@@ -52,6 +52,26 @@ def _not_connected() -> HTTPException:
     )
 
 
+def _script_json(value: str) -> str:
+    """Serialize untrusted text for an inline script without allowing </script> breakout."""
+    return (
+        json.dumps(value)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
+
+
+def _calendar_upstream_error(operation: str, exc: Exception) -> HTTPException:
+    logger.error("Google Calendar %s failed: %s", operation, type(exc).__name__, exc_info=True)
+    return HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="Google Calendar is temporarily unavailable",
+    )
+
+
 async def _candidate_for_manager(db: AsyncSession, candidate_id: str, current_user: User) -> EventCandidate:
     candidate = await db.get(EventCandidate, candidate_id)
     if candidate is None:
@@ -77,8 +97,12 @@ async def get_calendar_connection(
 async def calendar_oauth_url(current_user: User = Depends(get_current_user)) -> dict:
     try:
         return {"url": google_credentials.build_authorization_url(current_user.id)}
-    except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from None
+    except RuntimeError:
+        logger.exception("Google Calendar authorization URL is not configured")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google Calendar connection is not configured",
+        ) from None
 
 
 @router.delete("/calendar/connection", status_code=status.HTTP_204_NO_CONTENT)
@@ -93,9 +117,9 @@ async def calendar_oauth_callback(
     error: str | None = Query(default=None),
 ) -> HTMLResponse:
     def page(ok: bool, message: str, status_code: int = 200) -> HTMLResponse:
-        origin = json.dumps(get_settings().frontend_origin)
+        origin = _script_json(get_settings().frontend_origin)
         safe_message = html.escape(message)
-        message_json = json.dumps(message)
+        message_json = _script_json(message)
         document = f"""<!doctype html><meta charset=\"utf-8\"><title>Google Calendar</title>
 <body style=\"font-family:system-ui;padding:2rem;text-align:center\"><p>{safe_message}</p>
 <script>if(window.opener)window.opener.postMessage({{type:'calendar_oauth',ok:{str(ok).lower()},message:{message_json}}},{origin});
@@ -220,7 +244,7 @@ async def confirm_event_candidate(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Google Calendar error: {exc}") from None
+        raise _calendar_upstream_error("candidate confirmation", exc) from None
 
     candidate.status = "confirmed"
     await db.commit()
@@ -274,7 +298,7 @@ async def list_events(
     except CalendarNotConnectedError:
         raise _not_connected() from None
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Google Calendar error: {exc}") from None
+        raise _calendar_upstream_error("event listing", exc) from None
     return [_to_out(event) for event in items]
 
 
@@ -296,7 +320,7 @@ async def create_event(
     except CalendarNotConnectedError:
         raise _not_connected() from None
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Google Calendar error: {exc}") from None
+        raise _calendar_upstream_error("event creation", exc) from None
     out = _to_out(created)
     await calendar_service.broadcast_change(current_user.id, "calendar_event_created", {"event": out.model_dump()})
     return out
@@ -321,7 +345,7 @@ async def update_event(
     except CalendarNotConnectedError:
         raise _not_connected() from None
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Google Calendar error: {exc}") from None
+        raise _calendar_upstream_error("event update", exc) from None
     out = _to_out(updated)
     await calendar_service.broadcast_change(current_user.id, "calendar_event_updated", {"event": out.model_dump()})
     return out
@@ -334,5 +358,5 @@ async def delete_event(event_id: str, current_user: User = Depends(get_current_u
     except CalendarNotConnectedError:
         raise _not_connected() from None
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Google Calendar error: {exc}") from None
+        raise _calendar_upstream_error("event deletion", exc) from None
     await calendar_service.broadcast_change(current_user.id, "calendar_event_deleted", {"event_id": event_id})

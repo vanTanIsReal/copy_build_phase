@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import func, select
+from sqlalchemy import create_engine, func, select
 
 from src.db import session as db_session
 from src.db.models import MigrationState, User, Workspace
@@ -206,6 +206,34 @@ def test_alembic_upgrade_builds_fresh_database(tmp_path):
     assert revision == "20260824_19"
     assert "agent_threads" in tables
     assert {"google_identities", "ai_permissions"}.issubset(tables)
+
+
+def test_prepare_database_stamps_compatible_pre_alembic_schema(tmp_path):
+    database_path = tmp_path / "create-all.db"
+    sync_engine = create_engine(f"sqlite:///{database_path.as_posix()}")
+    from src.db.base import Base
+
+    Base.metadata.create_all(sync_engine)
+    sync_engine.dispose()
+    environment = os.environ.copy()
+    environment["DATABASE_URL"] = f"sqlite:///{database_path.as_posix()}"
+    environment["APP_ENV"] = "test"
+
+    result = subprocess.run(
+        [sys.executable, "scripts/prepare_database.py"],
+        cwd=Path(__file__).parent.parent,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Compatible pre-Alembic schema detected" in result.stdout
+    connection = sqlite3.connect(database_path)
+    revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+    connection.close()
+    assert revision == "20260824_19"
 
 
 @pytest.mark.asyncio

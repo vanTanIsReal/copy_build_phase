@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { WS_BASE_URL } from './client'
+import { apiFetch, WS_BASE_URL } from './client'
 
 export function useChatSocket(token, onMessage) {
   const socketRef = useRef(null)
@@ -12,9 +12,17 @@ export function useChatSocket(token, onMessage) {
     let connectTimer
     let reconnectTimer
 
-    const connect = () => {
+    const connect = async () => {
       if (cancelled) return
-      const ws = new WebSocket(`${WS_BASE_URL}?token=${token}`)
+      let ticket
+      try {
+        ticket = (await apiFetch('/auth/ws-ticket', { method: 'POST', token })).ticket
+      } catch {
+        if (!cancelled) reconnectTimer = setTimeout(connect, 2000)
+        return
+      }
+      if (cancelled) return
+      const ws = new WebSocket(`${WS_BASE_URL}?ticket=${encodeURIComponent(ticket)}`)
       socketRef.current = ws
       ws.onmessage = (event) => {
         try { onMessageRef.current?.(JSON.parse(event.data)) } catch { /* ignore malformed frame */ }

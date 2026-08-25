@@ -12,7 +12,10 @@ process-local.
 4. Add `RENDER_DEPLOY_HOOK_URL` as a GitHub secret and `RENDER_URL` as a GitHub variable.
 5. Run the `Deploy backend` workflow once manually. Later main-branch deployments run only after CI succeeds.
 
-The container runs `alembic upgrade head` before Uvicorn and exposes `/health` for rollout checks.
+Before Uvicorn starts, the container upgrades a versioned database with Alembic. A database made
+by the older `create_all` startup path is stamped only after every current ORM table and column is
+verified. `/health` is liveness-only; Render rollout checks use `/ready`, which also verifies the
+database schema and the current Alembic revision in production.
 
 ## Frontends (Vercel)
 

@@ -6,6 +6,7 @@ import AdminMemoryTable from '../../components/admin/AdminMemoryTable'
 import { useAuth } from '../../context/AuthContext'
 import {
   listUsers,
+  listWorkspaces,
   listTasks, deleteTask,
   listReminders, deleteReminder,
   listMemories, deleteMemory,
@@ -28,6 +29,7 @@ export default function AdminUserDataPage() {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [users, setUsers] = useState([])
+  const [workspaces, setWorkspaces] = useState([])
   const [ownerFilter, setOwnerFilter] = useState('')
   const [workspaceId, setWorkspaceId] = useState('')
   const [grants, setGrants] = useState([])
@@ -36,7 +38,11 @@ export default function AdminUserDataPage() {
   const [error, setError] = useState('')
   const [requesting, setRequesting] = useState(false)
 
-  useEffect(() => { listUsers(token).then(setUsers) }, [token])
+  useEffect(() => {
+    Promise.all([listUsers(token), listWorkspaces(token)])
+      .then(([nextUsers, nextWorkspaces]) => { setUsers(nextUsers); setWorkspaces(nextWorkspaces) })
+      .catch(err => setError(err.detail || 'Could not load support targets.'))
+  }, [token])
 
   const hasScope = (scope) => grants.some(grant => grant.status === 'approved' && grant.requested_scope === scope && new Date(grant.expires_at) > new Date())
   const canRead = hasScope('personal_data:read') || hasScope('personal_data:manage')
@@ -72,8 +78,10 @@ export default function AdminUserDataPage() {
   const onDelete = async (item) => {
     if (!window.confirm(`Delete this ${confirmLabel[tab]}? This cannot be undone.`)) return
     if (!canManage) { setError('An approved personal_data:manage grant is required to delete data.'); return }
-    await deleteFor[tab](token, workspaceId, item.id)
-    setItems(list => list.filter(x => x.id !== item.id))
+    try {
+      await deleteFor[tab](token, workspaceId, item.id)
+      setItems(list => list.filter(x => x.id !== item.id))
+    } catch (err) { setError(err.detail || `Could not delete the ${confirmLabel[tab]}.`) }
   }
 
   return (
@@ -82,7 +90,7 @@ export default function AdminUserDataPage() {
       {error && <div className="admin-warning-banner"><i className="bi bi-exclamation-triangle" /><div><strong>Support action failed</strong><span>{error}</span></div></div>}
       <section className="admin-card content-card mb-3 p-3">
         <form onSubmit={requestAccess} className="row g-2 align-items-end">
-          <label className="col-md-3"><span className="form-label small">Workspace ID</span><input className="form-control" value={workspaceId} onChange={event=>setWorkspaceId(event.target.value.trim())} required/></label>
+          <label className="col-md-3"><span className="form-label small">Workspace</span><select className="form-select" value={workspaceId} onChange={event=>setWorkspaceId(event.target.value)} required><option value="">Select workspace...</option>{workspaces.map(workspace => <option key={workspace.id} value={workspace.id}>{workspace.name} ({workspace.owner_email || workspace.type})</option>)}</select></label>
           <label className="col-md-3"><span className="form-label small">Scope</span><select className="form-select" value={requestedScope} onChange={event=>setRequestedScope(event.target.value)}><option value="personal_data:read">Read support data</option><option value="personal_data:manage">Manage support data</option></select></label>
           <label className="col-md-4"><span className="form-label small">Reason</span><input className="form-control" value={reason} onChange={event=>setReason(event.target.value)} minLength={10} required/></label>
           <div className="col-md-2"><button className="btn btn-primary w-100" disabled={requesting}>{requesting?'Requesting...':'Request access'}</button></div>

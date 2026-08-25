@@ -1,8 +1,10 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents.graph import close_checkpointer, init_checkpointer
 from src.api.admin_routes import router as admin_router
@@ -21,7 +23,8 @@ from src.api.task_routes import router as task_router
 from src.api.timeline_routes import router as timeline_router
 from src.api.workspace_routes import router as workspace_router
 from src.config import get_settings
-from src.db.session import init_db
+from src.db.schema_health import inspect_session_schema
+from src.db.session import get_db, init_db
 from src.services import (
     calendar_service,
     conversation_summary_service,
@@ -125,3 +128,18 @@ app.include_router(assistant_router, prefix="/api/v1", tags=["assistant"])
 @app.get("/health")
 async def health():
     return {"status": "ok", "env": settings.app_env}
+
+
+@app.get("/ready")
+async def readiness(db: AsyncSession = Depends(get_db)):
+    try:
+        schema = await inspect_session_schema(db)
+    except Exception:  # noqa: BLE001 - readiness must fail closed without leaking DB details
+        logging.exception("Database readiness check failed")
+        return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content={"status": "not_ready"})
+    revision_required = settings.app_env == "production"
+    ready = schema.compatible and (schema.revision_current or not revision_required)
+    return JSONResponse(
+        status_code=status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"status": "ready" if ready else "not_ready"},
+    )

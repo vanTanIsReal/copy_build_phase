@@ -33,16 +33,21 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
 ) -> list[UserPublic]:
     workspace = await resolve_workspace_for_user(db, current_user.id, workspace_id)
-    # Personal workspaces have no memberships to scope by, so fall back to the
-    # global active-user directory - this is what powers plain 1:1 chat between
-    # any two registered users (independent of the organization/agent-workspace
-    # features, which keep their own membership-scoped visibility below).
+    # Personal workspaces can start a direct chat with another registered user, but never expose
+    # a bulk global email directory. Require an intentional search and cap discovery results.
     if workspace.type == "personal":
+        if not search or len(search.strip()) < 2:
+            return []
         stmt = select(User).where(User.id != current_user.id, User.is_active.is_(True))
-        if search:
-            pattern = f"%{search}%"
-            stmt = stmt.where(or_(User.display_name.ilike(pattern), User.email.ilike(pattern)))
-        users = (await db.execute(stmt)).scalars().all()
+        escaped_search = search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped_search}%"
+        stmt = stmt.where(
+            or_(
+                User.display_name.ilike(pattern, escape="\\"),
+                User.email.ilike(pattern, escape="\\"),
+            )
+        )
+        users = (await db.execute(stmt.order_by(User.display_name).limit(20))).scalars().all()
         return [
             UserPublic(
                 id=u.id,

@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import (
@@ -11,6 +11,8 @@ from src.db.models import (
     ConversationRollingSummary,
     EventCandidate,
     EventExtractionCursor,
+    Memory,
+    MemoryEpisode,
     Message,
     Task,
     User,
@@ -262,6 +264,28 @@ async def leave_group_conversation(
         ).scalars()
     )
     if not remaining:
+        # Preserve confirmed user-owned domain records, but detach them from the chat that no
+        # longer has any authorized reader. Derived conversation-only artifacts are deleted
+        # explicitly because existing production foreign keys do not define database cascades.
+        await db.execute(update(Task).where(Task.conversation_id == conversation_id).values(conversation_id=None))
+        await db.execute(
+            update(Memory)
+            .where(Memory.source_conversation_id == conversation_id)
+            .values(source_conversation_id=None)
+        )
+        await db.execute(
+            update(MemoryEpisode)
+            .where(MemoryEpisode.conversation_id == conversation_id)
+            .values(conversation_id=None)
+        )
+        await db.execute(delete(AIPermission).where(AIPermission.conversation_id == conversation_id))
+        await db.execute(delete(EventCandidate).where(EventCandidate.conversation_id == conversation_id))
+        await db.execute(delete(EventExtractionCursor).where(EventExtractionCursor.conversation_id == conversation_id))
+        await db.execute(
+            delete(ConversationRollingSummary).where(
+                ConversationRollingSummary.conversation_id == conversation_id
+            )
+        )
         await db.delete(conversation)
         await db.commit()
         return [], True

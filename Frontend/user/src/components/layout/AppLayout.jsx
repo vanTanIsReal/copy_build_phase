@@ -4,10 +4,11 @@ import Sidebar from './Sidebar'
 import TopNavbar from './TopNavbar'
 import ReminderToast from './ReminderToast'
 import TaskSuggestedToast from './TaskSuggestedToast'
+import BudgetAlertToast from './BudgetAlertToast'
 import TransitionVeil from '../fx/TransitionVeil'
 import { useAuth } from '../../context/AuthContext'
 import { useChatSocket } from '../../api/useWebSocket'
-import { getNotificationPermission, notifyTaskSuggested } from '../../utils/browserNotifications'
+import { getNotificationPermission, notifyReminderFired, notifyTaskSuggested } from '../../utils/browserNotifications'
 
 export default function AppLayout() {
   const [open, setOpen] = useState(false)
@@ -16,6 +17,7 @@ export default function AppLayout() {
   const handlersRef = useRef(new Set())
   const [toastReminder, setToastReminder] = useState(null)
   const [toastTask, setToastTask] = useState(null)
+  const [toastBudget, setToastBudget] = useState(null)
   // Data Flight target (pillar 2): the Sidebar's Tasks nav icon, shared with TaskSuggestedToast so
   // it knows where to fly to. AppLayout is already the common ancestor of both, so a single ref
   // passed down one level is enough - no Context needed.
@@ -33,7 +35,14 @@ export default function AppLayout() {
 
   const { sendJson } = useChatSocket(token, (data) => {
     handlersRef.current.forEach(handler => handler(data))
-    if (data.type === 'reminder_fired') setToastReminder(data.reminder)
+    if (data.type === 'reminder_fired') {
+      setToastReminder(data.reminder)
+      if (
+        user?.preferences?.desktop_notifications === true &&
+        document.visibilityState !== 'visible' &&
+        getNotificationPermission() === 'granted'
+      ) notifyReminderFired(data.reminder, { onClick: () => navigate('/reminders') })
+    }
     if (data.type === 'task_suggested') {
       setToastTask(data.task)
       if (
@@ -52,6 +61,7 @@ export default function AppLayout() {
       <div className="app-column"><TopNavbar onMenu={() => setOpen(true)} /><main className="app-main"><Outlet context={{ sendJson, subscribe }} /></main></div>
       {toastReminder && <ReminderToast reminder={toastReminder} onClose={() => setToastReminder(null)} />}
       {toastTask && <TaskSuggestedToast task={toastTask} onClose={() => setToastTask(null)} tasksIconRef={tasksIconRef} onFlightArrive={onFlightArrive} />}
+      {toastBudget && <BudgetAlertToast alert={toastBudget} onClose={() => setToastBudget(null)} />}
     </div>
   )
 }

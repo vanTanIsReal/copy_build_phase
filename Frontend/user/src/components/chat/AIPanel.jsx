@@ -65,8 +65,9 @@ export default function AIPanel({
   canManageAi = false,
   onBusyChange,
 }) {
-  const { token } = useAuth()
-  const [scope, setScope] = useState('latest_20')
+  const { token, user } = useAuth()
+  const preferredScope = user?.preferences?.permission_scope
+  const [scope, setScope] = useState(() => scopeOptions[preferredScope] ? preferredScope : 'latest_20')
   const [customSince, setCustomSince] = useState('')
   const [customUntil, setCustomUntil] = useState('')
   const [runningAction, setRunningAction] = useState(null)

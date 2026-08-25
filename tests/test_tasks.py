@@ -1,5 +1,5 @@
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -77,6 +77,43 @@ async def test_delete_task(client, auth_headers):
 
     resp = await client.get("/api/v1/tasks", headers=auth_headers)
     assert created["id"] not in [t["id"] for t in resp.json()]
+
+
+@pytest.mark.asyncio
+async def test_delete_synced_task_deletes_calendar_event_first(client, auth_headers, monkeypatch):
+    created = (
+        await client.post("/api/v1/tasks", json={"title": "Synced task"}, headers=auth_headers)
+    ).json()
+    async with db_session.async_session_maker() as db:
+        task = await db.get(Task, created["id"])
+        task.calendar_event_id = "event-linked"
+        await db.commit()
+    delete_event = AsyncMock()
+    monkeypatch.setattr(calendar_service, "delete_event", delete_event)
+
+    response = await client.delete(f"/api/v1/tasks/{created['id']}", headers=auth_headers)
+
+    assert response.status_code == 204
+    delete_event.assert_awaited_once()
+    assert created["id"] not in [item["id"] for item in (await client.get("/api/v1/tasks", headers=auth_headers)).json()]
+
+
+@pytest.mark.asyncio
+async def test_delete_synced_task_keeps_task_when_calendar_delete_fails(client, auth_headers, monkeypatch):
+    created = (
+        await client.post("/api/v1/tasks", json={"title": "Retry delete"}, headers=auth_headers)
+    ).json()
+    async with db_session.async_session_maker() as db:
+        task = await db.get(Task, created["id"])
+        task.calendar_event_id = "event-fails"
+        await db.commit()
+    monkeypatch.setattr(calendar_service, "delete_event", AsyncMock(side_effect=RuntimeError("provider secret")))
+
+    response = await client.delete(f"/api/v1/tasks/{created['id']}", headers=auth_headers)
+
+    assert response.status_code == 502
+    assert "provider secret" not in response.text
+    assert created["id"] in [item["id"] for item in (await client.get("/api/v1/tasks", headers=auth_headers)).json()]
 
 
 @pytest.mark.asyncio
