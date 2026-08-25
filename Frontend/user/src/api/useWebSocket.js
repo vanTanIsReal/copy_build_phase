@@ -1,13 +1,17 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { apiFetch, WS_BASE_URL } from './client'
 
 export function useChatSocket(token, onMessage) {
   const socketRef = useRef(null)
   const onMessageRef = useRef(onMessage)
+  const [connected, setConnected] = useState(false)
   onMessageRef.current = onMessage
 
   useEffect(() => {
-    if (!token) return undefined
+    if (!token) {
+      setConnected(false)
+      return undefined
+    }
     let cancelled = false
     let connectTimer
     let reconnectTimer
@@ -24,11 +28,13 @@ export function useChatSocket(token, onMessage) {
       if (cancelled) return
       const ws = new WebSocket(`${WS_BASE_URL}?ticket=${encodeURIComponent(ticket)}`)
       socketRef.current = ws
+      ws.onopen = () => { if (!cancelled && socketRef.current === ws) setConnected(true) }
       ws.onmessage = (event) => {
         try { onMessageRef.current?.(JSON.parse(event.data)) } catch { /* ignore malformed frame */ }
       }
       ws.onclose = () => {
         if (socketRef.current === ws) socketRef.current = null
+        setConnected(false)
         if (!cancelled) reconnectTimer = setTimeout(connect, 2000)
       }
     }
@@ -38,6 +44,7 @@ export function useChatSocket(token, onMessage) {
 
     return () => {
       cancelled = true
+      setConnected(false)
       clearTimeout(connectTimer)
       clearTimeout(reconnectTimer)
       const ws = socketRef.current
@@ -53,8 +60,14 @@ export function useChatSocket(token, onMessage) {
 
   const sendJson = (obj) => {
     const ws = socketRef.current
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj))
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false
+    try {
+      ws.send(JSON.stringify(obj))
+      return true
+    } catch {
+      return false
+    }
   }
 
-  return { sendJson }
+  return { sendJson, connected }
 }

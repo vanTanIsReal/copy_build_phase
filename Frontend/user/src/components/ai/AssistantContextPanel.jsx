@@ -77,6 +77,6 @@ export default function AssistantContextPanel({ open, onClose }) {
       {!latestMemory && <p className="context-empty">Chưa có memory nào.</p>}
       {latestMemory && <div className="related-memory"><i className="bi bi-lightbulb"/><p>{latestMemory.detail || latestMemory.title}</p></div>}
     </section>
-    <div className="context-permission"><i className="bi bi-shield-check"/><div><strong>Bạn kiểm soát dữ liệu</strong><p>Orbit chỉ đọc những nguồn bạn đã cấp quyền.</p></div><button className="icon-btn"><i className="bi bi-chevron-right"/></button></div>
+    <div className="context-permission"><i className="bi bi-shield-check"/><div><strong>Bạn kiểm soát dữ liệu</strong><p>Orbit chỉ đọc những nguồn bạn đã cấp quyền.</p></div><button className="icon-btn" onClick={() => { onClose(); navigate('/profile#ai') }} aria-label="Mở cài đặt AI"><i className="bi bi-chevron-right"/></button></div>
   </aside></>
 }

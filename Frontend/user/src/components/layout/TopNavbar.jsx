@@ -12,9 +12,7 @@ export default function TopNavbar({ onMenu }) {
       <button className="icon-btn mobile-menu" onClick={onMenu} aria-label="Open menu"><i className="bi bi-list" /></button>
       <div className="app-context"><i className="bi bi-command" /><strong>Orbit</strong></div>
       <div className="nav-actions">
-        <button className="icon-btn"><i className="bi bi-question-circle" /></button>
-        <button className="icon-btn notification-btn"><i className="bi bi-bell" /><span /></button>
-        <button className="nav-avatar">{getInitials(user?.display_name)}</button>
+        <button className="nav-avatar" onClick={() => navigate('/profile')} aria-label="Open profile" title="Profile">{getInitials(user?.display_name)}</button>
         <button className="icon-btn" onClick={onLogout} aria-label="Log out" title="Log out"><i className="bi bi-box-arrow-right" /></button>
       </div>
     </header>

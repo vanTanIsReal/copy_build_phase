@@ -35,14 +35,6 @@ export const updateUserRole = (token, userId, role) =>
 export const updateUserStatus = (token, userId, is_active) =>
   apiFetch(`/admin/users/${userId}/status`, { method: 'PATCH', token, body: { is_active } })
 
-export const listConversations = (token) => apiFetch('/admin/conversations', { token })
-
-export const getConversationMessages = (token, conversationId) =>
-  apiFetch(`/admin/conversations/${conversationId}/messages`, { token })
-
-export const deleteConversation = (token, conversationId) =>
-  apiFetch(`/admin/conversations/${conversationId}`, { method: 'DELETE', token })
-
 const scopedParams = (workspaceId, ownerId) => {
   const params = new URLSearchParams({ workspace_id: workspaceId })
   if (ownerId) params.set('owner_id', ownerId)

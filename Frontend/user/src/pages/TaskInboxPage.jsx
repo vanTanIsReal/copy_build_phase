@@ -30,7 +30,7 @@ export default function TaskInboxPage() {
       setLoading(false)
       return
     }
-    listTasks(token).then(setTasks).finally(() => setLoading(false))
+    listTasks(token).then(setTasks).catch(err => pushToast(err.detail || ACTION_FAILED)).finally(() => setLoading(false))
   }
 
   useEffect(() => { refresh() }, [token])

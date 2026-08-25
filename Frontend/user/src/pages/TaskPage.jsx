@@ -50,10 +50,11 @@ export default function TaskPage() {
   const overdue = mainTasks.filter(t => t.status === 'pending' && t.due_at && new Date(t.due_at) < new Date()).length
   const pending = mainTasks.length - completed - overdue
 
-  const accept = (task) => updateTaskStatus(token, task.id, 'pending').then(upsertTask)
-  const dismiss = (task) => updateTaskStatus(token, task.id, 'dismissed').then(upsertTask)
-  const complete = (task) => updateTaskStatus(token, task.id, 'completed').then(upsertTask)
-  const remove = (task) => deleteTask(token, task.id).then(() => removeTask(task.id))
+  const taskError = (err) => setError(err.detail || 'Could not update the task.')
+  const accept = (task) => updateTaskStatus(token, task.id, 'pending').then(upsertTask).catch(taskError)
+  const dismiss = (task) => updateTaskStatus(token, task.id, 'dismissed').then(upsertTask).catch(taskError)
+  const complete = (task) => updateTaskStatus(token, task.id, 'completed').then(upsertTask).catch(taskError)
+  const remove = (task) => deleteTask(token, task.id).then(() => removeTask(task.id)).catch(taskError)
 
   return <div className="page-container">
     <PageHeader eyebrow="Personal" title="My Tasks" description="Stay on top of work, including action items found by Orbit." action={<div className="d-flex gap-2"><Link to="/tasks/inbox" className="btn btn-light rounded-3"><i className="bi bi-inbox me-2"/>Priority inbox</Link><button className="btn btn-primary rounded-3" onClick={()=>setNewOpen(true)}><i className="bi bi-plus-lg me-2"/>Add task</button></div>}/>

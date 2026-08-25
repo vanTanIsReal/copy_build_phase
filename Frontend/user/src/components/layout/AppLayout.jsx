@@ -33,7 +33,7 @@ export default function AppLayout() {
     return () => handlersRef.current.delete(handler)
   }, [])
 
-  const { sendJson } = useChatSocket(token, (data) => {
+  const { sendJson, connected: socketConnected } = useChatSocket(token, (data) => {
     handlersRef.current.forEach(handler => handler(data))
     if (data.type === 'reminder_fired') {
       setToastReminder(data.reminder)
@@ -58,7 +58,7 @@ export default function AppLayout() {
     <div className="app-shell orbit-fx">
       <TransitionVeil />
       <Sidebar open={open} onClose={() => setOpen(false)} tasksIconRef={tasksIconRef} flightPulse={flightPulse} />
-      <div className="app-column"><TopNavbar onMenu={() => setOpen(true)} /><main className="app-main"><Outlet context={{ sendJson, subscribe }} /></main></div>
+      <div className="app-column"><TopNavbar onMenu={() => setOpen(true)} /><main className="app-main"><Outlet context={{ sendJson, socketConnected, subscribe }} /></main></div>
       {toastReminder && <ReminderToast reminder={toastReminder} onClose={() => setToastReminder(null)} />}
       {toastTask && <TaskSuggestedToast task={toastTask} onClose={() => setToastTask(null)} tasksIconRef={tasksIconRef} onFlightArrive={onFlightArrive} />}
       {toastBudget && <BudgetAlertToast alert={toastBudget} onClose={() => setToastBudget(null)} />}

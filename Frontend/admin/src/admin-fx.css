@@ -178,7 +178,7 @@
 .admin-shell .admin-presets button.active { border-color: var(--admin-glow-a); color: #c9d1ff; background: rgba(82, 111, 245, .14); }
 
 /* ---------- Buttons, dropdowns, modals - Bootstrap primitives used directly across admin pages
-   (New workspace forms, ConversationMessagesModal, row-action menus...) ---------- */
+   (Support forms and row-action menus) ---------- */
 .admin-shell .admin-secondary-button, .admin-shell .btn-light { background: var(--admin-panel-2); border-color: var(--admin-line); color: var(--admin-ink); }
 .admin-shell .admin-secondary-button:hover, .admin-shell .btn-light:hover { background: var(--admin-panel); }
 .admin-shell .dropdown-menu { background: var(--admin-panel-2); border-color: var(--admin-line); box-shadow: var(--admin-shadow); }

@@ -4,7 +4,7 @@ import MessageBubble from './MessageBubble'
 import PulseWave from '../fx/PulseWave'
 import { springs } from '../fx/springs'
 
-export default function MessageArea({ conversation, messages, currentUserId, onSend, loading, firstUnreadMessageId, unreadCount, aiBusy = false }) {
+export default function MessageArea({ conversation, messages, currentUserId, onSend, socketConnected, loading, firstUnreadMessageId, unreadCount, aiBusy = false }) {
   const [draft, setDraft] = useState('')
   const scrollRef = useRef(null)
   const [unreadDismissed, setUnreadDismissed] = useState(false)
@@ -13,7 +13,11 @@ export default function MessageArea({ conversation, messages, currentUserId, onS
   // New unread marker (new conversation, or same conversation reopened) - show the button again.
   useEffect(() => { setUnreadDismissed(false) }, [firstUnreadMessageId])
 
-  const submit = (e) => { e.preventDefault(); if (!draft.trim()) return; onSend(draft.trim()); setDraft('') }
+  const submit = (e) => {
+    e.preventDefault()
+    if (!draft.trim() || !socketConnected) return
+    if (onSend(draft.trim())) setDraft('')
+  }
 
   // Only true when the marked message is actually among the currently loaded ones - useMessages
   // sizes its initial fetch to cover the known unread backlog, but in the rare case a backlog is
@@ -56,9 +60,9 @@ export default function MessageArea({ conversation, messages, currentUserId, onS
         <div ref={scrollRef} />
       </div>
       <form className="composer" onSubmit={submit}>
-        <div className="composer-main"><input value={draft} onChange={e => setDraft(e.target.value)} placeholder={`Message ${conversation.name}...`} /><button className="send-btn" aria-label="Send"><i className="bi bi-send-fill" /></button></div>
+        <div className="composer-main"><input value={draft} onChange={e => setDraft(e.target.value)} placeholder={socketConnected ? `Message ${conversation.name}...` : 'Connecting to chat...'} /><button className="send-btn" aria-label="Send" disabled={!socketConnected || !draft.trim()}><i className="bi bi-send-fill" /></button></div>
         <PulseWave active={aiBusy} />
-        <div className="composer-help"><span><i className="bi bi-stars" /> Type <strong>@orbit</strong> to ask AI</span><span>Enter to send</span></div>
+        <div className="composer-help"><span><i className="bi bi-stars" /> Type <strong>@orbit</strong> to ask AI</span><span>{socketConnected ? 'Enter to send' : 'Reconnecting…'}</span></div>
       </form>
     </div>
   )

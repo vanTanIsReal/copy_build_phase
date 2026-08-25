@@ -18,7 +18,7 @@ export default function ChatPage() {
   const { pushToast } = useToast()
   const { workspaceId } = useWorkspace()
   const location = useLocation()
-  const { sendJson, subscribe } = useOutletContext()
+  const { sendJson, socketConnected, subscribe } = useOutletContext()
   const [mobileChat, setMobileChat] = useState(false)
   const [aiOpen, setAiOpen] = useState(false)
   // Threaded down to MessageArea's PulseWave (pillar 3) so the composer's "AI active" glow reflects
@@ -147,7 +147,9 @@ export default function ChatPage() {
     markRead(token, selectedId).catch(() => {})
   }, [selectedId, messagesLoading, token])
 
-  const onSend = (content) => { if (selectedId) sendJson({ type: 'send_message', conversation_id: selectedId, content }) }
+  const onSend = (content) => selectedId
+    ? sendJson({ type: 'send_message', conversation_id: selectedId, content })
+    : false
 
   const onCreated = (conv) => {
     setConversations(prev => [conv, ...prev.filter(c => c.id !== conv.id)])
@@ -181,7 +183,7 @@ export default function ChatPage() {
         {selectedConversation ? (
           <>
             <ConversationHeader conversation={selectedConversation} onBack={() => setMobileChat(false)} onAI={() => setAiOpen(true)} onHide={onHide} onLeave={onLeave} aiGranted={aiGranted} onToggleAi={onToggleAi} aiMode={aiMode} canManageAi={canManageAi} />
-            <MessageArea conversation={selectedConversation} messages={messages} currentUserId={user?.id} onSend={onSend} loading={messagesLoading} firstUnreadMessageId={firstUnreadMessageId} unreadCount={unreadCount} aiBusy={aiBusy} />
+            <MessageArea conversation={selectedConversation} messages={messages} currentUserId={user?.id} onSend={onSend} socketConnected={socketConnected} loading={messagesLoading} firstUnreadMessageId={firstUnreadMessageId} unreadCount={unreadCount} aiBusy={aiBusy} />
           </>
         ) : (
           <div className="chat-empty-state"><i className="bi bi-chat-dots" /><p>Select a conversation or start a new one</p></div>
