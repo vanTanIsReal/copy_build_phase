@@ -3,9 +3,11 @@ import { useAuth } from '../../context/AuthContext'
 import { listUsers, createConversation } from '../../api/chat'
 import Avatar from '../common/Avatar'
 import { getInitials, getColor } from '../../utils/avatar'
+import { useWorkspace } from '../../context/WorkspaceContext'
 
 export default function NewConversationModal({ open, onClose, onCreated }) {
   const { token } = useAuth()
+  const { workspaceId } = useWorkspace()
   const [users, setUsers] = useState([])
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState([])
@@ -16,8 +18,8 @@ export default function NewConversationModal({ open, onClose, onCreated }) {
   useEffect(() => {
     if (!open) return
     if (search.trim().length < 2) { setUsers([]); return }
-    listUsers(token, search).then(setUsers).catch(() => setUsers([]))
-  }, [open, search, token])
+    listUsers(token, search, workspaceId).then(setUsers).catch(() => setUsers([]))
+  }, [open, search, token, workspaceId])
 
   useEffect(() => { if (!open) { setSelected([]); setGroupName(''); setSearch(''); setError('') } }, [open])
 
@@ -35,6 +37,7 @@ export default function NewConversationModal({ open, onClose, onCreated }) {
         type: selected.length > 1 ? 'group' : 'direct',
         participant_ids: selected,
         name: selected.length > 1 ? groupName.trim() : undefined,
+        workspace_id: workspaceId,
       })
       onCreated(conv)
       onClose()
