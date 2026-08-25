@@ -95,17 +95,25 @@ async def calendar_oauth_callback(
     def page(ok: bool, message: str, status_code: int = 200) -> HTMLResponse:
         origin = json.dumps(get_settings().frontend_origin)
         safe_message = html.escape(message)
+        message_json = json.dumps(message)
         document = f"""<!doctype html><meta charset=\"utf-8\"><title>Google Calendar</title>
 <body style=\"font-family:system-ui;padding:2rem;text-align:center\"><p>{safe_message}</p>
-<script>if(window.opener)window.opener.postMessage({{type:'calendar_oauth',ok:{str(ok).lower()}}},{origin});
+<script>if(window.opener)window.opener.postMessage({{type:'calendar_oauth',ok:{str(ok).lower()},message:{message_json}}},{origin});
 setTimeout(function(){{window.close()}},800);</script></body>"""
         return HTMLResponse(document, status_code=status_code)
 
     if error or not code or not state:
+        logger.warning(
+            "Google Calendar OAuth callback rejected: error=%s code_present=%s state_present=%s",
+            error,
+            bool(code),
+            bool(state),
+        )
         return page(False, f"Connection failed: {error or 'missing parameters'}.", 400)
     try:
         user_id = google_credentials.read_oauth_state(state)
     except google_credentials.OAuthStateError:
+        logger.warning("Google Calendar OAuth callback rejected: invalid or expired state")
         return page(False, "This connection attempt is invalid or expired.", 400)
     try:
         credentials = await run_in_threadpool(google_credentials.exchange_code, code)

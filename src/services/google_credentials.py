@@ -64,7 +64,7 @@ def make_oauth_state(user_id: str) -> str:
         {
             "sub": user_id,
             "purpose": _STATE_PURPOSE,
-            "exp": datetime.now(UTC) + timedelta(minutes=10),
+            "exp": datetime.now(UTC) + timedelta(minutes=30),
         },
         settings.secret_key,
         algorithm=settings.jwt_algorithm,
