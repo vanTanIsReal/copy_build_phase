@@ -324,7 +324,7 @@ async def test_chat_blocked_when_over_daily_token_budget(client, auth_headers, m
     from src.agents import graph as agent_graph
     from src.services import usage_service
 
-    async def _over_budget():
+    async def _over_budget(user_id=None):
         return True
 
     monkeypatch.setattr(usage_service, "is_over_budget", _over_budget)
@@ -391,7 +391,7 @@ async def test_chat_resume_not_blocked_by_budget(client, auth_headers, monkeypat
 
     from src.services import usage_service
 
-    async def _over_budget():
+    async def _over_budget(user_id=None):
         return True
 
     monkeypatch.setattr(usage_service, "is_over_budget", _over_budget)

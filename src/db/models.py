@@ -40,6 +40,7 @@ class User(Base):
     job_title: Mapped[str] = mapped_column(default="")
     timezone: Mapped[str] = mapped_column(default="Asia/Ho_Chi_Minh")
     preferences: Mapped[dict] = mapped_column(JSON, default=dict)
+    daily_token_budget: Mapped[int | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
