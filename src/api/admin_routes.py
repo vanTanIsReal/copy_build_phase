@@ -8,7 +8,6 @@ from sqlalchemy.orm import selectinload
 from src.auth.dependencies import require_admin
 from src.config import get_settings
 from src.db.models import (
-    AgentWorkspace,
     AIPermission,
     AuditLog,
     Conversation,
@@ -37,12 +36,9 @@ from src.models.admin_schemas import (
     UpdateRoleRequest,
     UpdateStatusRequest,
 )
-from src.models.agent_workspace_schemas import AdminWorkspaceSummaryOut
-from src.models.workspace_schemas import AdminOrganizationWorkspaceCreate, WorkspaceOut
 from src.services import ai_config_service, reminder_service, usage_service
 from src.services.audit_service import record_audit_event
 from src.services.authorization_service import require_support_scope
-from src.services.company_service import get_or_create_company_workspace
 from src.services.scheduler import scheduler
 from src.websocket.manager import manager
 
@@ -349,56 +345,6 @@ async def list_users(
         stmt = stmt.where((User.email.ilike(pattern)) | (User.display_name.ilike(pattern)))
     users = (await db.execute(stmt.offset(offset).limit(limit))).scalars().all()
     return [AdminUserOut.model_validate(u, from_attributes=True) for u in users]
-
-
-@router.get("/workspaces", response_model=list[AdminWorkspaceSummaryOut])
-async def list_organization_workspaces(db: AsyncSession = Depends(get_db)) -> list[AdminWorkspaceSummaryOut]:
-    company = await get_or_create_company_workspace(db)
-    agent_workspace_count = (
-        await db.execute(
-            select(func.count())
-            .select_from(AgentWorkspace)
-            .where(
-                AgentWorkspace.organization_workspace_id == company.id,
-                AgentWorkspace.status != "archived",
-            )
-        )
-    ).scalar_one()
-    await db.commit()
-    return [
-        AdminWorkspaceSummaryOut(
-            id=company.id,
-            name=company.name,
-            status=company.status,
-            agent_workspace_count=agent_workspace_count,
-            created_at=company.created_at,
-        )
-    ]
-
-
-@router.get("/company", response_model=WorkspaceOut)
-async def get_company(db: AsyncSession = Depends(get_db)) -> WorkspaceOut:
-    company = await get_or_create_company_workspace(db)
-    await db.commit()
-    await db.refresh(company)
-    return WorkspaceOut.model_validate(company)
-
-
-@router.post(
-    "/workspaces",
-    response_model=AdminWorkspaceSummaryOut,
-    status_code=status.HTTP_201_CREATED,
-)
-async def provision_organization_workspace(
-    request: AdminOrganizationWorkspaceCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
-) -> AdminWorkspaceSummaryOut:
-    del request, db, current_user
-    raise HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail="This is a single-company application; create a workspace inside the company",
-    )
 
 
 @router.patch("/users/{user_id}/role", response_model=AdminUserOut)

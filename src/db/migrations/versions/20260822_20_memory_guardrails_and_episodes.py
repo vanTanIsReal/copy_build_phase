@@ -1,7 +1,6 @@
 """Add memory maintenance/guardrail fields to memories, the memory_episodes table, and the
 session-compaction columns on assistant_threads (ported alongside guardrail_node/memory_tool
-from the docs/branches/G19-T132-Luong-Tri-Tue.md line of work - see AGENT_SYSTEM_DESIGN.md section
-11 for the resulting memory model). The dev/test-only `init_db()` path
+from the docs/branches/G19-T132-Luong-Tri-Tue.md line of work). The dev/test-only `init_db()` path
 (src/db/session.py:_apply_legacy_schema_compatibility) already patches a freshly created or legacy
 SQLite/dev database with the same additive columns; this migration is the equivalent for
 production/staging Postgres, where init_db() is skipped and only `alembic upgrade head` runs.
@@ -11,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "20260822_20"
-down_revision = "20260821_16"
+down_revision = "20260813_12"
 branch_labels = None
 depends_on = None
 

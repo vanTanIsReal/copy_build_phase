@@ -158,6 +158,3 @@ Foundation hiện tại đủ để ba workstream Delivery, QA và Executive ph�
 
 - [PRD](PRD.md) — yêu cầu sản phẩm và acceptance criteria.
 - [Architecture](ARCHITECTURE.md) — component, data flow, security boundary và current/target state.
-- [Enterprise Workspace Foundation](ENTERPRISE_WORKSPACE_FOUNDATION.md) — nghiệp vụ Workspace và role chi tiết.
-- [Multi-Agent Implementation Plan](MULTI_AGENT_IMPLEMENTATION_PLAN.md) — phân công, dependency và release gates.
-- [Multi-Agent Test Dataset](MULTI_AGENT_TEST_DATASET.md) — taxonomy và golden cases.

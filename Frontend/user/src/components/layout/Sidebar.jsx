@@ -5,8 +5,7 @@ const nav = [
   ['assistant', 'bi-stars', 'AI Assistant'], ['chat', 'bi-chat-dots', 'Chats'], ['tasks', 'bi-check2-square', 'Tasks'],
   ['tasks/inbox', 'bi-inbox', 'Inbox'],
   ['calendar', 'bi-calendar4-week', 'Calendar'], ['reminders', 'bi-bell', 'Reminders'],
-  ['memory', 'bi-stars', 'Memory'], ['workspaces', 'bi-diagram-3', 'Workspaces'],
-  ['workspace-briefs', 'bi-file-earmark-bar-graph', 'Briefs'], ['profile', 'bi-person', 'Profile'],
+  ['memory', 'bi-stars', 'Memory'], ['profile', 'bi-person', 'Profile'],
 ]
 
 const getInitials = (name) => (name || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase()

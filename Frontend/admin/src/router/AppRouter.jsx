@@ -11,7 +11,6 @@ const AdminUserDataPage = lazy(() => import('../pages/admin/AdminUserDataPage'))
 const AdminAIManagementPage = lazy(() => import('../pages/admin/AdminAIManagementPage'))
 const AdminAIUsagePage = lazy(() => import('../pages/admin/AdminAIUsagePage'))
 const AdminAuditLogPage = lazy(() => import('../pages/admin/AdminAuditLogPage'))
-const AdminWorkspacesPage = lazy(() => import('../pages/admin/AdminWorkspacesPage'))
 
 export default function AppRouter() {
   return (
@@ -24,7 +23,6 @@ export default function AppRouter() {
             <Route element={<AdminLayout />}>
               <Route path="/admin" element={<AdminDashboardPage />} />
               <Route path="/admin/users" element={<AdminUsersPage />} />
-              <Route path="/admin/workspaces" element={<AdminWorkspacesPage />} />
               <Route path="/admin/user-data" element={<AdminUserDataPage />} />
               <Route path="/admin/ai" element={<AdminAIManagementPage />} />
               <Route path="/admin/ai-usage" element={<AdminAIUsagePage />} />

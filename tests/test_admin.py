@@ -1,8 +1,5 @@
 import pytest
-from sqlalchemy import select
 
-import src.db.session as db_session
-from src.db.models import User, WorkspaceMembership
 from src.services.scheduler import scheduler
 
 
@@ -63,38 +60,6 @@ async def test_admin_can_list_users(client, admin_auth_headers, auth_headers):
     emails = {u["email"] for u in resp.json()}
     assert "admin@example.com" in emails
     assert "alice@example.com" in emails
-
-
-@pytest.mark.asyncio
-async def test_single_company_is_fixed_and_platform_admin_does_not_join_it(
-    client, admin_auth_headers, auth_headers
-):
-    response = await client.get("/api/v1/admin/company", headers=admin_auth_headers)
-    assert response.status_code == 200
-    company = response.json()
-    assert company["slug"] == "company-root"
-
-    same_company = await client.get("/api/v1/admin/company", headers=admin_auth_headers)
-    assert same_company.json()["id"] == company["id"]
-
-    cannot_create_another_company = await client.post(
-        "/api/v1/admin/workspaces",
-        json={"name": "Provisioned Company", "owner_email": "alice@example.com"},
-        headers=admin_auth_headers,
-    )
-    assert cannot_create_another_company.status_code == 409
-
-    async with db_session.async_session_maker() as db:
-        admin = (await db.execute(select(User).where(User.email == "admin@example.com"))).scalar_one()
-        admin_membership = (
-            await db.execute(
-                select(WorkspaceMembership).where(
-                    WorkspaceMembership.workspace_id == company["id"],
-                    WorkspaceMembership.user_id == admin.id,
-                )
-            )
-        ).scalar_one_or_none()
-    assert admin_membership is None
 
 
 @pytest.mark.asyncio

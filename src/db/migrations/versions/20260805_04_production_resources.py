@@ -41,14 +41,13 @@ def _detach_forward_references(table: sa.Table, existing_tables: set[str]) -> li
     be created without a dangling reference. Returns what to pass to `_reattach` afterwards.
 
     Base.metadata reflects today's ORM shape, which can be ahead of this migration's own place in
-    history - e.g. Task.agent_workspace_id targets `agent_workspaces`, a table this migration
-    predates by 12 revisions (added at 20260817_13). Creating that column here bakes in a
-    dangling FK that breaks SQLite's reflect-and-copy dance the very next step
-    (_harden_constraints' batch_alter_table) needs to do, and any replay of this migration
-    against a database where the table doesn't exist yet (a genuine legacy backfill, as opposed
-    to the normal path where the table was already created upstream). The migration that
-    actually owns such a column adds it back later with its own guarded
-    op.add_column/create_foreign_key (see 20260821_16 for `agent_workspace_id`).
+    history - a column added by a later revision, targeting a table that later revision also
+    creates, would otherwise bake in a dangling FK here and break SQLite's reflect-and-copy dance
+    the very next step (_harden_constraints' batch_alter_table) needs to do, and any replay of
+    this migration against a database where that table doesn't exist yet (a genuine legacy
+    backfill, as opposed to the normal path where the table was already created upstream). The
+    migration that actually owns such a column adds it back later with its own guarded
+    op.add_column/create_foreign_key.
     """
     detached = []
     for column in list(table.columns):

@@ -14,7 +14,6 @@ class Settings(BaseSettings):
 
     # App
     app_name: str = "AI20K Agent"
-    company_name: str = "Orbit"
     app_env: Literal["development", "production", "test"] = "development"
     app_port: int = Field(default=8000, ge=1, le=65535)
     app_host: str = "0.0.0.0"
@@ -34,11 +33,6 @@ class Settings(BaseSettings):
     agent_thread_summary_chars: int = Field(default=6000, ge=1000, le=20000)
     agent_thread_retention_days: int = Field(default=30, ge=1, le=365)
 
-    # Multi-agent rollout. All profiles stay off until their policy/data foundations are ready.
-    multi_agent_enabled: bool = False
-    product_delivery_agent_enabled: bool = False
-    quality_assurance_agent_enabled: bool = False
-    executive_agent_enabled: bool = False
     # Enterprise default: organizations are provisioned by platform operations.
     # Keep this switch only for local/demo compatibility and isolated tests.
     allow_self_service_organization_creation: bool = False

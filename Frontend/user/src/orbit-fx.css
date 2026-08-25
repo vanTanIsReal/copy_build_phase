@@ -6,7 +6,7 @@
 
    Scoping rule: every dark/glow token lives under `.orbit-fx`, never on `:root` - every visual
    rule below is an additive descendant selector (`.orbit-fx <existing-class>`), never an edit to
-   a base rule in styles.css/assistant.css/workspace-management.css. Because `.app-shell.orbit-fx`
+   a base rule in styles.css/assistant.css. Because `.app-shell.orbit-fx`
    is now the single ancestor of every protected route, a plain descendant rule like
    `.orbit-fx .stat-card` automatically reaches that class on ANY page under it - no need to
    re-tag each page individually (a few pages below, e.g. Task Inbox, additionally carry the
@@ -330,10 +330,6 @@
 .orbit-fx .workspace-switcher { background: var(--ofx-panel-2); border-color: var(--ofx-line); color: var(--ofx-muted); }
 .orbit-fx .workspace-switcher select { color: var(--ofx-ink); }
 .orbit-fx .workspace-switcher button { background: var(--ofx-panel-2); border-left-color: var(--ofx-line); }
-
-/* ---------- Workspace Briefs (WorkspaceBriefCard/ActionProposalCard) ---------- */
-.orbit-fx .status-badge.warning { background: rgba(245, 158, 11, .14); color: #ffc670; }
-.orbit-fx .brief-payload-preview { background: var(--ofx-bg); border-color: var(--ofx-line); color: var(--ofx-ink); }
 
 /* ---------- Auth (Login/Register) ----------
    Previously deliberately excluded (see this file's header comment history) - the user asked for

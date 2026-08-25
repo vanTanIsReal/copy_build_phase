@@ -2,21 +2,12 @@ import { apiFetch } from './client'
 
 export const chatWithAgent = (
   token,
-  {
-    message, conversation_id, thread_id, workspace_id, context_limit, scope, messages,
-    // Multi-agent (Delivery/Quality/Executive) - see src.api.routes._run_specialist_chat.
-    // requested_scope defaults server-side to "personal", so omitting these three keeps every
-    // existing caller's behavior unchanged.
-    requested_scope, target_agent_workspace_id, specialist_action,
-  },
+  { message, conversation_id, thread_id, workspace_id, context_limit, scope, messages },
 ) =>
   apiFetch('/chat', {
     method: 'POST',
     token,
-    body: {
-      message, conversation_id, thread_id, workspace_id, context_limit, scope, messages,
-      requested_scope, target_agent_workspace_id, specialist_action,
-    },
+    body: { message, conversation_id, thread_id, workspace_id, context_limit, scope, messages },
   })
 
 export const resumeAgent = (token, { thread_id, approved, edits }) =>

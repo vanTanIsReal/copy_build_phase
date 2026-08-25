@@ -117,10 +117,10 @@ Không commit file .env thật (chỉ .env.example).
 Tài liệu liên quan trong repo
 Frontend/README.md — hướng dẫn riêng cho frontend, gồm cách xử lý lỗi thường gặp khi chạy npm trên Windows.
 Frontend/detai.md — đề bài / yêu cầu gốc của dự án, tham khảo khi không chắc scope tính năng.
-docs/ARCHITECTURE.md — kiến trúc canonical của Multi-Agent; ARCHITECTURE.md ở root chỉ là con trỏ tương thích.
+docs/ARCHITECTURE.md — kiến trúc canonical hiện tại của Orbit (Personal Agent, không phải Multi-Agent — subsystem đó đã gỡ bỏ khỏi repo); ARCHITECTURE.md ở root là một bản mô tả "as implemented" chi tiết hơn, viết độc lập trước đó.
 ROADMAP.md — bảng đối chiếu từng yêu cầu đề bài với trạng thái thật + việc còn lại theo độ ưu tiên.
 WORKLOG.md — nhật ký công việc theo ngày của cả nhóm, xem để biết ai đang làm phần nào trước khi động vào.
-docs/README.md — mục lục và thứ tự ưu tiên của bộ tài liệu Multi-Agent.
+docs/README.md — mục lục và thứ tự ưu tiên của bộ tài liệu.
 Lưu ý an toàn khi code
 Không hardcode GOOGLE_API_KEY, GROQ_API_KEY hay bất kỳ secret nào vào code — luôn đọc từ .env.
 Khi agent thao tác với Google Calendar hoặc tạo nhắc nhở, giữ nguyên bước xác nhận người dùng trước khi gọi API thật; đây là yêu cầu thiết kế cốt lõi của sản phẩm (human-in-the-loop), không phải chi tiết có thể lược bỏ để "cho gọn".

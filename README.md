@@ -246,14 +246,12 @@ Docker Compose hiện chỉ chạy backend tại cổng `8000`; frontend chạy 
 | Test | pytest, pytest-asyncio, httpx |
 | Lint | ruff |
 
-## Tài liệu thiết kế Multi-Agent
+## Tài liệu thiết kế
 
 - [docs/README.md](docs/README.md) — mục lục và quy tắc single source of truth cho cả team.
 - [docs/BRIEF.md](docs/BRIEF.md) — ý tưởng, giá trị và phạm vi sản phẩm.
 - [docs/PRD.md](docs/PRD.md) — nghiệp vụ, yêu cầu và acceptance criteria.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — kiến trúc, data boundary, router, agent runtime và security.
-- [docs/ENTERPRISE_WORKSPACE_FOUNDATION.md](docs/ENTERPRISE_WORKSPACE_FOUNDATION.md) — Company Root, Workspace, role và membership.
-- [docs/MULTI_AGENT_IMPLEMENTATION_PLAN.md](docs/MULTI_AGENT_IMPLEMENTATION_PLAN.md) — phân công, dependency và release gate.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — kiến trúc, data boundary, agent runtime và security.
 
 ## Tài liệu khác
 

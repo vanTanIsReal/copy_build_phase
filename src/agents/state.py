@@ -6,8 +6,6 @@ from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
-from src.agents.contracts import AgentIntent, AgentProfile, BusinessRole, PolicyDecision, RequestedScope
-
 
 class AgentState(TypedDict, total=False):
     """State schema cho LangGraph agent.
@@ -26,17 +24,6 @@ class AgentState(TypedDict, total=False):
     guardrail_requires_clarification: bool
     user_id: str | None  # id of the user driving this run, for tools that push WS updates to them
     workspace_id: str | None  # active workspace for tenant-scoped tools
-    trace_id: str | None
-    agent_workspace_id: str | None
-    business_role: BusinessRole | None
-    agent_profile: AgentProfile | None
-    intent: AgentIntent | None
-    requested_scope: RequestedScope | None
-    allowed_agent_workspace_ids: list[str]
-    allowed_resource_ids: list[str]
-    policy_decision: PolicyDecision | None
-    policy_reason: str | None
-    prompt_version: str | None
     conversation_id: str | None
     consent_scope_hash: str | None
     source_message_ids: list[str]

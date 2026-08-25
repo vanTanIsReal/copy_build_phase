@@ -430,7 +430,6 @@ Tối thiểu phải có:
 11. Admin không đọc business data chỉ vì có platform role.
 12. UI không hiển thị create Workspace ở User app.
 
-Golden cases và taxonomy chi tiết nằm tại [Multi-Agent Test Dataset](MULTI_AGENT_TEST_DATASET.md).
 
 ## 14. Rollout và release gate
 
@@ -487,7 +486,4 @@ MVP chỉ được coi là hoàn thành khi:
 ## 17. Tài liệu liên quan
 
 - [Architecture](ARCHITECTURE.md)
-- [Enterprise Workspace Foundation](ENTERPRISE_WORKSPACE_FOUNDATION.md)
-- [Multi-Agent Implementation Plan](MULTI_AGENT_IMPLEMENTATION_PLAN.md)
-- [Multi-Agent Test Dataset](MULTI_AGENT_TEST_DATASET.md)
 - [Deployment Guide](deploy.md)

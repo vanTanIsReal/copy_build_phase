@@ -4,10 +4,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-import src.db.session as db_session
 from src.agents.graph import close_checkpointer, init_checkpointer
 from src.api.admin_routes import router as admin_router
-from src.api.agent_workspace_routes import router as agent_workspace_router
 from src.api.assistant_routes import router as assistant_router
 from src.api.auth_routes import router as auth_router
 from src.api.calendar_routes import public_router as calendar_public_router
@@ -31,7 +29,6 @@ from src.services import (
     thread_memory_service,
 )
 from src.services.ai_config_service import load_saved_ai_configuration
-from src.services.company_service import get_or_create_company_workspace
 from src.services.scheduler import scheduler
 from src.websocket.routes import router as ws_router
 
@@ -47,9 +44,6 @@ async def lifespan(app: FastAPI):
     print(f"Starting {settings.app_name} in {settings.app_env} mode")
     if settings.app_env != "production":
         await init_db()
-    async with db_session.async_session_maker() as db:
-        await get_or_create_company_workspace(db)
-        await db.commit()
     await load_saved_ai_configuration()
     await init_checkpointer()
     await thread_memory_service.cleanup_expired_threads()
@@ -118,7 +112,6 @@ app.include_router(ws_router, prefix="/api/v1", tags=["ws"])
 app.include_router(admin_router, prefix="/api/v1/admin", tags=["admin"])
 app.include_router(platform_router, prefix="/api/v1/platform", tags=["platform"])
 app.include_router(workspace_router, prefix="/api/v1/workspaces", tags=["workspaces"])
-app.include_router(agent_workspace_router, prefix="/api/v1/workspaces", tags=["agent-workspaces"])
 app.include_router(relationship_router, prefix="/api/v1/workspaces", tags=["relationships"])
 app.include_router(task_router, prefix="/api/v1", tags=["tasks"])
 app.include_router(timeline_router, prefix="/api/v1", tags=["timeline"])
