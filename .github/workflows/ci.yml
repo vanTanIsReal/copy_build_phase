@@ -83,3 +83,20 @@ jobs:
       - name: Build user and admin frontends
         working-directory: Frontend
         run: npm run build
+
+  deploy-backend:
+    name: Deploy backend to Render
+    needs: [backend, frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/deploy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger Render deploy
+        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+      - name: Wait for health check
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS "${{ vars.RENDER_URL }}/health"; then exit 0; fi
+            sleep 10
+          done
+          exit 1
