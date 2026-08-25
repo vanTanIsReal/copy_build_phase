@@ -217,7 +217,7 @@ def test_build_chat_response_replaces_empty_agent_output():
 
     assert response.status == "completed"
     assert response.response
-    assert "thử diễn đạt lại" in response.response
+    assert "thá»­ diá»…n Ä‘áº¡t láº¡i" in response.response
 
 
 @pytest.mark.asyncio
@@ -231,7 +231,7 @@ async def test_chat_surfaces_llm_error_instead_of_empty_response(client, auth_he
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "error"
-    assert data["response"] == "Dịch vụ AI tạm thời không khả dụng. Vui lòng thử lại sau."
+    assert data["response"] == "Dá»‹ch vá»¥ AI táº¡m thá»i khÃ´ng kháº£ dá»¥ng. Vui lÃ²ng thá»­ láº¡i sau."
 
 
 @pytest.mark.asyncio
@@ -338,7 +338,7 @@ async def test_chat_blocked_when_over_daily_token_budget(client, auth_headers, m
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "error"
-    assert "hạn mức" in data["response"]
+    assert "háº¡n má»©c" in data["response"]
 
 
 @pytest.mark.asyncio
@@ -468,7 +468,7 @@ async def test_chat_resume_rejects_stale_consent_snapshot(
 
     assert response.status_code == 200
     assert response.json()["status"] == "error"
-    assert "thay đổi" in response.json()["response"]
+    assert "thay Ä‘á»•i" in response.json()["response"]
     must_not_resume.assert_not_awaited()
 
 
