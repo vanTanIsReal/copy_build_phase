@@ -203,7 +203,7 @@ def test_alembic_upgrade_builds_fresh_database(tmp_path):
         "conversation_rolling_summaries",
     }.issubset(tables)
     assert "people_preferences" in tables
-    assert revision == "20260826_23"
+    assert revision == "20260826_24"
     assert "agent_threads" in tables
     assert {"google_identities", "ai_permissions"}.issubset(tables)
 
@@ -233,7 +233,7 @@ def test_prepare_database_stamps_compatible_pre_alembic_schema(tmp_path):
     connection = sqlite3.connect(database_path)
     revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
     connection.close()
-    assert revision == "20260826_23"
+    assert revision == "20260826_24"
 
 
 @pytest.mark.asyncio
