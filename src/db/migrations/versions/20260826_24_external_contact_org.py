@@ -1,7 +1,7 @@
 """Repair the final missing external contact organization column."""
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "20260826_24"
 down_revision = "20260826_23"
