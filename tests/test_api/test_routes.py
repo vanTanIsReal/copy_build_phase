@@ -497,7 +497,7 @@ async def test_usage_status_accessible_to_regular_user_without_cost_or_model_fie
 async def test_usage_status_zero_budget_reports_zero_pct(client, auth_headers, monkeypatch):
     from src.services import usage_service
 
-    async def _zero_budget():
+    async def _zero_budget(user_id=None):
         return 0
 
     monkeypatch.setattr(usage_service, "get_daily_token_budget", _zero_budget)
