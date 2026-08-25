@@ -1,7 +1,7 @@
 """Restore audit log columns missing from older production schemas."""
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "20260826_21"
 down_revision = "20260824_19"
