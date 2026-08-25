@@ -13,7 +13,7 @@ ENV PATH=/opt/venv/bin:$PATH
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --retries 5 --timeout 120 -r requirements.txt
 
 # ---- Stage 2: Runtime ----
 FROM python:3.11-slim

@@ -60,6 +60,13 @@ async def load_saved_ai_configuration() -> None:
             return
         provider, model = config.llm_provider, config.model_name
         temperature = config.llm_temperature if config.llm_temperature is not None else get_settings().llm_temperature
+        if provider not in configured_providers():
+            logger.warning(
+                "Ignored saved AI configuration because its credential is unavailable: %s / %s",
+                provider,
+                model,
+            )
+            return
         if provider in MODEL_OPTIONS and is_supported_model(provider, model):
             apply_ai_configuration(provider, model, float(temperature))
         else:

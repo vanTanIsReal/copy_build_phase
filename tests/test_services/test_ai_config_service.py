@@ -72,3 +72,19 @@ async def test_load_saved_ai_configuration_ignores_unsupported_saved_model(clien
     await ai_config_service.load_saved_ai_configuration()
     after = (get_settings().llm_provider, get_settings().model_name)
     assert before == after  # bad saved value discarded, .env defaults kept - no crash either
+
+
+@pytest.mark.asyncio
+async def test_load_saved_ai_configuration_ignores_provider_without_credentials(client, monkeypatch):
+    async with db_session.async_session_maker() as db:
+        db.add(SystemConfig(id="default", llm_provider="openai", model_name="gpt-4o-mini", llm_temperature=0.5))
+        await db.commit()
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    before = (settings.llm_provider, settings.model_name, settings.llm_temperature)
+
+    await ai_config_service.load_saved_ai_configuration()
+
+    after = (settings.llm_provider, settings.model_name, settings.llm_temperature)
+    assert before == after

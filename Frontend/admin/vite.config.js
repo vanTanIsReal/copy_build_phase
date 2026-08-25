@@ -12,6 +12,15 @@ export default defineConfig({
     // there must resolve to this app's own react/react-dom, not a second copy - dedupe forces
     // that, fs.allow below is what lets Vite serve files from ../src at all.
     dedupe: ['react', 'react-dom'],
+    // Resolve dependencies imported by ../src from this app's node_modules. Without this alias,
+    // Vite starts resolution from the shared source directory and cannot find app dependencies.
+    alias: {
+      bootstrap: path.resolve(rootDir, 'node_modules/bootstrap'),
+      'bootstrap-icons': path.resolve(rootDir, 'node_modules/bootstrap-icons'),
+      'framer-motion': path.resolve(rootDir, 'node_modules/framer-motion'),
+      'react-hook-form': path.resolve(rootDir, 'node_modules/react-hook-form'),
+      'react-router-dom': path.resolve(rootDir, 'node_modules/react-router-dom'),
+    },
   },
   server: {
     port: 5174,
