@@ -38,6 +38,7 @@ from src.models.admin_schemas import (
     UpdateBudgetRequest,
     UpdateRoleRequest,
     UpdateStatusRequest,
+    UpdateUserBudgetRequest,
 )
 from src.services import ai_config_service, reminder_service, task_calendar_service, usage_service
 from src.services.audit_service import record_audit_event
@@ -424,6 +425,28 @@ async def update_user_role(
     await db.refresh(user)
     return AdminUserOut.model_validate(user, from_attributes=True)
 
+
+@router.patch("/users/{user_id}/budget", response_model=AdminUserOut)
+async def update_user_budget(
+    user_id: str,
+    request: UpdateUserBudgetRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+) -> AdminUserOut:
+    user = await _get_user_or_404(user_id, db)
+    user.daily_token_budget = request.daily_token_budget
+    await record_audit_event(
+        db,
+        actor=current_user,
+        action="platform.user_budget_changed",
+        target_type="user",
+        target_id=user.id,
+        workspace_id=None,
+        metadata={"daily_token_budget": request.daily_token_budget},
+    )
+    await db.commit()
+    await db.refresh(user)
+    return AdminUserOut.model_validate(user, from_attributes=True)
 
 @router.patch("/users/{user_id}/status", response_model=AdminUserOut)
 async def update_user_status(

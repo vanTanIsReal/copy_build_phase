@@ -92,7 +92,7 @@ async def chat(
     # đã chạm daily_token_budget. Chỉ áp dụng cho lượt chat MỚI - resume_chat() bên dưới cố tình
     # không chặn, vì nó hoàn tất một hành động con người đã bấm xác nhận rồi (human-in-the-loop),
     # chặn ở đó sẽ để interrupt() treo lơ lửng không cách nào hoàn tất hay huỷ.
-    if await usage_service.is_over_budget():
+    if await usage_service.is_over_budget(user_id=current_user.id):
         return ChatResponse(
             response=(
                 "Đã vượt hạn mức token/chi phí AI hôm nay. Vui lòng thử lại vào ngày mai hoặc "
@@ -285,5 +285,4 @@ async def agent_status():
 
 @router.get("/usage/status", response_model=UsageStatusOut)
 async def usage_status(current_user: User = Depends(get_current_user)) -> UsageStatusOut:
-    del current_user
-    return UsageStatusOut(**(await usage_service.get_usage_summary()))
+    return UsageStatusOut(**(await usage_service.get_usage_summary(user_id=current_user.id)))

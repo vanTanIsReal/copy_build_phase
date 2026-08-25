@@ -15,6 +15,7 @@ class AdminUserOut(BaseModel):
     role: str
     platform_role: Literal["user", "platform_admin"]
     is_active: bool
+    daily_token_budget: int | None = None
     created_at: datetime
     personal_workspace_id: str | None = None
 
@@ -130,6 +131,10 @@ class UpdateRoleRequest(BaseModel):
 
 
 class UpdateBudgetRequest(BaseModel):
+    daily_token_budget: int = Field(..., ge=0)
+
+
+class UpdateUserBudgetRequest(BaseModel):
     daily_token_budget: int = Field(..., ge=0)
 
 
