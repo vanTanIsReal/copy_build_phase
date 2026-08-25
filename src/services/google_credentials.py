@@ -47,6 +47,9 @@ def _client_config() -> dict:
 
 def _build_flow(state: str | None = None) -> Flow:
     settings = get_settings()
+    # Google may return previously granted identity scopes alongside Calendar.
+    # Accept that safe superset as long as the requested Calendar scope remains present.
+    os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
     if settings.google_calendar_redirect_uri.startswith("http://"):
         os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
     return Flow.from_client_config(

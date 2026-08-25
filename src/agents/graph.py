@@ -99,7 +99,9 @@ async def init_checkpointer() -> None:
 
     scheme, _, rest = _settings.database_url.partition("://")
     conninfo = f"{scheme.split('+')[0]}://{rest}"
-    pool = AsyncConnectionPool(conninfo=conninfo, max_size=10, open=False, kwargs={"autocommit": True})
+    pool = AsyncConnectionPool(
+        conninfo=conninfo, min_size=1, max_size=2, open=False, kwargs={"autocommit": True}
+    )
     await pool.open()
     saver = AsyncPostgresSaver(pool)
     await saver.setup()
