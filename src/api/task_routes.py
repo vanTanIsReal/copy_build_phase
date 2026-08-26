@@ -155,18 +155,26 @@ def _reminder_lead_minutes(due_at) -> int:
     return max(1, min(_ACCEPTED_TASK_REMINDER_LEAD_MINUTES, int(remaining_minutes // 2)))
 
 
-async def _sync_task_to_reminder(task: Task, current_user: User) -> None:
+async def _sync_task_to_reminder(task: Task, current_user: User, db: AsyncSession) -> None:
     """Same "Accept = confirm-and-sync" product decision as _sync_task_to_calendar above, applied
     to Reminders instead: the Accept click is the explicit human confirmation, so the reminder is
     scheduled directly with no separate dialog. Unlike Calendar sync this never depends on a
     connected external account, but it still must never block Accept: a due_at that's already at
     or past now (see _reminder_lead_minutes) raises ValueError, which is only logged.
+
+    Deliberately does NOT reuse task.workspace_id: a proactive/ai_extracted task can legitimately
+    carry a different personal workspace_id than the accepting user's own (see list_tasks's
+    comment on the same caveat) - GET /reminders filters strictly on owner_id AND workspace_id
+    (no personal-workspace exception like list_tasks has), so a reminder saved under the task's
+    workspace_id would silently never show up on the accepting user's own Reminders page. Resolve
+    the user's own workspace instead, exactly like reminder_routes.create_reminder does.
     """
     if task.source not in {"proactive", "ai_extracted"} or task.due_at is None or task.reminder_id:
         return
     try:
+        workspace = await resolve_workspace_for_user(db, current_user.id, None)
         reminder = await reminder_service.schedule_reminder(
-            workspace_id=task.workspace_id,
+            workspace_id=workspace.id,
             owner_id=current_user.id,
             title=task.title,
             due_at_iso=task.due_at,
@@ -335,7 +343,7 @@ async def update_task_status(
     task.status = request.status
     if is_accept:
         await _sync_task_to_calendar(task, current_user)
-        await _sync_task_to_reminder(task, current_user)
+        await _sync_task_to_reminder(task, current_user, db)
     await db.commit()
     await db.refresh(task)
     out = _to_out(task)

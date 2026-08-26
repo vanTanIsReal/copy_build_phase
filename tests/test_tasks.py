@@ -365,6 +365,45 @@ async def test_accepting_proactive_task_due_soon_still_gets_a_reminder(client, a
 
 
 @pytest.mark.asyncio
+async def test_accepting_proactive_task_reminder_is_visible_under_a_workspace_mismatch(
+    client, auth_headers, other_auth_headers, monkeypatch
+):
+    """Reported live: the reminder was created but never showed up on the accepting user's own
+    Reminders page. Root cause - GET /reminders filters strictly on owner_id AND workspace_id (no
+    personal-workspace exception like list_tasks has), but a proactive task can legitimately carry
+    a *different* participant's personal workspace_id (see list_tasks's own comment on this same
+    caveat) - saving the reminder under task.workspace_id made it invisible to the accepting
+    user's own query. Simulates that mismatch directly: Alice's task points at Bob's workspace."""
+    fake_service = MagicMock()
+    fake_service.events.return_value.insert.return_value.execute.return_value = {
+        "id": "evt-5", "htmlLink": "https://calendar.google.com/event?eid=evt5",
+    }
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
+
+    bob_workspaces = (await client.get("/api/v1/workspaces", headers=other_auth_headers)).json()
+    bob_workspace_id = next(w["id"] for w in bob_workspaces if w["type"] == "personal")
+
+    due_at_local = datetime.now(ZoneInfo(get_settings().calendar_timezone)) + timedelta(hours=2)
+    created = await _create_proactive_task(
+        client, auth_headers, title="Ăn tối", due_at=due_at_local.replace(tzinfo=None).isoformat()
+    )
+    async with db_session.async_session_maker() as db:
+        task = (await db.execute(select(Task).where(Task.id == created["id"]))).scalar_one()
+        task.workspace_id = bob_workspace_id  # Alice's task, Bob's workspace - the mismatch
+        await db.commit()
+
+    resp = await client.patch(
+        f"/api/v1/tasks/{created['id']}/status", json={"status": "pending"}, headers=auth_headers
+    )
+    assert resp.status_code == 200
+    reminder_id = resp.json()["reminder_id"]
+    assert reminder_id is not None
+
+    reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
+    assert any(r["id"] == reminder_id for r in reminders)
+
+
+@pytest.mark.asyncio
 async def test_deleting_synced_calendar_event_dismisses_the_linked_task(client, auth_headers, monkeypatch):
     """Task <-> Calendar sync is two-way: once Accept auto-created a Calendar event for a task
     (see the accept test above), deleting that event - from the app's own Delete event button, or
