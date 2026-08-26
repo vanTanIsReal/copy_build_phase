@@ -229,7 +229,13 @@ def _build_window_prompt(
         "can be empty). If a later message changes its time, emit ONE commitment with the final "
         "time, AND a separate cancelled:true entry for the proposal it replaced.\n"
         '- due_at: resolve relative dates/times ("hôm nay", "ngày mai", "tuần sau") against the '
-        f"current date and time, which is {now.strftime('%A, %Y-%m-%d %H:%M')} ({tz_name}).\n\n"
+        f"current date and time, which is {now.strftime('%A, %Y-%m-%d %H:%M')} ({tz_name}).\n"
+        '- A bare hour with no am/pm or day qualifier at all ("8 giờ", "3h" alone - no "sáng"/'
+        '"chiều"/"tối"/"trưa"/"khuya"/"ngày mai"/etc.) means the NEXT time that hour occurs from '
+        "now, not literally that hour today: if reading it as that hour AM today has already "
+        "passed, resolve it as PM today instead; only roll to tomorrow if the PM reading has also "
+        'already passed. This is how a casual "8 giờ đi chơi nhé" is actually understood, not as '
+        "08:00 the next time the clock reaches it.\n\n"
         "Examples:\n"
         "[1] An (09:00): tối nay 8h tôi đi họp\n[2] Binh (09:01): ok\n"
         '-> {"commitments":[{"title":"Họp tối nay","due_at":"...T20:00:00",'
@@ -258,6 +264,13 @@ def _build_window_prompt(
         'Tuấn is never named in the message, but per the 1-on-1 special case he is still an owner via '
         '"invited" - he is the only other person in this conversation, so "đi ăn sáng nhé" can only be '
         "proposing it to him.\n\n"
+        "[1] An (19:15): 8 giờ đi chơi với tôi nhé\n"
+        '-> {"commitments":[{"title":"Đi chơi","due_at":"...T20:00:00",'
+        '"proposal_message_index":1,"cancelled":false,'
+        '"owners":[{"name":"An","evidence":"self","message_index":1}]}]}\n'
+        'No "sáng"/"tối" qualifier at all here, unlike every example above - sent at 19:15, so '
+        "reading 8 giờ as 08:00 today would already be hours in the past; per the bare-hour rule "
+        "above it resolves to the next upcoming 8 o'clock, 20:00 tonight.\n\n"
         "[1] An (09:00): 8h họp nhé\n[2] An (09:05): thôi huỷ nhé\n"
         '-> {"commitments":[{"proposal_message_index":1,"cancelled":true,"owners":[]}]}\n\n'
         f"Chat excerpt:\n{_format_window(window, tz_name)}"
