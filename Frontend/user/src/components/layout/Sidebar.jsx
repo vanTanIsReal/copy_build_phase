@@ -12,7 +12,7 @@ const getInitials = (name) => (name || '?').trim().split(/\s+/).map(w => w[0]).s
 
 export default function Sidebar({ open, onClose, tasksIconRef, flightPulse }) {
   const { user, isAdmin } = useAuth()
-  const adminUrl = import.meta.env.VITE_ADMIN_APP_URL || 'https://admin-luxboum80-auo2.vercel.app'
+  const adminUrl = import.meta.env.VITE_ADMIN_APP_URL || 'https://admin-nu-six-83.vercel.app'
   return (
     <>
       <div className={`sidebar-backdrop ${open ? 'show' : ''}`} onClick={onClose} />
