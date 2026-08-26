@@ -134,6 +134,19 @@ class Settings(BaseSettings):
             raise ValueError("GROQ_API_KEY is required when LLM_PROVIDER=groq in production")
         if self.llm_provider == "openai" and not self.openai_api_key:
             raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER=openai in production")
+        # Both default to localhost and the app boots fine either way - Calendar connect only
+        # fails at request time, and only for real users (never the developer testing against
+        # their own machine), so a leftover default here silently breaks it for everyone else.
+        if self.google_calendar_client_id and "localhost" in self.google_calendar_redirect_uri:
+            raise ValueError(
+                "GOOGLE_CALENDAR_REDIRECT_URI still points at localhost in production; set it to "
+                "the deployed backend's public HTTPS callback URL"
+            )
+        if self.google_calendar_client_id and "localhost" in self.frontend_origin:
+            raise ValueError(
+                "FRONTEND_ORIGIN still points at localhost in production; set it to the deployed "
+                "frontend's public URL so the Calendar OAuth popup can postMessage back to it"
+            )
         return self
 
 
