@@ -15,9 +15,9 @@ services:
       - key: LOG_LEVEL
         value: INFO
       - key: LLM_PROVIDER
-        value: google
+        value: openai
       - key: MODEL_NAME
-        value: gemini-2.5-flash
+        value: gpt-4o-mini
       - key: DAILY_TOKEN_BUDGET
         value: "150000"
       - key: AGENT_CONTEXT_WINDOW_TOKENS
@@ -62,7 +62,7 @@ services:
         sync: false
       - key: SECRET_KEY
         sync: false
-      - key: GOOGLE_API_KEY
+      - key: OPENAI_API_KEY
         sync: false
       - key: CORS_ORIGINS
         sync: false
