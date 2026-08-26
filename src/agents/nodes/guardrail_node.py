@@ -80,7 +80,7 @@ async def input_guardrail_node(state: AgentState) -> dict:
                 "messages": [AIMessage(content=question)],
             }
         else:
-            safe_reason = guardrail_service.sanitize_untrusted_text(semantic.reason).strip()
+            safe_reason = guardrail_service.sanitize_untrusted_text(semantic.reason).strip().rstrip(".!?")
             decision = guardrail_service.GuardrailDecision(
                 False, "out_of_domain", safe_reason,
                 (
