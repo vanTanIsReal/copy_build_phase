@@ -8,6 +8,21 @@ import ScanningBorder from '../fx/ScanningBorder'
 import ScrambledMarkdown from '../fx/ScrambledMarkdown'
 import FluidButton from '../fx/FluidButton'
 import { springs } from '../fx/springs'
+import { formatDateTime } from '../../utils/datetime'
+
+// Same mapping TaskTable.jsx uses for its priority pill, kept in sync so a "High" priority looks
+// the same whether it came from a real Task or straight out of an AI panel result.
+const priorityClass = { High: 'danger', Medium: 'warning', Low: 'info' }
+
+// Icon + empty-state copy for each flavor of list the panel can render into resultItems, so a
+// JSON array never gets dumped to the user as raw text - it always becomes this same list look.
+const resultMeta = {
+  'Tasks extracted': { icon: 'bi-check2-square', empty: 'No action items found.' },
+  'Schedule found': { icon: 'bi-calendar-event', empty: 'No events found in this window.' },
+  'Deadlines found': { icon: 'bi-alarm', empty: 'No deadlines found in this window.' },
+  'Reminder suggestions': { icon: 'bi-bell', empty: 'No reminders found in this window.' },
+}
+const defaultResultMeta = { icon: 'bi-list-check', empty: 'Nothing found.' }
 
 const actions = [
   ['bi-text-paragraph', 'Summarize', 'Get the key points', '#526ff5'],
@@ -34,6 +49,19 @@ function parseJsonArray(text) {
   const parsed = JSON.parse(cleaned)
   if (!Array.isArray(parsed)) throw new Error('Expected a JSON array')
   return parsed
+}
+
+// 'Find schedule'/'Deadlines' ask the agent for a JSON array (same raw shape 'Extract tasks'
+// parses below) but, unlike tasks, there's nothing to save - so instead of throwing on a
+// malformed/prose reply, this just returns null and the caller falls back to showing the raw
+// text, same as before this list rendering existed.
+function tryParseScheduleItems(text) {
+  try {
+    const items = parseJsonArray(text)
+    return items.every(item => item && typeof item === 'object' && typeof item.title === 'string') ? items : null
+  } catch {
+    return null
+  }
 }
 
 function describeInterrupt(interrupt) {
@@ -72,6 +100,8 @@ export default function AIPanel({
   const [runningAction, setRunningAction] = useState(null)
   const [resultTitle, setResultTitle] = useState('')
   const [result, setResult] = useState('')
+  const [resultItems, setResultItems] = useState(null)
+  const [resultNote, setResultNote] = useState('')
   const [error, setError] = useState('')
   const [pending, setPending] = useState(null)
   const [contextScope, setContextScope] = useState(null)
@@ -135,7 +165,7 @@ export default function AIPanel({
 
   const callAgent = async (action, prompt, title) => {
     if (!messages.length) { setError('No messages in this conversation yet.'); setResult(''); return null }
-    setRunningAction(action); setError(''); setResult(''); setPending(null)
+    setRunningAction(action); setError(''); setResult(''); setResultItems(null); setResultNote(''); setPending(null)
     try {
       const response = await chatWithAgent(token, {
         message: prompt,
@@ -170,17 +200,47 @@ export default function AIPanel({
         source_message_ids: response.context_scope?.source_message_ids || null,
         consent_scope_hash: response.context_scope?.consent_scope_hash || null,
       })))
-      const added = settled.filter(item => item.status === 'fulfilled').length
-      setResult(added ? `Added ${added} task${added > 1 ? 's' : ''} for review.` : 'No action items found.')
-    } catch (err) { setError(err.detail || 'Could not save extracted tasks.') }
+      const added = items.filter((_, index) => settled[index].status === 'fulfilled')
+      const failed = items.length - added.length
+      setResult('')
+      setResultItems(added)
+      if (failed > 0) setResultNote(`${failed} item${failed > 1 ? 's' : ''} couldn't be saved.`)
+      else if (added.length) setResultNote(`Added ${added.length} task${added.length > 1 ? 's' : ''} for review.`)
+    } catch (err) { setError(err.detail || 'Could not save extracted tasks.'); setResult('') }
+  }
+
+  // Shared by 'Find schedule' and 'Deadlines': both ask the agent for a JSON array and, when it
+  // parses cleanly, render it as a list (see resultItems below) instead of dumping raw JSON.
+  const runJsonListAction = async (action, prompt, title) => {
+    const response = await callAgent(action, prompt, title)
+    if (!response) return
+    const items = tryParseScheduleItems(response.response)
+    if (items) { setResultItems(items); setResult('') }
+  }
+
+  // 'Suggest reminder' normally has the agent call create_reminder, which pauses on an
+  // interrupt (handled inside callAgent/handleAgentResult) so execution never reaches past the
+  // await below. If the agent answers directly instead - e.g. a plain JSON list of candidate
+  // reminders, with no confirmation offered - render that list like Find schedule/Deadlines do
+  // instead of dumping raw JSON. Nothing is created either way; only a confirmed interrupt creates one.
+  const runSuggestReminder = async () => {
+    const response = await callAgent('Suggest reminder', 'Find the most important deadline or appointment and draft a reminder. Ask me to confirm first.', 'Suggest reminder')
+    if (!response) return
+    const items = tryParseScheduleItems(response.response)
+    if (items) {
+      setResultTitle('Reminder suggestions')
+      setResultItems(items)
+      setResult('')
+      setResultNote("The assistant listed these instead of asking to confirm one - nothing was created.")
+    }
   }
 
   const handlers = {
     Summarize: () => callAgent('Summarize', 'Summarize this conversation.', 'Summary'),
     'Extract tasks': runExtractTasks,
-    'Find schedule': () => callAgent('Find schedule', 'List events, meetings, or scheduled times mentioned in this conversation.', 'Schedule found'),
-    Deadlines: () => callAgent('Deadlines', 'List deadlines or due dates mentioned in this conversation.', 'Deadlines found'),
-    'Suggest reminder': () => callAgent('Suggest reminder', 'Find the most important deadline or appointment and draft a reminder. Ask me to confirm first.', 'Suggest reminder'),
+    'Find schedule': () => runJsonListAction('Find schedule', 'List events, meetings, or scheduled times mentioned in this conversation.', 'Schedule found'),
+    Deadlines: () => runJsonListAction('Deadlines', 'List deadlines or due dates mentioned in this conversation.', 'Deadlines found'),
+    'Suggest reminder': runSuggestReminder,
   }
 
   const respondToInterrupt = async (approved, edits) => {
@@ -192,6 +252,7 @@ export default function AIPanel({
       if (!handleAgentResult(response)) {
         setResultTitle(approved ? 'Done' : 'Cancelled')
         setResult(response.response)
+        setResultItems(null); setResultNote('')
       }
     } catch (err) {
       setError(err.detail || 'Could not reach the AI agent.')
@@ -217,6 +278,7 @@ export default function AIPanel({
       await refreshEventCandidates()
       setResultTitle(action === 'confirm' ? 'Calendar updated' : 'Suggestion dismissed')
       setResult(action === 'confirm' ? 'The reviewed calendar change was applied.' : 'The suggestion was dismissed.')
+      setResultItems(null); setResultNote('')
     } catch (err) { setError(err.detail || 'Could not update this event suggestion.') }
     finally { setCandidateBusy(null) }
   }
@@ -267,6 +329,16 @@ export default function AIPanel({
       {error && <div className="auth-error">{error}</div>}
       {contextScope && <div className="alert border border-white/10 bg-white/5 backdrop-blur-md text-orbit-ink py-2 px-3 small mt-2 mb-2">This request used {contextScope.included_message_count}/{contextScope.window_message_count} messages in its selected window.{contextScope.excluded_participants?.length > 0 && <> Excluded authors: {contextScope.excluded_participants.join(', ')}.</>}</div>}
       {result && <div className="border border-white/10 bg-white/5 backdrop-blur-md text-orbit-ink rounded-3 p-3 mt-2 small"><strong className="d-block mb-1">{resultTitle}</strong><ScrambledMarkdown text={result} active={Boolean(result)}/>{pending && <div className="d-flex flex-wrap gap-2 mt-2">{pending.interrupt?.draft?.alternatives?.map((alternative, index) => <button className="btn btn-sm btn-outline-primary" disabled={runningAction==='__resume__'} key={`${alternative.start}-${index}`} onClick={()=>respondToInterrupt(true, {start: alternative.start, end: alternative.end}).catch(()=>{})}>Dùng {alternative.start} - {alternative.end}</button>)}<FluidButton label="Xác nhận" disabled={runningAction==='__resume__'} onClick={()=>respondToInterrupt(true)}/><button className="btn btn-sm btn-light" disabled={runningAction==='__resume__'} onClick={()=>respondToInterrupt(false).catch(()=>{})}>Hủy</button></div>}</div>}
+      {resultItems && <div className="border border-white/10 bg-white/5 backdrop-blur-md text-orbit-ink rounded-3 p-3 mt-2 small">
+        <strong className="d-block mb-2">{resultTitle}</strong>
+        {resultNote && <div className="text-muted mb-2">{resultNote}</div>}
+        {!resultItems.length && <div className="text-muted">{(resultMeta[resultTitle] || defaultResultMeta).empty}</div>}
+        {resultItems.map((item, index) => <div key={index} className="d-flex align-items-center gap-2 border-top pt-2 mt-2">
+          <i className={`bi ${(resultMeta[resultTitle] || defaultResultMeta).icon} text-muted`}/>
+          <div className="flex-grow-1" style={{minWidth: 0}}><strong className="d-block">{item.title}</strong>{item.due_at && <small className="text-muted">{formatDateTime(item.due_at)}</small>}</div>
+          {item.priority && <span className={`soft-badge ${priorityClass[item.priority] || 'info'}`}><i/>{item.priority}</span>}
+        </div>)}
+      </div>}
       <div className="ask-card"><div className="ask-title"><span><i className="bi bi-stars"/></span><div><strong>Ask Orbit</strong><small>About this conversation</small></div></div><textarea value={question} onChange={event=>setQuestion(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();askOrbit()}}} placeholder="Ask anything about this conversation..." disabled={!granted}/><div className="ask-footer"><span>AI may make mistakes</span><button disabled={!granted || asking || !question.trim()} onClick={()=>askOrbit()}><i className={`bi ${asking?'bi-hourglass-split':'bi-arrow-up'}`}/></button></div></div>
       <div className="suggested-prompts"><span>Try asking</span><button disabled={asking || !granted} onClick={()=>askOrbit('What decisions were made today?')}>“What decisions were made today?”</button><button disabled={asking || !granted} onClick={()=>askOrbit('Who assigned me tasks?')}>“Who assigned me tasks?”</button></div>
       </motion.div>
