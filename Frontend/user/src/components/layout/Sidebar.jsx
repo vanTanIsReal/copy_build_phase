@@ -43,7 +43,12 @@ export default function Sidebar({ open, onClose, tasksIconRef, flightPulse }) {
             // `end` matters here: without it, `/tasks` would also read as "active" while on
             // `/tasks/inbox` (NavLink prefix-matches by default), highlighting both at once.
             <NavLink key={path} to={`/${path}`} end onClick={onClose} className={({ isActive }) => `side-link ${label === 'AI Assistant' ? 'assistant-link' : ''} ${isActive ? 'active' : ''} ${path === 'tasks' && flightPulse ? 'flight-pulse' : ''}`}>
-              <i className={`bi ${icon}`} ref={path === 'tasks' ? tasksIconRef : undefined} /><span>{label}</span>{label === 'AI Assistant' && <span className="new-pill">New</span>}
+              <i className={`bi ${icon}`} ref={path === 'tasks' ? tasksIconRef : undefined} /><span>{label}</span>
+              {label === 'AI Assistant' && <span className="new-pill">New</span>}
+              {/* Requires an admin to assign the account to a company workspace first (see
+                  WorkspaceManagementPage/WorkspaceBriefsPage empty states) - most accounts never
+                  get one, so mark these as an org-gated add-on instead of a core personal page. */}
+              {(path === 'workspaces' || path === 'workspace-briefs') && <span className="org-pill">Org</span>}
             </NavLink>
           ))}
           {isAdmin && <><div className="nav-caption">Administration</div><a className="side-link" href={adminUrl}><i className="bi bi-box-arrow-up-right" /><span>Open Admin</span></a></>}

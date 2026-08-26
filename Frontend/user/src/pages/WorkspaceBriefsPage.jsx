@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
+import OrgFeatureBadge from '../components/common/OrgFeatureBadge'
 import StatCard from '../components/common/StatCard'
 import EmptyState from '../components/fx/EmptyState'
 import WorkspaceBriefCard from '../components/agents/WorkspaceBriefCard'
@@ -44,7 +45,7 @@ export default function WorkspaceBriefsPage() {
     setLoadError('')
     listAvailableAgentWorkspaces(token, company.id)
       .then(setAgentWorkspaces)
-      .catch(err => setLoadError(err.detail || 'Could not load your assigned workspaces.'))
+      .catch(err => setLoadError(err.detail || 'Không thể tải danh sách workspace được gán cho bạn.'))
       .finally(() => setLoadingWorkspaces(false))
   }, [token, company?.id])
 
@@ -114,6 +115,7 @@ export default function WorkspaceBriefsPage() {
         eyebrow="Multi-agent"
         title="Workspace Briefs"
         description="Delivery, Quality Assurance và Executive brief - dựng từ dữ liệu thật, tôn trọng human-in-the-loop trước mọi hành động."
+        action={<OrgFeatureBadge text="Tính năng tổ chức · cần admin gán" />}
       />
 
       {loadError && <div className="auth-error mb-3">{loadError}</div>}
@@ -129,48 +131,53 @@ export default function WorkspaceBriefsPage() {
           <EmptyState
             variant="radar"
             icon="bi-diagram-3"
-            title="Chưa có workspace nào"
-            description="Một admin cần gán bạn vào Product Delivery hoặc Quality Assurance workspace trước."
+            title="Tài khoản này chưa được cấu hình cho tính năng này"
+            description="Đây là tiện ích multi-agent tuỳ chọn dành cho các nhóm Product Delivery / Quality Assurance / Executive — không phải mọi tài khoản đều có. Nếu nhóm của bạn cần, hãy nhờ admin gán bạn vào workspace tương ứng."
           />
         </div>
       )}
 
       <div className="row g-4">
         <div className="col-lg-7">
-          <h2 className="h6 text-uppercase text-secondary">Workspace briefs</h2>
-          {briefWorkspaces.map(ws => {
-            const entry = briefsByWorkspace[ws.id] || { status: 'loading' }
-            return (
-              <div key={ws.id} className="mb-3">
-                <div className="d-flex justify-content-between align-items-center mb-1">
-                  <strong>{ws.name}</strong>
-                  <small className="text-secondary">{profileName(ws.agent_profile)}</small>
+          <section className="content-card p-4">
+            <h2 className="h6 text-uppercase text-secondary mb-3">Workspace briefs</h2>
+            {!briefWorkspaces.length && <p className="text-secondary small mb-0">Chưa có brief nào để hiển thị.</p>}
+            {briefWorkspaces.map(ws => {
+              const entry = briefsByWorkspace[ws.id] || { status: 'loading' }
+              return (
+                <div key={ws.id} className="mb-3">
+                  <div className="d-flex justify-content-between align-items-center mb-1">
+                    <strong>{ws.name}</strong>
+                    <small className="text-secondary">{profileName(ws.agent_profile)}</small>
+                  </div>
+                  {entry.status === 'loading' && <p className="text-secondary small">Đang tải...</p>}
+                  {entry.status === 'error' && <div className="auth-error small">{entry.errorText}</div>}
+                  {entry.status === 'ready' && <>
+                    <WorkspaceBriefCard brief={entry.brief} />
+                    <button className="btn btn-sm btn-light mb-3" onClick={() => proposeFollowUpReminder(ws)}>
+                      <i className="bi bi-bell me-1" />Đề xuất nhắc theo dõi
+                    </button>
+                  </>}
                 </div>
-                {entry.status === 'loading' && <p className="text-secondary small">Đang tải...</p>}
-                {entry.status === 'error' && <div className="auth-error small">{entry.errorText}</div>}
-                {entry.status === 'ready' && <>
-                  <WorkspaceBriefCard brief={entry.brief} />
-                  <button className="btn btn-sm btn-light mb-3" onClick={() => proposeFollowUpReminder(ws)}>
-                    <i className="bi bi-bell me-1" />Đề xuất nhắc theo dõi
-                  </button>
-                </>}
-              </div>
-            )
-          })}
+              )
+            })}
 
-          {executiveBrief?.status === 'ready' && (
-            <>
-              <h2 className="h6 text-uppercase text-secondary mt-4">Executive</h2>
-              <WorkspaceBriefCard brief={executiveBrief.brief} />
-            </>
-          )}
+            {executiveBrief?.status === 'ready' && (
+              <>
+                <h2 className="h6 text-uppercase text-secondary mt-4 mb-3">Executive</h2>
+                <WorkspaceBriefCard brief={executiveBrief.brief} />
+              </>
+            )}
+          </section>
         </div>
 
         <div className="col-lg-5">
-          <h2 className="h6 text-uppercase text-secondary">Chờ xác nhận (HITL)</h2>
-          {pendingProposal
-            ? <ActionProposalCard proposal={pendingProposal.proposal} onConfirm={() => confirmProposal(true)} onReject={() => confirmProposal(false)} />
-            : <p className="text-secondary small">Không có đề xuất nào đang chờ xác nhận.</p>}
+          <section className="content-card p-4">
+            <h2 className="h6 text-uppercase text-secondary mb-3">Chờ xác nhận (HITL)</h2>
+            {pendingProposal
+              ? <ActionProposalCard proposal={pendingProposal.proposal} onConfirm={() => confirmProposal(true)} onReject={() => confirmProposal(false)} />
+              : <p className="text-secondary small mb-0">Không có đề xuất nào đang chờ xác nhận.</p>}
+          </section>
         </div>
       </div>
     </div>
