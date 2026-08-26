@@ -2,6 +2,8 @@ import logging
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import google_auth_httplib2
+import httplib2
 from googleapiclient.discovery import Resource, build
 from googleapiclient.errors import HttpError
 from sqlalchemy import select
@@ -65,11 +67,21 @@ def get_calendar_service():
 _DEFAULT_SERVICE_FACTORY = get_calendar_service
 
 
+def _build_service(credentials) -> Resource:
+    # Explicit http= (instead of credentials=) so we can bound the timeout - httplib2 otherwise
+    # has none, so a stalled route to Google blocks for the OS-level TCP timeout instead of
+    # failing fast (see google_credentials.HTTP_TIMEOUT_SECONDS).
+    http = google_auth_httplib2.AuthorizedHttp(
+        credentials, http=httplib2.Http(timeout=google_credentials.HTTP_TIMEOUT_SECONDS)
+    )
+    return build("calendar", "v3", http=http)
+
+
 async def _service(user_id: str) -> Resource:
     if get_calendar_service is not _DEFAULT_SERVICE_FACTORY:
         return get_calendar_service()
     credentials = await google_credentials.get_credentials(user_id)
-    return await run_in_threadpool(build, "calendar", "v3", credentials=credentials)
+    return await run_in_threadpool(_build_service, credentials)
 
 
 async def authorize_calendar_access(user_id: str, workspace_id: str | None = None) -> tuple[str, list[str]]:

@@ -2,6 +2,8 @@ import logging
 import os
 from datetime import UTC, datetime, timedelta
 
+import google_auth_httplib2
+import httplib2
 import httpx
 import jwt
 from google.auth.exceptions import RefreshError
@@ -21,6 +23,11 @@ SCOPES = ["https://www.googleapis.com/auth/calendar"]
 _AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
 _TOKEN_URI = "https://oauth2.googleapis.com/token"
 _STATE_PURPOSE = "calendar_oauth"
+# httplib2/requests default to no timeout at all, so a stalled route to Google (e.g. an IPv6
+# path with no real connectivity, common on Windows dev machines) blocks for the OS-level TCP
+# timeout - tens of seconds - instead of failing fast. Bound every outbound Google call instead.
+# Public: reused by calendar_service.py when building the per-request Calendar API client.
+HTTP_TIMEOUT_SECONDS = 10
 
 
 class CalendarNotConnectedError(Exception):
@@ -90,7 +97,7 @@ def build_authorization_url(user_id: str) -> str:
 
 def exchange_code(code: str) -> Credentials:
     flow = _build_flow()
-    flow.fetch_token(code=code)
+    flow.fetch_token(code=code, timeout=HTTP_TIMEOUT_SECONDS)
     return flow.credentials
 
 
@@ -98,9 +105,8 @@ def fetch_google_email(creds: Credentials) -> str:
     from googleapiclient.discovery import build
 
     try:
-        return (
-            build("calendar", "v3", credentials=creds).calendarList().get(calendarId="primary").execute().get("id", "")
-        )
+        http = google_auth_httplib2.AuthorizedHttp(creds, http=httplib2.Http(timeout=HTTP_TIMEOUT_SECONDS))
+        return build("calendar", "v3", http=http).calendarList().get(calendarId="primary").execute().get("id", "")
     except Exception:  # noqa: BLE001 - display metadata is best-effort
         logger.warning("Could not resolve connected Google Calendar email", exc_info=True)
         return ""
@@ -129,6 +135,18 @@ async def save_credentials(user_id: str, creds: Credentials, google_email: str =
         if google_email:
             row.google_email = google_email
         await db.commit()
+
+
+async def update_google_email(user_id: str, google_email: str) -> None:
+    """Best-effort display metadata only - never touches tokens, so it's safe to run off the
+    connect flow's critical path (see calendar_oauth_callback)."""
+    if not google_email:
+        return
+    async with db_session.async_session_maker() as db:
+        row = await _row_for_user(db, user_id)
+        if row is not None:
+            row.google_email = google_email
+            await db.commit()
 
 
 async def get_connection_info(user_id: str) -> dict:

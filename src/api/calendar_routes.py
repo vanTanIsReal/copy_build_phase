@@ -4,7 +4,7 @@ import json
 import logging
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -86,8 +86,20 @@ async def disconnect_calendar(current_user: User = Depends(get_current_user)) ->
     await google_credentials.disconnect(current_user.id)
 
 
+async def _resolve_google_email(user_id: str, credentials) -> None:
+    """Runs after the callback response is already sent - fetching the display email is a real
+    extra round trip to the Calendar API, and the connection is fully usable without it, so it
+    must not delay closing the OAuth popup (see calendar_oauth_callback)."""
+    try:
+        email = await run_in_threadpool(google_credentials.fetch_google_email, credentials)
+        await google_credentials.update_google_email(user_id, email)
+    except Exception:  # noqa: BLE001 - best-effort display metadata, must not surface to the user
+        logger.warning("Could not resolve Google Calendar email after connect", exc_info=True)
+
+
 @public_router.get("/calendar/oauth/callback", response_class=HTMLResponse)
 async def calendar_oauth_callback(
+    background_tasks: BackgroundTasks,
     code: str | None = Query(default=None),
     state: str | None = Query(default=None),
     error: str | None = Query(default=None),
@@ -109,11 +121,14 @@ setTimeout(function(){{window.close()}},800);</script></body>"""
         return page(False, "This connection attempt is invalid or expired.", 400)
     try:
         credentials = await run_in_threadpool(google_credentials.exchange_code, code)
-        email = await run_in_threadpool(google_credentials.fetch_google_email, credentials)
-        await google_credentials.save_credentials(user_id, credentials, google_email=email)
+        await google_credentials.save_credentials(user_id, credentials)
     except Exception:  # noqa: BLE001 - callback returns a safe page, details stay in logs
         logger.exception("Google Calendar OAuth exchange failed")
         return page(False, "Could not connect Google Calendar.", 502)
+    # The connection is already saved and usable at this point - resolving the display email is
+    # a second, non-essential Calendar API call, so it happens after the popup has closed instead
+    # of adding its round trip to what the user waits on.
+    background_tasks.add_task(_resolve_google_email, user_id, credentials)
     return page(True, "Google Calendar connected. You can close this window.")
 
 
