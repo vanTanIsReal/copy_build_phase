@@ -1,5 +1,5 @@
 import logging
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -25,8 +25,9 @@ _PRIORITY_RANK = {"High": 0, "Medium": 1, "Low": 2}
 # fixed-length placeholder event on Google Calendar - same convention as a quick manual add. The
 # user can always resize/edit it afterwards from the Calendar page.
 _ACCEPTED_TASK_EVENT_DURATION = timedelta(minutes=30)
-# How long before an accepted task's due_at its synced Reminder fires - same default the manual
-# "New reminder" form and the agent's create_reminder tool both use.
+# Upper bound on how long before an accepted task's due_at its synced Reminder fires - same
+# default the manual "New reminder" form and the agent's create_reminder tool both use.
+# _reminder_lead_minutes below caps this further when due_at is too soon for the full 30 minutes.
 _ACCEPTED_TASK_REMINDER_LEAD_MINUTES = 30
 
 def _to_out(task: Task, *, due_at_override=None) -> TaskOut:
@@ -140,13 +141,26 @@ async def _sync_task_to_calendar(task: Task, current_user: User) -> None:
     )
 
 
+def _reminder_lead_minutes(due_at) -> int:
+    """Cap the default lead time to what's actually left before due_at, so a task due soon (but
+    still genuinely in the future) doesn't silently lose its reminder just because a fixed
+    30-minute lead would push the notification time itself into the past. Only a due_at that's
+    already at or past now falls through unchanged - schedule_reminder still rejects that one, as
+    it should.
+    """
+    due = due_at if due_at.tzinfo else due_at.replace(tzinfo=ZoneInfo(get_settings().calendar_timezone))
+    remaining_minutes = (due.astimezone(UTC) - datetime.now(UTC)).total_seconds() / 60
+    if remaining_minutes <= 0:
+        return _ACCEPTED_TASK_REMINDER_LEAD_MINUTES
+    return max(1, min(_ACCEPTED_TASK_REMINDER_LEAD_MINUTES, int(remaining_minutes // 2)))
+
+
 async def _sync_task_to_reminder(task: Task, current_user: User) -> None:
     """Same "Accept = confirm-and-sync" product decision as _sync_task_to_calendar above, applied
     to Reminders instead: the Accept click is the explicit human confirmation, so the reminder is
     scheduled directly with no separate dialog. Unlike Calendar sync this never depends on a
-    connected external account, but it still must never block Accept: a due_at too soon for
-    schedule_reminder's lead time (already past, or less than
-    _ACCEPTED_TASK_REMINDER_LEAD_MINUTES away) raises ValueError, which is only logged.
+    connected external account, but it still must never block Accept: a due_at that's already at
+    or past now (see _reminder_lead_minutes) raises ValueError, which is only logged.
     """
     if task.source not in {"proactive", "ai_extracted"} or task.due_at is None or task.reminder_id:
         return
@@ -156,7 +170,7 @@ async def _sync_task_to_reminder(task: Task, current_user: User) -> None:
             owner_id=current_user.id,
             title=task.title,
             due_at_iso=task.due_at,
-            lead_minutes=_ACCEPTED_TASK_REMINDER_LEAD_MINUTES,
+            lead_minutes=_reminder_lead_minutes(task.due_at),
             message="Automatically scheduled from an accepted Orbit task suggestion.",
             source="proactive",
         )

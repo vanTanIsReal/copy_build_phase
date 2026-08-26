@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
@@ -318,6 +318,50 @@ async def test_accepting_proactive_task_with_past_due_date_skips_reminder_sync(
     body = resp.json()
     assert body["calendar_event_id"] == "evt-3"
     assert body["reminder_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_accepting_proactive_task_due_soon_still_gets_a_reminder(client, auth_headers, monkeypatch):
+    """A due_at only minutes away must not lose its reminder just because the default 30-minute
+    lead would push the notification time into the past - the lead should shrink instead of the
+    reminder disappearing. Uses a due_at relative to real now (not a fixed date) since this test is
+    specifically about that near-term boundary."""
+    fake_service = MagicMock()
+    fake_service.events.return_value.insert.return_value.execute.return_value = {
+        "id": "evt-4", "htmlLink": "https://calendar.google.com/event?eid=evt4",
+    }
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
+
+    # Naive, no explicit offset - same convention as every other due_at fixture in this file
+    # (matching how a real AI-extracted due_at arrives, per create_task's own comment); it's
+    # interpreted as calendar_timezone (Asia/Ho_Chi_Minh) wall-clock time.
+    due_at_local = datetime.now(ZoneInfo(get_settings().calendar_timezone)) + timedelta(minutes=10)
+    due_at_local = due_at_local.replace(microsecond=0)
+    created = await _create_proactive_task(
+        client, auth_headers, title="Ăn tối", due_at=due_at_local.replace(tzinfo=None).isoformat()
+    )
+
+    resp = await client.patch(
+        f"/api/v1/tasks/{created['id']}/status", json={"status": "pending"}, headers=auth_headers
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["calendar_event_id"] == "evt-4"
+    assert body["reminder_id"] is not None
+
+    reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
+    reminder = next(r for r in reminders if r["title"] == "Ăn tối")
+    # SQLite (this test DB) doesn't reliably round-trip tzinfo on DateTime(timezone=True) columns -
+    # a naive result here means "Asia/Ho_Chi_Minh wall clock", same assumption applied to due_at
+    # above and throughout this codebase's own naive-datetime handling.
+    tz = ZoneInfo(get_settings().calendar_timezone)
+
+    def _aware(dt: datetime) -> datetime:
+        return dt if dt.tzinfo else dt.replace(tzinfo=tz)
+
+    fire_at = _aware(datetime.fromisoformat(reminder["fire_at"]))
+    due_at_aware = _aware(due_at_local)
+    assert datetime.now(UTC) < fire_at < due_at_aware
 
 
 @pytest.mark.asyncio
