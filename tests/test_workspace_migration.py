@@ -212,7 +212,7 @@ def test_alembic_upgrade_builds_fresh_database(tmp_path):
         "agent_workspace_memberships",
         "agent_workspace_conversations",
     }.issubset(tables)
-    assert revision == "20260824_19"
+    assert revision == "20260826_21"
     assert membership_indexes["uq_agent_workspace_active_lead"] == 1
     assert "agent_threads" in tables
     assert {"google_identities", "ai_permissions"}.issubset(tables)

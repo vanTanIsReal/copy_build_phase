@@ -11,7 +11,7 @@ from src.config import get_settings
 from src.db.models import Conversation, Task, User, Workspace
 from src.db.session import get_db
 from src.models.task_schemas import TaskCreateRequest, TaskOut, UpdateTaskStatusRequest
-from src.services import calendar_service, consent_service
+from src.services import calendar_service, consent_service, reminder_service
 from src.services.authorization_service import require_conversation_access
 from src.services.google_credentials import CalendarNotConnectedError
 from src.services.workspace_service import resolve_workspace_for_user
@@ -25,6 +25,9 @@ _PRIORITY_RANK = {"High": 0, "Medium": 1, "Low": 2}
 # fixed-length placeholder event on Google Calendar - same convention as a quick manual add. The
 # user can always resize/edit it afterwards from the Calendar page.
 _ACCEPTED_TASK_EVENT_DURATION = timedelta(minutes=30)
+# How long before an accepted task's due_at its synced Reminder fires - same default the manual
+# "New reminder" form and the agent's create_reminder tool both use.
+_ACCEPTED_TASK_REMINDER_LEAD_MINUTES = 30
 
 def _to_out(task: Task, *, due_at_override=None) -> TaskOut:
     due_at = due_at_override if due_at_override is not None else task.due_at
@@ -43,6 +46,7 @@ def _to_out(task: Task, *, due_at_override=None) -> TaskOut:
         consent_scope_hash=task.consent_scope_hash,
         invalidated_reason=task.invalidated_reason,
         calendar_event_id=task.calendar_event_id,
+        reminder_id=task.reminder_id,
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
@@ -134,6 +138,35 @@ async def _sync_task_to_calendar(task: Task, current_user: User) -> None:
     await calendar_service.broadcast_change(
         current_user.id, "calendar_event_created", {"event": calendar_service.to_out_dict(created)}
     )
+
+
+async def _sync_task_to_reminder(task: Task, current_user: User) -> None:
+    """Same "Accept = confirm-and-sync" product decision as _sync_task_to_calendar above, applied
+    to Reminders instead: the Accept click is the explicit human confirmation, so the reminder is
+    scheduled directly with no separate dialog. Unlike Calendar sync this never depends on a
+    connected external account, but it still must never block Accept: a due_at too soon for
+    schedule_reminder's lead time (already past, or less than
+    _ACCEPTED_TASK_REMINDER_LEAD_MINUTES away) raises ValueError, which is only logged.
+    """
+    if task.source not in {"proactive", "ai_extracted"} or task.due_at is None or task.reminder_id:
+        return
+    try:
+        reminder = await reminder_service.schedule_reminder(
+            workspace_id=task.workspace_id,
+            owner_id=current_user.id,
+            title=task.title,
+            due_at_iso=task.due_at,
+            lead_minutes=_ACCEPTED_TASK_REMINDER_LEAD_MINUTES,
+            message="Automatically scheduled from an accepted Orbit task suggestion.",
+            source="proactive",
+        )
+    except ValueError:
+        logger.info("Skipped reminder sync for task %s: due_at too close to now", task.id)
+        return
+    except Exception:  # noqa: BLE001 - accepting the task must never fail because this did
+        logger.exception("Could not auto-sync accepted task %s to a Reminder", task.id)
+        return
+    task.reminder_id = reminder.id
 
 
 @router.get("/tasks", response_model=list[TaskOut])
@@ -288,6 +321,7 @@ async def update_task_status(
     task.status = request.status
     if is_accept:
         await _sync_task_to_calendar(task, current_user)
+        await _sync_task_to_reminder(task, current_user)
     await db.commit()
     await db.refresh(task)
     out = _to_out(task)

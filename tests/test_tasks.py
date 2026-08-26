@@ -8,7 +8,7 @@ from sqlalchemy import select
 from src.config import get_settings
 from src.db import session as db_session
 from src.db.models import Task
-from src.services import calendar_service
+from src.services import calendar_service, reminder_service
 
 
 async def _create_proactive_task(client, auth_headers, *, title, due_at=None):
@@ -151,12 +151,14 @@ async def test_tasks_sorted_by_due_date_then_priority(client, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_accepting_proactive_task_auto_syncs_calendar_but_not_reminder(
+async def test_accepting_proactive_task_auto_syncs_calendar_and_reminder(
     client, auth_headers, monkeypatch
 ):
-    """Product decision: Accept on an AI-suggested task IS the human confirmation to write the
-    matching Google Calendar event (no separate dialog) - but it still must not silently create
-    a Reminder, which has its own distinct confirmation flow."""
+    """Product decision: Accept on an AI-suggested task IS the human confirmation to both write
+    the matching Google Calendar event AND schedule a Reminder for the same due_at - no separate
+    dialog for either. (Reminders created this way still fire through the normal reminder flow;
+    this only skips the confirmation step, matching the same "Accept = confirm" reasoning already
+    applied to Calendar sync.)"""
     fake_service = MagicMock()
     fake_service.events.return_value.insert.return_value.execute.return_value = {
         "id": "evt-1", "htmlLink": "https://calendar.google.com/event?eid=evt1",
@@ -164,7 +166,7 @@ async def test_accepting_proactive_task_auto_syncs_calendar_but_not_reminder(
     monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
 
     created = await _create_proactive_task(
-        client, auth_headers, title="Product launch call", due_at="2026-08-10T15:00:00"
+        client, auth_headers, title="Product launch call", due_at="2026-12-10T15:00:00"
     )
     assert created["status"] == "suggested"
 
@@ -175,15 +177,19 @@ async def test_accepting_proactive_task_auto_syncs_calendar_but_not_reminder(
     body = resp.json()
     assert body["status"] == "pending"
     assert body["calendar_event_id"] == "evt-1"
+    assert body["reminder_id"] is not None
 
     fake_service.events.return_value.insert.assert_called_once()
     call_kwargs = fake_service.events.return_value.insert.call_args.kwargs
     assert call_kwargs["body"]["summary"] == "Product launch call"
-    assert call_kwargs["body"]["start"]["dateTime"] == "2026-08-10T15:00:00+07:00"
-    assert call_kwargs["body"]["end"]["dateTime"] == "2026-08-10T15:30:00+07:00"
+    assert call_kwargs["body"]["start"]["dateTime"] == "2026-12-10T15:00:00+07:00"
+    assert call_kwargs["body"]["end"]["dateTime"] == "2026-12-10T15:30:00+07:00"
 
     reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
-    assert not any(r["title"] == "Product launch call" for r in reminders)
+    reminder = next(r for r in reminders if r["title"] == "Product launch call")
+    assert reminder["id"] == body["reminder_id"]
+    assert reminder["due_at"].startswith("2026-12-10T15:00:00")
+    assert reminder["source"] == "proactive"
 
 
 @pytest.mark.asyncio
@@ -204,6 +210,9 @@ async def test_accepting_manual_task_does_not_touch_calendar_or_reminder(client,
     )
     assert resp.status_code == 200
     fake_service.events.return_value.insert.assert_not_called()
+    assert resp.json()["reminder_id"] is None
+    reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
+    assert not any(r["title"] == "Manual with due date" for r in reminders)
 
 
 @pytest.mark.asyncio
@@ -221,12 +230,16 @@ async def test_accepting_proactive_task_without_due_date_does_not_touch_calendar
     )
     assert resp.status_code == 200
     fake_service.events.return_value.insert.assert_not_called()
+    assert resp.json()["reminder_id"] is None
+    reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
+    assert not any(r["title"] == "No due date" for r in reminders)
 
 
 @pytest.mark.asyncio
 async def test_accepting_proactive_task_survives_calendar_sync_failure(client, auth_headers, monkeypatch):
-    """The calendar auto-sync from the test above is best-effort: a broken Google API must not
-    stop Accept from succeeding, and must not fall back to creating a Reminder instead."""
+    """Calendar and Reminder sync on Accept are independent, best-effort actions: a broken Google
+    API must not stop Accept from succeeding, and must not stop the Reminder sync from still
+    happening."""
 
     def _broken_get_calendar_service():
         raise RuntimeError("Google API unreachable")
@@ -234,17 +247,77 @@ async def test_accepting_proactive_task_survives_calendar_sync_failure(client, a
     monkeypatch.setattr(calendar_service, "get_calendar_service", _broken_get_calendar_service)
 
     created = await _create_proactive_task(
-        client, auth_headers, title="Flaky calendar", due_at="2026-08-10T15:00:00"
+        client, auth_headers, title="Flaky calendar", due_at="2026-12-10T15:00:00"
     )
 
     resp = await client.patch(
         f"/api/v1/tasks/{created['id']}/status", json={"status": "pending"}, headers=auth_headers
     )
     assert resp.status_code == 200
-    assert resp.json()["status"] == "pending"
+    body = resp.json()
+    assert body["status"] == "pending"
+    assert body["calendar_event_id"] is None
+    assert body["reminder_id"] is not None
 
     reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
-    assert not any(r["title"] == "Flaky calendar" for r in reminders)
+    assert any(r["title"] == "Flaky calendar" for r in reminders)
+
+
+@pytest.mark.asyncio
+async def test_accepting_proactive_task_survives_reminder_sync_failure(client, auth_headers, monkeypatch):
+    """Same independence the other direction: a broken Reminder sync must not stop Accept from
+    succeeding, and must not stop the Calendar sync from still happening."""
+    fake_service = MagicMock()
+    fake_service.events.return_value.insert.return_value.execute.return_value = {
+        "id": "evt-2", "htmlLink": "https://calendar.google.com/event?eid=evt2",
+    }
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
+
+    async def _broken_schedule_reminder(**kwargs):
+        raise RuntimeError("Reminder scheduler unreachable")
+
+    monkeypatch.setattr(reminder_service, "schedule_reminder", _broken_schedule_reminder)
+
+    created = await _create_proactive_task(
+        client, auth_headers, title="Flaky reminder", due_at="2026-12-10T15:00:00"
+    )
+
+    resp = await client.patch(
+        f"/api/v1/tasks/{created['id']}/status", json={"status": "pending"}, headers=auth_headers
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "pending"
+    assert body["calendar_event_id"] == "evt-2"
+    assert body["reminder_id"] is None
+
+    reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
+    assert not any(r["title"] == "Flaky reminder" for r in reminders)
+
+
+@pytest.mark.asyncio
+async def test_accepting_proactive_task_with_past_due_date_skips_reminder_sync(
+    client, auth_headers, monkeypatch
+):
+    """schedule_reminder rejects a due_at too close to (or past) now - this must be silently
+    skipped, same as any other reminder-sync failure, never surfaced as a failed Accept."""
+    fake_service = MagicMock()
+    fake_service.events.return_value.insert.return_value.execute.return_value = {
+        "id": "evt-3", "htmlLink": "https://calendar.google.com/event?eid=evt3",
+    }
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
+
+    created = await _create_proactive_task(
+        client, auth_headers, title="Already due", due_at="2026-01-01T09:00:00"
+    )
+
+    resp = await client.patch(
+        f"/api/v1/tasks/{created['id']}/status", json={"status": "pending"}, headers=auth_headers
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["calendar_event_id"] == "evt-3"
+    assert body["reminder_id"] is None
 
 
 @pytest.mark.asyncio
