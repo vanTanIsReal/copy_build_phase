@@ -12,7 +12,7 @@ from src.agents.state import AgentState
 from src.agents.tools import ALL_TOOLS
 from src.config import get_settings
 from src.services import guardrail_service, usage_service
-from src.services.llm import get_llm
+from src.services.llm import get_llm, invoke_with_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -289,7 +289,6 @@ async def _answer_from_conversation(
     if extractive_answer:
         return AIMessage(content=extractive_answer)
 
-    settings = get_settings()
     wrapped_context = guardrail_service.wrap_untrusted_text(
         context, label="untrusted_conversation_data"
     )
@@ -307,10 +306,12 @@ async def _answer_from_conversation(
         ),
         HumanMessage(content=f"{wrapped_context}\n\nQUESTION:\n{question}"),
     ]
-    answer = await get_llm(temperature=0).ainvoke(prompt)
+    primary_llm = get_llm(temperature=0)
+    call = await invoke_with_fallback(prompt, temperature=0, primary_llm=primary_llm)
+    answer = call.message
     await usage_service.log_usage(
-        provider=settings.llm_provider,
-        model=settings.model_name,
+        provider=call.provider,
+        model=call.model,
         usage_metadata=answer.usage_metadata,
         user_id=user_id,
         workspace_id=workspace_id,
@@ -452,11 +453,16 @@ async def planner_node(state: AgentState) -> dict:
                     )
                 ]
             }
-        llm = get_llm().bind_tools(ALL_TOOLS)
-        ai_message: AIMessage = await llm.ainvoke([SystemMessage(content=system_prompt), *messages])
+        primary_llm = get_llm()
+        call = await invoke_with_fallback(
+            [SystemMessage(content=system_prompt), *messages],
+            tools=ALL_TOOLS,
+            primary_llm=primary_llm,
+        )
+        ai_message: AIMessage = call.message
         await usage_service.log_usage(
-            provider=settings.llm_provider,
-            model=settings.model_name,
+            provider=call.provider,
+            model=call.model,
             usage_metadata=ai_message.usage_metadata,
             user_id=state.get("user_id"),
             workspace_id=state.get("workspace_id"),

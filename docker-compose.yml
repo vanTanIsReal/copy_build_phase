@@ -1,6 +1,19 @@
-version: "3.8"
-
 services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: orbit
+      POSTGRES_USER: orbit
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orbit_dev_password}
+    volumes:
+      - postgres-data-v2:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orbit -d orbit"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   backend:
     build:
       context: .
@@ -9,11 +22,22 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql://orbit:${POSTGRES_PASSWORD:-orbit_dev_password}@db:5432/orbit
+      CHROMA_PERSIST_DIR: /app/data/chroma
     volumes:
-      - ./data:/app/data
+      - app-data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  postgres-data-v2:
+  app-data:

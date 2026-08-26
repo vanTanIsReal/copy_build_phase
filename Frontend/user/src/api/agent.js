@@ -12,3 +12,5 @@ export const chatWithAgent = (
 
 export const resumeAgent = (token, { thread_id, approved, edits }) =>
   apiFetch('/chat/resume', { method: 'POST', token, body: { thread_id, approved, edits } })
+
+export const getUsageStatus = (token) => apiFetch('/usage/status', { token })

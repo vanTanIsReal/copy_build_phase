@@ -6,9 +6,8 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
 from src.agents.state import AgentState
-from src.config import get_settings
 from src.services import guardrail_service, usage_service
-from src.services.llm import get_llm
+from src.services.llm import get_llm, invoke_with_fallback
 
 _STYLE_INSTRUCTIONS = {
     "brief": "2-3 short sentences, plain prose",
@@ -75,7 +74,6 @@ async def generate_summary(
         return "No conversation text was provided to summarize."
 
     style_label = style.replace("_", " ")
-    settings = get_settings()
     llm = get_llm()
     wrapped_text = guardrail_service.wrap_untrusted_text(
         text, label="untrusted_conversation_data"
@@ -113,10 +111,11 @@ async def generate_summary(
         f"{focus_instruction}"
         f"{wrapped_text}"
     )
-    result = await llm.ainvoke(prompt)
+    call = await invoke_with_fallback(prompt, primary_llm=llm)
+    result = call.message
     await usage_service.log_usage(
-        provider=settings.llm_provider,
-        model=settings.model_name,
+        provider=call.provider,
+        model=call.model,
         usage_metadata=result.usage_metadata,
         user_id=user_id,
         workspace_id=workspace_id,

@@ -24,6 +24,7 @@ export function GoogleAuthButton({ onError }) {
         width="100%"
         onSuccess={(credentialResponse) => {
           onError('')
+          if (!credentialResponse.credential) { onError('Google did not return an ID token. Check the OAuth Client ID and authorized origin.'); return }
           loginWithGoogle(credentialResponse.credential)
             .then(() => navigate('/chat'))
             .catch((err) => onError(err.detail || 'Could not sign in with Google'))

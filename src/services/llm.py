@@ -1,3 +1,7 @@
+import logging
+from dataclasses import dataclass
+from typing import Any
+
 from langchain_core.language_models import BaseChatModel
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
@@ -5,24 +9,93 @@ from langchain_openai import ChatOpenAI
 
 from src.config import get_settings
 
+logger = logging.getLogger(__name__)
 
-def get_llm(*, temperature: float | None = None) -> BaseChatModel:
+
+@dataclass(frozen=True)
+class LLMResult:
+    message: Any
+    provider: str
+    model: str
+
+
+class AllLLMProvidersFailedError(RuntimeError):
+    pass
+
+
+def _build_llm(provider: str, model: str, *, temperature: float | None = None) -> BaseChatModel:
     settings = get_settings()
     effective_temperature = settings.llm_temperature if temperature is None else temperature
-    if settings.llm_provider == "groq":
-        return ChatGroq(
-            model=settings.model_name,
-            api_key=settings.groq_api_key,
-            temperature=effective_temperature,
-        )
-    if settings.llm_provider == "openai":
-        return ChatOpenAI(
-            model=settings.model_name,
-            api_key=settings.openai_api_key,
-            temperature=effective_temperature,
-        )
+    if provider == "groq":
+        return ChatGroq(model=model, api_key=settings.groq_api_key, temperature=effective_temperature)
+    if provider == "openai":
+        kwargs = {"model": model, "api_key": settings.openai_api_key}
+        if not model.startswith("o"):
+            kwargs["temperature"] = effective_temperature
+        return ChatOpenAI(**kwargs)
     return ChatGoogleGenerativeAI(
-        model=settings.model_name,
+        model=model,
         google_api_key=settings.google_api_key,
         temperature=effective_temperature,
     )
+
+
+def _candidates() -> list[tuple[str, str]]:
+    settings = get_settings()
+    keys = {
+        "google": settings.google_api_key,
+        "openai": settings.openai_api_key,
+        "groq": settings.groq_api_key,
+    }
+    defaults = {
+        "openai": ["gpt-4o-mini", "o4-mini"],
+        "google": ["gemini-2.5-flash", "gemini-2.5-flash-lite"],
+        "groq": ["openai/gpt-oss-20b", "llama-3.1-8b-instant"],
+    }
+    ordered = [(settings.llm_provider, settings.model_name)]
+    for provider in ("openai", "google", "groq"):
+        ordered.extend((provider, model) for model in defaults[provider])
+    result: list[tuple[str, str]] = []
+    for candidate in ordered:
+        if keys.get(candidate[0]) and candidate not in result:
+            result.append(candidate)
+    return result
+
+
+def get_llm(*, temperature: float | None = None) -> BaseChatModel:
+    settings = get_settings()
+    return _build_llm(settings.llm_provider, settings.model_name, temperature=temperature)
+
+
+async def invoke_with_fallback(
+    prompt: Any,
+    *,
+    tools: list | None = None,
+    temperature: float | None = None,
+    primary_llm: BaseChatModel | None = None,
+) -> LLMResult:
+    candidates = _candidates()
+    settings = get_settings()
+    primary_candidate = (settings.llm_provider, settings.model_name)
+    # Besides avoiding a duplicate constructor call, accepting the configured model preserves
+    # the lightweight fake-model seam used throughout the test suite.
+    if primary_llm is not None and primary_candidate not in candidates:
+        candidates.insert(0, primary_candidate)
+    if not candidates:
+        raise AllLLMProvidersFailedError(
+            "No AI provider is configured. Set GOOGLE_API_KEY, OPENAI_API_KEY, or GROQ_API_KEY."
+        )
+    failures: list[str] = []
+    for provider, model in candidates:
+        try:
+            llm = (
+                primary_llm
+                if primary_llm is not None and (provider, model) == primary_candidate
+                else _build_llm(provider, model, temperature=temperature)
+            )
+            runnable = llm.bind_tools(tools) if tools else llm
+            return LLMResult(message=await runnable.ainvoke(prompt), provider=provider, model=model)
+        except Exception as exc:  # noqa: BLE001 - provider failures are what fallback handles
+            logger.warning("AI provider failed; trying fallback (%s/%s): %s", provider, model, exc)
+            failures.append(f"{provider}/{model}: {type(exc).__name__}")
+    raise AllLLMProvidersFailedError("All configured AI providers failed (" + ", ".join(failures) + ").")

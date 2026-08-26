@@ -148,7 +148,7 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
       {sending && <div className="personal-message"><div className="message-ai-icon"><i className="bi bi-stars"/></div><div className="personal-message-bubble">Đang xử lý...</div></div>}
     </div>
     <PulseWave active={sending} />
-    <div className="personal-composer-wrap"><div className="active-sources"><span><i className="bi bi-database-check"/> Nguồn khả dụng: Chats · Tasks · Calendar · Memory</span></div>{/* Floating glass composer: translucent blur + resting glow + a stronger glow ring on focus
+    <div className="personal-composer-wrap"><div className="active-sources"><span><i className="bi bi-shield-check"/> Nguồn khả dụng: Chats · Tasks · Calendar · Memory · Actions require confirmation</span></div>{/* Floating glass composer: translucent blur + resting glow + a stronger glow ring on focus
           (Tailwind focus-within: variant) - `.personal-composer`'s own box model/flex layout and
           the existing orbit-fx.css glow stay as-is, these classes only add the glass surface. */}
       <form

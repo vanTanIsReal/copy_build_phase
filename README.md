@@ -231,7 +231,7 @@ npm run build
 docker compose up --build
 ```
 
-Docker Compose hiện chỉ chạy backend tại cổng `8000`; frontend chạy riêng bằng `npm run dev`.
+Docker Compose chạy backend tại cổng `8000` và PostgreSQL local; hai frontend chạy riêng bằng `npm run dev`.
 
 ## Công nghệ sử dụng
 
