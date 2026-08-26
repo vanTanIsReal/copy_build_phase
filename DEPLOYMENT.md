@@ -37,3 +37,27 @@ preserves client-side routes on refresh.
 
 Google Calendar also needs the credentials/token strategy documented in `.env.example`; do not
 deploy local secret files into the image.
+
+## Google Calendar for real users (not just yourself)
+
+The app code has no allowlist - any Google account can connect once OAuth is configured
+correctly. What actually gates "anyone can connect" is entirely in Google Cloud Console, not code:
+
+1. **Authorized origins/redirect URIs** - in
+   [console.cloud.google.com/apis/credentials](https://console.cloud.google.com/apis/credentials),
+   on the *Calendar* OAuth client, add the production callback to Authorized redirect URIs:
+   `https://<backend-domain>/api/v1/calendar/oauth/callback` (must match `GOOGLE_CALENDAR_REDIRECT_URI`
+   exactly, HTTPS). On the separate *Sign-In* OAuth client, add the production frontend origin to
+   Authorized JavaScript origins. Leftover `localhost` values here are the #1 cause of "works for
+   me, fails for everyone else" - `src/config.py`'s production validator now rejects a `localhost`
+   `GOOGLE_CALENDAR_REDIRECT_URI`/`FRONTEND_ORIGIN` at boot so this fails loud instead of silently.
+2. **OAuth consent screen publishing status** - under *OAuth consent screen*, a new client starts
+   in **Testing**, which only lets manually-added test users (max ~100) sign in; everyone else
+   gets `Error 403: access_denied`. Click **Publish App** to move it to **In production**.
+3. **Verification warning** - `https://www.googleapis.com/auth/calendar` (full read/write) is a
+   Google *sensitive* scope. In production without completing Google's app verification, users
+   still see a one-time "Google hasn't verified this app" interstitial and must click
+   Advanced → "Go to <app> (unsafe)" to continue - functional, just unpolished. Removing that
+   warning requires submitting for verification (needs a live Privacy Policy URL, app homepage on
+   an authorized domain, and a scope-justification review) - budget days to a few weeks, and start
+   it before it's urgent.
