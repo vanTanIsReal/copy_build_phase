@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (lint + test)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: orbit
+          POSTGRES_PASSWORD: orbit
+          POSTGRES_DB: orbit_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U orbit"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # Everything below is consumed only by the one Postgres-backed integration test
+      # (tests/test_agents/test_postgres_checkpointer.py) - every other test forces its own
+      # isolated in-memory SQLite DATABASE_URL from tests/conftest.py regardless of this env,
+      # so this Postgres service exists purely to stop that one test from skipping in CI.
+      TEST_DATABASE_URL: postgresql+psycopg://orbit:orbit@localhost:5432/orbit_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint (ruff)
+        run: ruff check src tests
+
+      - name: Test (pytest)
+        run: pytest tests/ -v
+
+  frontend:
+    name: Frontend build (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [user, admin]
+    defaults:
+      run:
+        working-directory: Frontend/${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: Frontend/${{ matrix.app }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build

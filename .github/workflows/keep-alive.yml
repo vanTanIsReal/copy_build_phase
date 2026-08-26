@@ -1,0 +1,23 @@
+name: Keep Render Awake
+
+# Render's free/starter plan sleeps the backend after ~15 minutes idle, which also pauses the
+# in-process APScheduler jobs (reminders, Calendar polling) until the next request wakes it. This
+# ping reduces - it cannot fully eliminate - the chance of a reminder firing late. See
+# docs/deploy.md step 13.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    name: Ping /health
+    runs-on: ubuntu-latest
+    steps:
+      - name: Curl backend health endpoint
+        run: |
+          if [ -z "${{ vars.RENDER_URL }}" ]; then
+            echo "RENDER_URL repository variable is not set - see docs/deploy.md step 6." >&2
+            exit 1
+          fi
+          curl -fsS "${{ vars.RENDER_URL }}/health"

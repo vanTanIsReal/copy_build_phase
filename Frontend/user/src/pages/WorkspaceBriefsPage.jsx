@@ -125,7 +125,7 @@ export default function WorkspaceBriefsPage() {
       </div>
 
       {!loadingWorkspaces && !briefWorkspaces.length && (
-        <div className="content-card p-4">
+        <div className="content-card p-4 mb-4">
           <EmptyState
             variant="radar"
             icon="bi-diagram-3"

@@ -80,3 +80,5 @@ services:
         sync: false
       - key: INITIAL_ADMIN_EMAIL
         sync: false
+      - key: ADMIN_BOOTSTRAP_KEY
+        sync: false
