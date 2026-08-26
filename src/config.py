@@ -70,8 +70,16 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = "sqlite:///./data/app.db"
-    db_pool_size: int = Field(default=10, ge=1, le=100)
-    db_max_overflow: int = Field(default=20, ge=0, le=200)
+    # Small on purpose: Supabase's free-tier "Session pooler" (see docs/deploy.md) allows only 15
+    # concurrent clients total, shared with the separate psycopg checkpointer pool
+    # (src/agents/graph.py's AsyncConnectionPool) - and Render briefly runs the old AND new
+    # instance side by side during every deploy. The previous 10+20 default let one instance alone
+    # ask for up to 30 connections, so two overlapping instances could blow the 15-connection
+    # ceiling and fail to start with psycopg.pool's EMAXCONNSESSION - which then looks like every
+    # subsequent deploy failing, not a connection-count problem. WEB_CONCURRENCY=1 (single
+    # process) doesn't need a large pool anyway.
+    db_pool_size: int = Field(default=3, ge=1, le=100)
+    db_max_overflow: int = Field(default=2, ge=0, le=200)
     db_pool_timeout_seconds: int = Field(default=30, ge=1, le=300)
 
     # Auth

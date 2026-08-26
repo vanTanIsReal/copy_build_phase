@@ -173,10 +173,6 @@ async def _sync_task_to_reminder(task: Task, current_user: User, db: AsyncSessio
         return
     try:
         workspace = await resolve_workspace_for_user(db, current_user.id, None)
-        logger.info(
-            "Reminder sync for task %s: user=%s resolved workspace=%s (task's own workspace was %s)",
-            task.id, current_user.id, workspace.id, task.workspace_id,
-        )
         reminder = await reminder_service.schedule_reminder(
             workspace_id=workspace.id,
             owner_id=current_user.id,
