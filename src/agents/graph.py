@@ -102,7 +102,10 @@ async def init_checkpointer() -> None:
     # Small on purpose - see src/config.py's db_pool_size comment: this pool shares Supabase's
     # 15-connection session-pooler ceiling with the SQLAlchemy engine, and two Render instances
     # briefly overlap on every deploy, so this can't be sized as if it had the ceiling to itself.
-    pool = AsyncConnectionPool(conninfo=conninfo, max_size=2, open=False, kwargs={"autocommit": True})
+    # min_size must be passed explicitly - psycopg_pool defaults it to 4, which is > max_size=2.
+    pool = AsyncConnectionPool(
+        conninfo=conninfo, min_size=1, max_size=2, open=False, kwargs={"autocommit": True}
+    )
     await pool.open()
     saver = AsyncPostgresSaver(pool)
     await saver.setup()
