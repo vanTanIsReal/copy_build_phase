@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { createTask } from '../../api/tasks'
 import { useAuth } from '../../context/AuthContext'
 
-export default function NewTaskModal({ open, onClose, onCreated }) {
+export default function NewTaskModal({ open, onClose, onCreated, workspaceId }) {
   const { token } = useAuth()
   const [title, setTitle] = useState('')
   const [dueAt, setDueAt] = useState('')
@@ -18,6 +18,7 @@ export default function NewTaskModal({ open, onClose, onCreated }) {
     setSubmitting(true); setError('')
     try {
       const task = await createTask(token, {
+        workspace_id: workspaceId,
         title: title.trim(),
         due_at: dueAt ? new Date(dueAt).toISOString() : null,
         priority,

@@ -6,12 +6,14 @@ import TaskTable, { formatDue } from '../components/task/TaskTable'
 import NewTaskModal from '../components/task/NewTaskModal'
 import EmptyState from '../components/fx/EmptyState'
 import { useAuth } from '../context/AuthContext'
+import { useWorkspace } from '../context/WorkspaceContext'
 import { listTasks, updateTaskStatus, deleteTask } from '../api/tasks'
 
 const sourceLabel = { manual: 'Manual', proactive: 'AI suggestion' }
 
 export default function TaskPage() {
   const { token } = useAuth()
+  const { workspaceId } = useWorkspace()
   const { subscribe } = useOutletContext()
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
@@ -21,16 +23,16 @@ export default function TaskPage() {
 
   const refresh = () => {
     setLoading(true)
-    if (!token) {
+    if (!token || !workspaceId) {
       setTasks([])
       setLoading(false)
       return
     }
     setError('')
-    listTasks(token).then(setTasks).catch(err => setError(err.detail || 'Could not load tasks.')).finally(() => setLoading(false))
+    listTasks(token, workspaceId).then(setTasks).catch(err => setError(err.detail || 'Could not load tasks.')).finally(() => setLoading(false))
   }
 
-  useEffect(() => { refresh() }, [token])
+  useEffect(() => { refresh() }, [token, workspaceId])
 
   const upsertTask = (task) => setTasks(prev => [...prev.filter(t => t.id !== task.id), task])
   const removeTask = (taskId) => setTasks(prev => prev.filter(t => t.id !== taskId))
@@ -39,9 +41,10 @@ export default function TaskPage() {
   // from another tab/device (or the agent chat) shows up without a manual refresh. Harmless if
   // it duplicates an update this tab already applied optimistically below - upsert is idempotent.
   useEffect(() => subscribe((data) => {
+    if (data.task?.workspace_id && data.task.workspace_id !== workspaceId) return
     if (data.type === 'task_suggested' || data.type === 'task_created' || data.type === 'task_updated') upsertTask(data.task)
-    if (data.type === 'task_deleted') removeTask(data.task_id)
-  }), [subscribe])
+    if (data.type === 'task_deleted' && (!data.workspace_id || data.workspace_id === workspaceId)) removeTask(data.task_id)
+  }), [subscribe, workspaceId])
 
   const suggestions = tasks.filter(t => t.status === 'suggested')
   const mainTasks = tasks.filter(t => !['suggested', 'dismissed', 'invalidated'].includes(t.status))
@@ -64,6 +67,6 @@ export default function TaskPage() {
     <section className="suggested-section"><div className="section-heading"><div><span className="ai-label"><i className="bi bi-stars"/> AI suggestions</span><h3>Tasks you may have missed</h3><p>Orbit found these action items in your conversations.</p></div></div><div className="suggestion-grid">{suggestions.map(s=><div className="suggestion-card" key={s.id}><div className="suggestion-check"><i className="bi bi-stars"/></div><div className="flex-grow-1"><h4>{s.title}</h4><div className="suggestion-meta"><span><i className="bi bi-chat-left-text"/>{sourceLabel[s.source] || s.source}</span><span><i className="bi bi-calendar3"/>{formatDue(s.due_at)}</span></div></div><div className="suggestion-actions"><button className="btn btn-sm btn-primary" onClick={() => accept(s)}>Accept</button><button className="btn btn-sm btn-light" onClick={() => dismiss(s)}>Dismiss</button></div></div>)}
       {!loading && !suggestions.length && <EmptyState variant="float" icon="bi-stars" title="No new suggestions right now" description={'Try "Extract tasks" in a conversation\'s AI panel — Orbit is standing by to scan for action items.'} />}
     </div></section>
-    <NewTaskModal open={newOpen} onClose={()=>setNewOpen(false)} onCreated={upsertTask}/>
+    <NewTaskModal open={newOpen} onClose={()=>setNewOpen(false)} onCreated={upsertTask} workspaceId={workspaceId}/>
   </div>
 }

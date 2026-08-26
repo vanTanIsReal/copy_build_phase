@@ -87,6 +87,14 @@ export default function ChatPage() {
   stateRef.current = { selectedId, userId: user?.id }
 
   useEffect(() => {
+    setSelectedId(null)
+    setMessages([])
+    setMobileChat(false)
+    setAiOpen(false)
+    setUnreadHint(0)
+  }, [workspaceId, setMessages])
+
+  useEffect(() => {
     if (location.state?.conversationId) {
       setSelectedId(location.state.conversationId)
       setMobileChat(true)

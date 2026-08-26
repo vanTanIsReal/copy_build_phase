@@ -56,7 +56,7 @@ src/
 │   ├── graph.py           # planner -> tools -> compact_thread -> END, Postgres checkpointer
 │   ├── state.py            # AgentState (TypedDict)
 │   ├── nodes/                # context_node, guardrail_node, planner_node, compact_node
-│   └── tools/                  # calendar/reminder/memory/search/summarize/task/people/policy/context
+│   └── tools/                  # calendar/reminder/memory/search/summarize/task/policy/context
 ├── api/                # REST routes — mỏng, gọi services/
 ├── auth/                # Hash mật khẩu (bcrypt), tạo/kiểm tra JWT
 ├── db/                    # SQLAlchemy models (async) + Alembic migrations

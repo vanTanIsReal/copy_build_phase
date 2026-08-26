@@ -49,6 +49,20 @@ async def test_readiness_checks_database_schema(client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/api/v1/workspaces/removed/people-insights",
+        "/api/v1/workspaces/removed/external-contacts",
+        "/api/v1/workspaces/removed/relationships",
+    ),
+)
+async def test_people_endpoints_are_removed(client, auth_headers, path):
+    response = await client.get(path, headers=auth_headers)
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_chat_requires_auth(client):
     response = await client.post("/api/v1/chat", json={"message": "hello"})
     assert response.status_code == 401

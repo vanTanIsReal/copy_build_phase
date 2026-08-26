@@ -4,7 +4,7 @@ Frontend được tổ chức thành một npm workspace với hai ứng dụng 
 
 ```text
 Frontend/
-├── user/       # Chat, assistant, task, calendar, reminder, memory, relationships
+├── user/       # Chat, assistant, task, calendar, reminder and memory
 ├── admin/      # Platform dashboard, users và support access
 └── shared/     # Design system CSS dùng chung
 ```
@@ -59,7 +59,7 @@ Artifact nằm trong `user/dist/` và `admin/dist/`.
 
 ## Phân chia trách nhiệm
 
-- `user`: đăng ký/đăng nhập, workspace, chat, AI consent, assistant, people, task, reminder,
+- `user`: đăng ký/đăng nhập, workspace, chat, AI consent, assistant, task, reminder,
   calendar, memory và profile.
 - `admin`: đăng nhập riêng cho platform admin, dashboard, quản lý user và support access có thời
   hạn/owner approval.

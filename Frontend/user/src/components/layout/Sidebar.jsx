@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 
 const nav = [
-  ['assistant', 'bi-stars', 'AI Assistant'], ['chat', 'bi-chat-dots', 'Chats'], ['relationships', 'bi-people', 'People'], ['tasks', 'bi-check2-square', 'Tasks'],
+  ['assistant', 'bi-stars', 'AI Assistant'], ['chat', 'bi-chat-dots', 'Chats'], ['tasks', 'bi-check2-square', 'Tasks'],
   ['tasks/inbox', 'bi-inbox', 'Inbox'],
   ['calendar', 'bi-calendar4-week', 'Calendar'], ['reminders', 'bi-bell', 'Reminders'],
   ['memory', 'bi-stars', 'Memory'], ['profile', 'bi-person', 'Profile'],

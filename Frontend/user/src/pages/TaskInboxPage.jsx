@@ -4,6 +4,7 @@ import PageHeader from '../components/common/PageHeader'
 import StatCard from '../components/common/StatCard'
 import { formatDue } from '../components/task/TaskTable'
 import { useAuth } from '../context/AuthContext'
+import { useWorkspace } from '../context/WorkspaceContext'
 import { useToast } from '../context/ToastContext'
 import { listTasks, updateTaskStatus } from '../api/tasks'
 import { groupTasks } from '../utils/taskGrouping'
@@ -18,6 +19,7 @@ const ACTION_FAILED = 'Không thực hiện được, thử lại sau.'
 // only what needs a decision or attention *right now*, ranked instead of just chronological.
 export default function TaskInboxPage() {
   const { token } = useAuth()
+  const { workspaceId } = useWorkspace()
   const { pushToast } = useToast()
   const { subscribe } = useOutletContext()
   const [tasks, setTasks] = useState([])
@@ -25,22 +27,23 @@ export default function TaskInboxPage() {
 
   const refresh = () => {
     setLoading(true)
-    if (!token) {
+    if (!token || !workspaceId) {
       setTasks([])
       setLoading(false)
       return
     }
-    listTasks(token).then(setTasks).catch(err => pushToast(err.detail || ACTION_FAILED)).finally(() => setLoading(false))
+    listTasks(token, workspaceId).then(setTasks).catch(err => pushToast(err.detail || ACTION_FAILED)).finally(() => setLoading(false))
   }
 
-  useEffect(() => { refresh() }, [token])
+  useEffect(() => { refresh() }, [token, workspaceId])
 
   const upsertTask = (task) => setTasks(prev => [...prev.filter(t => t.id !== task.id), task])
 
   useEffect(() => subscribe((data) => {
+    if (data.task?.workspace_id && data.task.workspace_id !== workspaceId) return
     if (data.type === 'task_suggested' || data.type === 'task_created' || data.type === 'task_updated') upsertTask(data.task)
-    if (data.type === 'task_deleted') setTasks(prev => prev.filter(t => t.id !== data.task_id))
-  }), [subscribe])
+    if (data.type === 'task_deleted' && (!data.workspace_id || data.workspace_id === workspaceId)) setTasks(prev => prev.filter(t => t.id !== data.task_id))
+  }), [subscribe, workspaceId])
 
   const { needsDecision, overdue, dueSoon, highPriority } = groupTasks(tasks)
 

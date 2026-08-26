@@ -9,17 +9,21 @@ const formatThreadTime = (iso) => {
   return sameDay ? formatClock(iso) : formatDateShort(iso)
 }
 
-export default function AssistantSessionList({ activeThreadId, onSelectThread, onNewThread, refreshSignal }) {
+export default function AssistantSessionList({ activeThreadId, onSelectThread, onNewThread, refreshSignal, workspaceId }) {
   const { token } = useAuth()
   const [search, setSearch] = useState('')
   const [threads, setThreads] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!token) return
+    if (!token || !workspaceId) {
+      setThreads([])
+      setLoading(false)
+      return
+    }
     setLoading(true)
-    listAssistantThreads(token).then(setThreads).catch(() => setThreads([])).finally(() => setLoading(false))
-  }, [token, refreshSignal])
+    listAssistantThreads(token, workspaceId).then(setThreads).catch(() => setThreads([])).finally(() => setLoading(false))
+  }, [token, workspaceId, refreshSignal])
 
   const visible = threads.filter(t => t.title.toLowerCase().includes(search.toLowerCase()))
 

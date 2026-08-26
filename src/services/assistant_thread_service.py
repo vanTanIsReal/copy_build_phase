@@ -1,9 +1,9 @@
 from langchain_core.messages import AIMessage, HumanMessage
-from sqlalchemy import select
+from sqlalchemy import literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents import graph as agent_graph
-from src.db.models import AssistantThread
+from src.db.models import AgentThread, AssistantThread
 
 _TITLE_MAX = 60
 _PREVIEW_MAX = 80
@@ -59,18 +59,47 @@ async def touch_if_exists(db: AsyncSession, *, owner_id: str, thread_id: str, ai
         await db.commit()
 
 
-async def list_threads(db: AsyncSession, owner_id: str) -> list[AssistantThread]:
+async def list_threads(
+    db: AsyncSession, owner_id: str, workspace_id: str | None = None
+) -> list[AssistantThread]:
+    stmt = select(AssistantThread).where(AssistantThread.owner_id == owner_id)
+    if workspace_id is not None:
+        stmt = stmt.join(
+            AgentThread,
+            AgentThread.id
+            == AssistantThread.owner_id + literal(":") + AssistantThread.thread_id,
+        ).where(AgentThread.workspace_id == workspace_id)
     result = await db.execute(
-        select(AssistantThread)
-        .where(AssistantThread.owner_id == owner_id)
+        stmt
         .order_by(AssistantThread.updated_at.desc())
         .limit(_LIST_LIMIT)
     )
     return list(result.scalars())
 
 
-async def get_owned_thread(db: AsyncSession, owner_id: str, thread_id: str) -> AssistantThread | None:
-    return await _get_own_thread(db, owner_id, thread_id)
+async def get_owned_thread(
+    db: AsyncSession,
+    owner_id: str,
+    thread_id: str,
+    workspace_id: str | None = None,
+) -> AssistantThread | None:
+    if workspace_id is None:
+        return await _get_own_thread(db, owner_id, thread_id)
+    return (
+        await db.execute(
+            select(AssistantThread)
+            .join(
+                AgentThread,
+                AgentThread.id
+                == AssistantThread.owner_id + literal(":") + AssistantThread.thread_id,
+            )
+            .where(
+                AssistantThread.owner_id == owner_id,
+                AssistantThread.thread_id == thread_id,
+                AgentThread.workspace_id == workspace_id,
+            )
+        )
+    ).scalar_one_or_none()
 
 
 async def get_thread_messages(owner_id: str, thread_id: str) -> list[dict]:

@@ -16,7 +16,6 @@ from src.api.chat_routes import router as chat_router
 from src.api.memory_routes import router as memory_router
 from src.api.platform_routes import router as platform_router
 from src.api.rate_limit import RateLimitMiddleware
-from src.api.relationship_routes import router as relationship_router
 from src.api.reminder_routes import router as reminder_router
 from src.api.routes import router
 from src.api.task_routes import router as task_router
@@ -115,7 +114,6 @@ app.include_router(ws_router, prefix="/api/v1", tags=["ws"])
 app.include_router(admin_router, prefix="/api/v1/admin", tags=["admin"])
 app.include_router(platform_router, prefix="/api/v1/platform", tags=["platform"])
 app.include_router(workspace_router, prefix="/api/v1/workspaces", tags=["workspaces"])
-app.include_router(relationship_router, prefix="/api/v1/workspaces", tags=["relationships"])
 app.include_router(task_router, prefix="/api/v1", tags=["tasks"])
 app.include_router(timeline_router, prefix="/api/v1", tags=["timeline"])
 app.include_router(calendar_router, prefix="/api/v1", tags=["calendar"])

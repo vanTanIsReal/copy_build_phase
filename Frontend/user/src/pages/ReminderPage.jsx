@@ -3,6 +3,7 @@ import { useOutletContext } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import NewReminderModal from '../components/reminder/NewReminderModal'
 import { useAuth } from '../context/AuthContext'
+import { useWorkspace } from '../context/WorkspaceContext'
 import { listReminders, cancelReminder } from '../api/reminders'
 import { getColor } from '../utils/avatar'
 import { formatDateTime } from '../utils/datetime'
@@ -12,6 +13,7 @@ const statusClass = { scheduled: 'primary', fired: 'success', cancelled: 'second
 
 export default function ReminderPage() {
   const { token } = useAuth()
+  const { workspaceId } = useWorkspace()
   const { subscribe } = useOutletContext()
   const [reminders, setReminders] = useState([])
   const [loading, setLoading] = useState(true)
@@ -21,18 +23,24 @@ export default function ReminderPage() {
   const refresh = () => {
     setLoading(true)
     setError('')
-    listReminders(token).then(setReminders).catch(err => setError(err.detail || 'Could not load reminders.')).finally(() => setLoading(false))
+    if (!token || !workspaceId) {
+      setReminders([])
+      setLoading(false)
+      return
+    }
+    listReminders(token, workspaceId).then(setReminders).catch(err => setError(err.detail || 'Could not load reminders.')).finally(() => setLoading(false))
   }
 
-  useEffect(() => { refresh() }, [token])
+  useEffect(() => { refresh() }, [token, workspaceId])
 
   useEffect(() => subscribe((data) => {
     if (data.type !== 'reminder_fired') return
+    if (data.reminder.workspace_id !== workspaceId) return
     setReminders(prev => prev.map(r => r.id === data.reminder.id ? { ...r, status: 'fired' } : r))
-  }), [subscribe])
+  }), [subscribe, workspaceId])
 
   const onCreated = (reminder) => setReminders(prev => [...prev, reminder])
-  const onCancel = (reminder) => cancelReminder(token, reminder.id).then(refresh).catch(err => setError(err.detail || 'Could not cancel reminder.'))
+  const onCancel = (reminder) => cancelReminder(token, reminder.id, workspaceId).then(refresh).catch(err => setError(err.detail || 'Could not cancel reminder.'))
 
   return <div className="page-container">
     <PageHeader eyebrow="Stay focused" title="Reminders" description="Gentle nudges for everything that matters." action={<button className="btn btn-primary" onClick={() => setNewOpen(true)}><i className="bi bi-plus-lg me-2"/>New reminder</button>}/>
@@ -49,6 +57,6 @@ export default function ReminderPage() {
     </section>
       <aside><div className="notification-preview"><div className="preview-label"><span>Preview</span><i className="bi bi-phone"/></div><div className="phone-notification"><div className="orbit-mini"><i className="bi bi-command"/></div><div><div><strong>Orbit</strong><time>now</time></div><h4>Product launch call</h4><p>Starting in 30 minutes • Product Launch</p></div></div><div className="preview-glow"/></div><div className="reminder-tip"><i className="bi bi-lightbulb"/><div><strong>Realtime</strong><p>Khi reminder đến giờ, bạn sẽ thấy thông báo hiện ngay dù đang ở trang khác.</p></div></div></aside>
     </div>
-    <NewReminderModal open={newOpen} onClose={() => setNewOpen(false)} onCreated={onCreated} />
+    <NewReminderModal open={newOpen} onClose={() => setNewOpen(false)} onCreated={onCreated} workspaceId={workspaceId} />
   </div>
 }

@@ -6,7 +6,6 @@ from src.agents.tools.calendar_tool import (
 )
 from src.agents.tools.context_tool import get_personal_timeline, list_my_tasks, search_my_memories
 from src.agents.tools.memory_tool import forget_memory, list_memories, remember_fact
-from src.agents.tools.people_tool import search_people_context
 from src.agents.tools.policy_tool import check_request_policy
 from src.agents.tools.reminder_tool import create_reminder, list_reminders
 from src.agents.tools.search_tool import search_messages
@@ -27,7 +26,6 @@ ALL_TOOLS = [
     list_reminders,
     list_my_tasks,
     search_my_memories,
-    search_people_context,
     list_memories,
     remember_fact,
     forget_memory,
@@ -48,7 +46,6 @@ __all__ = [
     "list_reminders",
     "list_my_tasks",
     "search_my_memories",
-    "search_people_context",
     "list_memories",
     "remember_fact",
     "forget_memory",

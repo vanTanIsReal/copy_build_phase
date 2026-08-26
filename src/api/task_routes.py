@@ -320,4 +320,7 @@ async def delete_task(
         await manager.broadcast_to_users(
             [current_user.id], {"type": "calendar_event_deleted", "event_id": event_id}
         )
-    await manager.broadcast_to_users([current_user.id], {"type": "task_deleted", "task_id": task_id})
+    await manager.broadcast_to_users(
+        [current_user.id],
+        {"type": "task_deleted", "task_id": task_id, "workspace_id": task.workspace_id},
+    )

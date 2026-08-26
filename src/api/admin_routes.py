@@ -533,7 +533,10 @@ async def delete_task_admin(
         await manager.broadcast_to_users(
             [task.owner_id], {"type": "calendar_event_deleted", "event_id": event_id}
         )
-    await manager.broadcast_to_users([task.owner_id], {"type": "task_deleted", "task_id": task_id})
+    await manager.broadcast_to_users(
+        [task.owner_id],
+        {"type": "task_deleted", "task_id": task_id, "workspace_id": workspace_id},
+    )
 
 
 @router.get("/reminders", response_model=list[AdminReminderOut])
