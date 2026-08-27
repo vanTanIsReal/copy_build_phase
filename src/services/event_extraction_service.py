@@ -4,7 +4,7 @@ direct (1-1) conversations where each participant has individually granted contr
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, or_, select
@@ -193,7 +193,9 @@ async def _extract_event_candidate(
         start_at = start_at or target.start_at
         end_at = end_at or target.end_at
         attendees = attendees or list(target.attendees or [])
-    missing_fields = [field for field in ("title", "start_at", "end_at") if data.get(field) is None]
+    if action == "create" and start_at is not None and end_at is None:
+        end_at = start_at + timedelta(hours=1)
+    missing_fields = [field for field, value in (("title", title), ("start_at", start_at), ("end_at", end_at)) if value is None]
     if target:
         missing_fields = [
             field
