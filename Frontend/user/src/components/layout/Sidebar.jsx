@@ -16,7 +16,7 @@ const getInitials = (name) => (name || '?').trim().split(/\s+/).map(w => w[0]).s
 
 export default function Sidebar({ open, onClose, tasksIconRef, flightPulse }) {
   const { user, token, isAdmin } = useAuth()
-  const adminUrl = import.meta.env.VITE_ADMIN_APP_URL || 'http://localhost:5174'
+  const adminUrl = import.meta.env.VITE_ADMIN_APP_URL || 'https://admin-c3-app-132-auo2.vercel.app'
   const openAdmin = async (event) => { event.preventDefault(); try { const { ticket } = await createAdminHandoff(token); window.location.href = `${adminUrl}/sso?ticket=${encodeURIComponent(ticket)}` } catch { window.location.href = adminUrl } }
   // Real workspace-wide AI usage today (src/api/v1/usage/status) - there's no per-user credit
   // balance in the backend, only a shared daily token budget, so this is that, not "your" quota.
