@@ -127,3 +127,8 @@ app.include_router(assistant_router, prefix="/api/v1", tags=["assistant"])
 @app.get("/health")
 async def health():
     return {"status": "ok", "env": settings.app_env}
+
+
+@app.get('/ready')
+async def readiness():
+    return {'status': 'ready'}
