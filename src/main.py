@@ -46,9 +46,6 @@ async def lifespan(app: FastAPI):
     print(f"Starting {settings.app_name} in {settings.app_env} mode")
     if settings.app_env != "production":
         await init_db()
-    async with db_session.async_session_maker() as db:
-        await get_or_create_company_workspace(db)
-        await db.commit()
     await load_saved_ai_configuration()
     await init_checkpointer()
     await thread_memory_service.cleanup_expired_threads()
