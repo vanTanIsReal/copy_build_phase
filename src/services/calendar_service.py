@@ -154,8 +154,17 @@ async def suggest_alternative_slots(
 
     window_start = start.replace(hour=0, minute=0, second=0, microsecond=0)
     window_end = window_start + timedelta(days=_SEARCH_DAYS_AHEAD)
+    # window_start/window_end are deliberately naive above (all the interval math below - and
+    # find_conflicts's own comparisons - work in local wall-clock hours), but list_events() calls
+    # straight through to Google Calendar's events.list, which rejects a timeMin/timeMax with no
+    # UTC offset ("operator does not exist"-style 400 Bad Request, not a Python-level error) - only
+    # re-attach a timezone for this one outgoing call, not for the naive values used below.
+    tzinfo = ZoneInfo(get_settings().calendar_timezone)
     busy_items = await list_events(
-        user_id, window_start.isoformat(), window_end.isoformat(), max_results=100
+        user_id,
+        window_start.replace(tzinfo=tzinfo).isoformat(),
+        window_end.replace(tzinfo=tzinfo).isoformat(),
+        max_results=100,
     )
     busy = _merge_busy_intervals(busy_items)
 

@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -55,6 +56,7 @@ from src.services.google_credentials import CalendarNotConnectedError
 from src.services.workspace_service import resolve_workspace_for_user
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # Ngày 6-7 hookup (MULTI_AGENT_IMPLEMENTATION_PLAN.md): which specialist tool builds the read-only
 # brief for a resolved route.profile.
@@ -747,6 +749,7 @@ async def chat(
     try:
         result = await agent_graph.agent.ainvoke(inputs, config)
     except Exception:
+        logger.exception("Agent invocation failed for thread_id=%s", thread_id)
         raise HTTPException(status_code=500, detail="AI service is temporarily unavailable")
     response = _build_chat_response(result, thread_id, context_scope)
     if request.conversation_id is None and response.status != "error":
@@ -802,6 +805,7 @@ async def resume_chat(
             Command(resume={"approved": request.approved, "edits": request.edits}), config
         )
     except Exception:
+        logger.exception("Agent resume failed for thread_id=%s", request.thread_id)
         raise HTTPException(status_code=500, detail="AI service is temporarily unavailable")
     response = _build_chat_response(result, request.thread_id)
     if response.status != "error":
