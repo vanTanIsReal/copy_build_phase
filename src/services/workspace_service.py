@@ -303,5 +303,8 @@ async def resolve_workspace_for_user(
     workspaces = await list_user_workspaces(db, user_id)
     personal = next((workspace for workspace in workspaces if workspace.type == "personal"), None)
     if personal is None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User has no personal workspace")
+        organization = next((workspace for workspace in workspaces if workspace.type == 'organization'), None)
+        if organization is not None:
+            return organization
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='User has no accessible workspace')
     return personal
