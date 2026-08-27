@@ -307,6 +307,12 @@ async def create_task(
         # candidate by ownership, not by matching the caller's own resolved workspace, or a
         # personal-workspace participant retrying this call would never see their own earlier
         # candidate and would create a duplicate every time instead of returning the existing one.
+        # source_message_ids is deliberately left out of the SQL filter and checked in Python
+        # below instead: it's a plain `JSON` column, and Postgres's json type (unlike jsonb) has no
+        # `=` operator at all, so `Task.source_message_ids == request.source_message_ids` raised
+        # "operator does not exist: json = json" on every single ai_extracted create against the
+        # real Postgres backend - the dedup-narrowing scalar filters below are more than specific
+        # enough that this remaining Python-side check only ever compares a handful of rows.
         dedup_filters = [
             Task.owner_id == current_user.id,
             Task.conversation_id == request.conversation_id,
@@ -314,13 +320,14 @@ async def create_task(
             Task.status == "suggested",
             Task.title == request.title,
             Task.consent_scope_hash == request.consent_scope_hash,
-            Task.source_message_ids == request.source_message_ids,
         ]
         if workspace.type == "organization":
             dedup_filters.append(Task.workspace_id == workspace.id)
-        existing = (
-            await db.execute(select(Task).where(*dedup_filters))
-        ).scalar_one_or_none()
+        candidates = (await db.execute(select(Task).where(*dedup_filters))).scalars().all()
+        existing = next(
+            (candidate for candidate in candidates if candidate.source_message_ids == request.source_message_ids),
+            None,
+        )
         if existing is not None:
             return _to_out(existing)
     due_at = request.due_at
