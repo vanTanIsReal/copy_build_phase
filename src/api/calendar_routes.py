@@ -258,7 +258,11 @@ async def backfill_event_candidates(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EventBackfillOut:
-    await require_conversation_access(db, current_user, conversation_id, "manager")
+    conversation = await db.get(Conversation, conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    minimum_role = "manager" if conversation.type == "group" else "participant"
+    await require_conversation_access(db, current_user, conversation_id, minimum_role)
     return EventBackfillOut(
         **(await event_extraction_service.process_event_backfill_batch(conversation_id, request.batch_size))
     )

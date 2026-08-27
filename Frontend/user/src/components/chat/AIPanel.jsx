@@ -163,7 +163,7 @@ export default function AIPanel({
     return false
   }
 
-  const callAgent = async (action, prompt, title) => {
+  const callAgent = async (action, prompt, title, options = {}) => {
     if (!messages.length) { setError('No messages in this conversation yet.'); setResult(''); return null }
     setRunningAction(action); setError(''); setResult(''); setResultItems(null); setResultNote(''); setPending(null)
     try {
@@ -174,6 +174,7 @@ export default function AIPanel({
         workspace_id: workspaceId,
         context_limit: scopeOptions[scope].count,
         scope: selectedScope(),
+        ...options,
       })
       if (handleAgentResult(response)) return null
       setResultTitle(title)
@@ -186,7 +187,7 @@ export default function AIPanel({
   }
 
   const runExtractTasks = async () => {
-    const response = await callAgent('Extract tasks', 'Extract tasks from this conversation.', 'Tasks extracted')
+    const response = await callAgent('Extract tasks', 'Extract tasks from this conversation.', 'Tasks extracted', { quick_action: 'extract_tasks' })
     if (!response) return
     try {
       const items = parseJsonArray(response.response)
