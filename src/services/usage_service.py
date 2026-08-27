@@ -123,7 +123,7 @@ async def _maybe_alert_budget(*, before_tokens: int, after_tokens: int) -> None:
     )
 
 
-async def get_usage_today(workspace_id: str | None = None) -> dict:
+async def get_usage_today(workspace_id: str | None = None, user_id: str | None = None) -> dict:
     since = _midnight_local_as_utc()
     async with db_session.async_session_maker() as db:
         stmt = select(
@@ -138,6 +138,8 @@ async def get_usage_today(workspace_id: str | None = None) -> dict:
         )
         if workspace_id:
             stmt = stmt.where(UsageLog.workspace_id == workspace_id)
+        if user_id:
+            stmt = stmt.where(UsageLog.user_id == user_id)
         rows = (await db.execute(stmt.group_by(UsageLog.provider, UsageLog.model))).all()
 
     estimated_cost_usd = 0.0
@@ -157,7 +159,15 @@ async def get_usage_today(workspace_id: str | None = None) -> dict:
     }
 
 
-async def get_daily_token_budget() -> int:
+async def get_daily_token_budget(user_id: str | None = None) -> int:
+    if user_id:
+        try:
+            async with db_session.async_session_maker() as db:
+                user = await db.get(User, user_id)
+                if user is not None and user.daily_token_budget is not None:
+                    return user.daily_token_budget
+        except SQLAlchemyError:
+            pass
     try:
         async with db_session.async_session_maker() as db:
             config = await db.get(SystemConfig, _SYSTEM_CONFIG_ID)
@@ -169,10 +179,10 @@ async def get_daily_token_budget() -> int:
     return get_settings().daily_token_budget
 
 
-async def get_usage_summary() -> dict:
+async def get_usage_summary(user_id: str | None = None) -> dict:
     """Return the non-admin-safe subset used by the daily AI budget indicator."""
-    budget = await get_daily_token_budget()
-    usage = await get_usage_today()
+    budget = await get_daily_token_budget(user_id)
+    usage = await get_usage_today(user_id=user_id)
     used_pct = round(usage["total_tokens"] / budget * 100, 1) if budget else 0.0
     return {
         "tokens_used_today": usage["total_tokens"],
@@ -193,6 +203,15 @@ async def set_daily_token_budget(value: int, *, updated_by: str | None) -> int:
     return value
 
 
+
+async def set_user_daily_token_budget(user_id: str, value: int) -> int:
+    async with db_session.async_session_maker() as db:
+        user = await db.get(User, user_id)
+        if user is None:
+            raise ValueError("user_not_found")
+        user.daily_token_budget = value
+        await db.commit()
+    return value
 async def get_usage_report(days: int = 7) -> dict:
     tz = ZoneInfo(get_settings().calendar_timezone)
     now = datetime.now(tz)
@@ -281,12 +300,12 @@ async def get_usage_report(days: int = 7) -> dict:
     return {"days": days, "since": since, "totals": totals, "daily": daily_rows, "models": model_rows}
 
 
-async def is_over_budget() -> bool:
+async def is_over_budget(user_id: str | None = None) -> bool:
     """True once today's usage has reached (not just approached) daily_token_budget. Used to
     block *new* LLM calls - never to interrupt one already in flight or a human-approved action
     that's just completing (see routes.py::resume_chat for why resume is exempt)."""
-    budget = await get_daily_token_budget()
+    budget = await get_daily_token_budget(user_id)
     if not budget:
         return False
-    usage = await get_usage_today()
+    usage = await get_usage_today(user_id=user_id)
     return usage["total_tokens"] >= budget
