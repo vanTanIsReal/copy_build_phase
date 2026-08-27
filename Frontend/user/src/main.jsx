@@ -13,16 +13,19 @@ import AppRouter from './router/AppRouter'
 import { AuthProvider } from './context/AuthContext'
 import { WorkspaceProvider } from './context/WorkspaceContext'
 import { ToastProvider } from './context/ToastContext'
+import AppErrorBoundary from './components/common/AppErrorBoundary'
 
 // Empty clientId just disables the Google button's provider context (GoogleLogin quietly
 // no-ops/errors on click instead of crashing at import time) when GOOGLE_OAUTH is unset - dev
 // without a Google Cloud OAuth client configured still works for the existing email/password flow.
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <GoogleOAuthProvider clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID || ''}>
+    <AppErrorBoundary>
+      <GoogleOAuthProvider clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID || ''}>
       <ToastProvider>
         <AuthProvider><WorkspaceProvider><AppRouter /></WorkspaceProvider></AuthProvider>
       </ToastProvider>
-    </GoogleOAuthProvider>
+      </GoogleOAuthProvider>
+    </AppErrorBoundary>
   </React.StrictMode>
 )
