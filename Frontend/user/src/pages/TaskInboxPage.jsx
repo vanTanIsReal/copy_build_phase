@@ -10,6 +10,7 @@ import { groupTasks } from '../utils/taskGrouping'
 import HologramSurface from '../components/fx/HologramSurface'
 import FluidButton from '../components/fx/FluidButton'
 import ConfirmTaskDueDateModal from '../components/task/ConfirmTaskDueDateModal'
+import TaskSuggestionDetail from '../components/task/TaskSuggestionDetail'
 
 const sourceLabel = { manual: 'Manual', proactive: 'AI suggestion' }
 const priorityClass = { High: 'danger', Medium: 'warning', Low: 'info' }
@@ -80,7 +81,7 @@ export default function TaskInboxPage() {
             <div className="suggestion-card" key={task.id}>
               <div className={`suggestion-check text-${tone}`}><i className="bi bi-flag-fill" /></div>
               <div className="flex-grow-1">
-                <h4>{task.title}</h4>
+                <h4>{task.title}<TaskSuggestionDetail task={task}/></h4>
                 <div className="suggestion-meta">
                   <span><i className="bi bi-chat-left-text" />{sourceLabel[task.source] || task.source}</span>
                   <span><i className="bi bi-calendar3" />{formatDue(task.due_at)}</span>

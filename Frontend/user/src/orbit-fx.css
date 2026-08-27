@@ -130,6 +130,41 @@
 .orbit-fx .suggestion-card h4 { color: var(--ofx-ink); }
 .orbit-fx .suggestion-meta { color: var(--ofx-muted); }
 
+/* "Why did Orbit suggest this" hover detail on a suggestion card - see TaskSuggestionDetail.jsx */
+.task-suggestion-detail { position: relative; display: inline-flex; margin-left: 6px; }
+.task-suggestion-detail > i { color: var(--ofx-muted); cursor: help; font-size: 12px; }
+.task-suggestion-detail:hover > i, .task-suggestion-detail > i:focus-visible { color: var(--ofx-glow-a); outline: none; }
+.task-suggestion-detail-popover {
+  display: none;
+  position: absolute;
+  z-index: 20;
+  top: 20px;
+  left: 0;
+  width: 260px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--ofx-panel);
+  border: 1px solid var(--ofx-line-strong);
+  box-shadow: var(--ofx-shadow);
+  text-align: left;
+  white-space: normal;
+}
+.task-suggestion-detail:hover .task-suggestion-detail-popover,
+.task-suggestion-detail > i:focus-visible + .task-suggestion-detail-popover {
+  display: block;
+}
+.task-suggestion-detail-proposer { margin: 0 0 8px; font-size: 12px; color: var(--ofx-ink); }
+.task-suggestion-detail-label {
+  margin: 0 0 4px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--ofx-muted);
+}
+.task-suggestion-detail-message { margin: 0 0 6px; font-size: 11px; line-height: 1.5; color: var(--ofx-muted); }
+.task-suggestion-detail-message:last-child { margin-bottom: 0; }
+.task-suggestion-detail-message strong { color: var(--ofx-ink); }
+
 /* ---------- Global shell (pillar 1: unified dark theme, whole app) ---------- */
 .app-shell.orbit-fx { --sidebar: 258px; background: var(--ofx-bg); color: var(--ofx-ink); }
 @media (max-width: 992px) { .app-shell.orbit-fx { --sidebar: 231px; } }
