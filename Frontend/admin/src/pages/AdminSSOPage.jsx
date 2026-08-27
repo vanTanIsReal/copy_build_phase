@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
@@ -7,7 +7,10 @@ export default function AdminSSOPage() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const [error, setError] = useState('')
+  const started = useRef(false)
   useEffect(() => {
+    if (started.current) return
+    started.current = true
     const ticket = params.get('ticket')
     if (!ticket) { setError('Missing admin sign-in ticket'); return }
     loginWithHandoff(ticket).then(() => navigate('/admin', { replace: true })).catch(() => setError('Admin sign-in link expired.'))
