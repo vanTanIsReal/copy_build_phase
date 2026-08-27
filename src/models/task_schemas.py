@@ -7,6 +7,16 @@ TaskStatus = Literal["suggested", "pending", "in_progress", "completed", "dismis
 TaskPriority = Literal["High", "Medium", "Low"]
 
 
+class TaskSourceMessageOut(BaseModel):
+    """One message that contributed to an AI-suggested task, for the "why did Orbit suggest this"
+    hover detail - source_message_ids[0] is always the message that first proposed the commitment
+    (see proactive_service.py), so sender_name of the first entry is who proposed it."""
+
+    sender_name: str
+    content: str
+    created_at: datetime
+
+
 class TaskOut(BaseModel):
     id: str
     workspace_id: str
@@ -21,6 +31,7 @@ class TaskOut(BaseModel):
     invalidated_reason: str | None = None
     calendar_event_id: str | None = None
     reminder_id: str | None = None
+    source_messages: list[TaskSourceMessageOut] | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -380,7 +380,28 @@ async def _task_exists(
     return any(task.source_message_ids and task.source_message_ids[0] == proposal_message_id for task in tasks)
 
 
-def _task_payload(task: Task) -> dict:
+async def _task_payload(db: AsyncSession, task: Task) -> dict:
+    # source_message_ids[0] is always the proposal message (see maybe_suggest_task below), so the
+    # frontend's "why did Orbit suggest this" hover reads source_messages[0].sender_name as who
+    # proposed it, same shape TaskOut.source_messages uses (task_routes._load_source_messages).
+    source_messages = None
+    if task.source_message_ids:
+        rows = (
+            await db.execute(
+                select(Message, User)
+                .join(User, User.id == Message.sender_id)
+                .where(Message.id.in_(task.source_message_ids))
+            )
+        ).all()
+        by_id = {
+            message.id: {
+                "sender_name": sender.display_name,
+                "content": message.content,
+                "created_at": message.created_at.isoformat(),
+            }
+            for message, sender in rows
+        }
+        source_messages = [by_id[mid] for mid in task.source_message_ids if mid in by_id]
     return {
         "id": task.id,
         "workspace_id": task.workspace_id,
@@ -391,6 +412,7 @@ def _task_payload(task: Task) -> dict:
         "status": task.status,
         "source": task.source,
         "source_message_ids": task.source_message_ids,
+        "source_messages": source_messages,
         "consent_scope_hash": task.consent_scope_hash,
         "invalidated_reason": task.invalidated_reason,
         "created_at": task.created_at.isoformat(),
@@ -431,7 +453,7 @@ async def _retract_tasks_for_source(
         await db.refresh(task)
         await manager.broadcast_to_users(
             [task.owner_id],
-            {"type": "task_updated", "task": _task_payload(task)},
+            {"type": "task_updated", "task": await _task_payload(db, task)},
         )
 
 
@@ -583,7 +605,7 @@ async def maybe_suggest_task(
                     await db.refresh(task)
                     await manager.broadcast_to_users(
                         [owner_id],
-                        {"type": "task_suggested", "task": _task_payload(task)},
+                        {"type": "task_suggested", "task": await _task_payload(db, task)},
                     )
     except Exception:  # noqa: BLE001 - background detection must never break message delivery
         logger.exception("Proactive commitment detection failed")
