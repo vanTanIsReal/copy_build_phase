@@ -4,6 +4,7 @@ import AdminGuard from './AdminGuard'
 import AdminLayout from '../components/layout/AdminLayout'
 
 const AdminLoginPage = lazy(() => import('../pages/AdminLoginPage'))
+const AdminSSOPage = lazy(() => import('../pages/AdminSSOPage'))
 const AccessDeniedPage = lazy(() => import('../pages/AccessDeniedPage'))
 const AdminDashboardPage = lazy(() => import('../pages/admin/AdminDashboardPage'))
 const AdminUsersPage = lazy(() => import('../pages/admin/AdminUsersPage'))
@@ -19,6 +20,7 @@ export default function AppRouter() {
       <Suspense fallback={<div className="auth-loading">Loading...</div>}>
         <Routes>
           <Route path="/login" element={<AdminLoginPage />} />
+          <Route path="/sso" element={<AdminSSOPage />} />
           <Route path="/access-denied" element={<AccessDeniedPage />} />
           <Route element={<AdminGuard />}>
             <Route element={<AdminLayout />}>

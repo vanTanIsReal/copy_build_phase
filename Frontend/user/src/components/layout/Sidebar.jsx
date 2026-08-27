@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { getUsageStatus } from '../../api/usage'
+import { createAdminHandoff } from '../../api/auth'
 
 const nav = [
   ['assistant', 'bi-stars', 'AI Assistant'], ['chat', 'bi-chat-dots', 'Chats'], ['tasks', 'bi-check2-square', 'Tasks'],
@@ -16,6 +17,7 @@ const getInitials = (name) => (name || '?').trim().split(/\s+/).map(w => w[0]).s
 export default function Sidebar({ open, onClose, tasksIconRef, flightPulse }) {
   const { user, token, isAdmin } = useAuth()
   const adminUrl = import.meta.env.VITE_ADMIN_APP_URL || 'http://localhost:5174'
+  const openAdmin = async (event) => { event.preventDefault(); try { const { ticket } = await createAdminHandoff(token); window.location.href = `${adminUrl}/sso?ticket=${encodeURIComponent(ticket)}` } catch { window.location.href = adminUrl } }
   // Real workspace-wide AI usage today (src/api/v1/usage/status) - there's no per-user credit
   // balance in the backend, only a shared daily token budget, so this is that, not "your" quota.
   const [usage, setUsage] = useState(null)
@@ -51,7 +53,7 @@ export default function Sidebar({ open, onClose, tasksIconRef, flightPulse }) {
               {(path === 'workspaces' || path === 'workspace-briefs') && <span className="org-pill">Org</span>}
             </NavLink>
           ))}
-          {isAdmin && <><div className="nav-caption">Administration</div><a className="side-link" href={adminUrl}><i className="bi bi-box-arrow-up-right" /><span>Open Admin</span></a></>}
+          {isAdmin && <><div className="nav-caption">Administration</div><a className="side-link" href={adminUrl} onClick={openAdmin}><i className="bi bi-box-arrow-up-right" /><span>Open Admin</span></a></>}
         </nav>
         <div className="sidebar-bottom">
           <div className="ai-usage"><div className="d-flex align-items-center gap-2 mb-2"><i className="bi bi-stars" /><strong>AI usage today</strong><span>{usedPct === null ? '…' : `${usedPct}%`}</span></div><div className="progress"><div className="progress-bar" style={{width: `${usedPct ?? 0}%`}} /></div><small>{usage ? `${usage.tokens_used_today.toLocaleString()} / ${usage.daily_token_budget.toLocaleString()} tokens · shared across workspace · resets at midnight` : 'Loading…'}</small></div>
