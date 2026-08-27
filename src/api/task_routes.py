@@ -340,6 +340,11 @@ async def update_task_status(
     is_accept = task.status == "suggested" and request.status == "pending"
     if task.status == "suggested" and request.status in {"pending", "in_progress", "completed"}:
         await _require_current_ai_provenance(task, db)
+    if request.due_at is not None:
+        due_at = request.due_at
+        if due_at.tzinfo is None:
+            due_at = due_at.replace(tzinfo=ZoneInfo(get_settings().calendar_timezone))
+        task.due_at = due_at
     task.status = request.status
     if is_accept:
         await _sync_task_to_calendar(task, current_user)

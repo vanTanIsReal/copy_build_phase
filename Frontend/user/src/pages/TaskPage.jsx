@@ -4,6 +4,7 @@ import PageHeader from '../components/common/PageHeader'
 import StatCard from '../components/common/StatCard'
 import TaskTable, { formatDue } from '../components/task/TaskTable'
 import NewTaskModal from '../components/task/NewTaskModal'
+import ConfirmTaskDueDateModal from '../components/task/ConfirmTaskDueDateModal'
 import EmptyState from '../components/fx/EmptyState'
 import { useAuth } from '../context/AuthContext'
 import { listTasks, updateTaskStatus, deleteTask } from '../api/tasks'
@@ -18,6 +19,7 @@ export default function TaskPage() {
   const [query, setQuery] = useState('')
   const [newOpen, setNewOpen] = useState(false)
   const [error, setError] = useState('')
+  const [needsDueDate, setNeedsDueDate] = useState(null) // task awaiting date/time confirmation to accept
 
   const refresh = () => {
     setLoading(true)
@@ -50,7 +52,14 @@ export default function TaskPage() {
   const overdue = mainTasks.filter(t => t.status === 'pending' && t.due_at && new Date(t.due_at) < new Date()).length
   const pending = mainTasks.length - completed - overdue
 
-  const accept = (task) => updateTaskStatus(token, task.id, 'pending').then(upsertTask)
+  // A suggestion with no due_at means Orbit couldn't find a clear date/time in the conversation -
+  // Accept still needs that one human-in-the-loop step before Calendar/Reminder sync has anything
+  // to schedule against, so it opens ConfirmTaskDueDateModal instead of accepting immediately.
+  const accept = (task) => task.due_at
+    ? updateTaskStatus(token, task.id, 'pending').then(upsertTask)
+    : setNeedsDueDate(task)
+  const confirmAcceptWithDueDate = (dueAtIso) =>
+    updateTaskStatus(token, needsDueDate.id, 'pending', dueAtIso).then(upsertTask).then(() => setNeedsDueDate(null))
   const dismiss = (task) => updateTaskStatus(token, task.id, 'dismissed').then(upsertTask)
   const complete = (task) => updateTaskStatus(token, task.id, 'completed').then(upsertTask)
   const remove = (task) => deleteTask(token, task.id).then(() => removeTask(task.id))
@@ -64,5 +73,6 @@ export default function TaskPage() {
       {!loading && !suggestions.length && <EmptyState variant="float" icon="bi-stars" title="No new suggestions right now" description={'Try "Extract tasks" in a conversation\'s AI panel — Orbit is standing by to scan for action items.'} />}
     </div></section>
     <NewTaskModal open={newOpen} onClose={()=>setNewOpen(false)} onCreated={upsertTask}/>
+    <ConfirmTaskDueDateModal task={needsDueDate} onConfirm={confirmAcceptWithDueDate} onClose={()=>setNeedsDueDate(null)}/>
   </div>
 }

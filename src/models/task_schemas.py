@@ -38,3 +38,8 @@ class TaskCreateRequest(BaseModel):
 
 class UpdateTaskStatusRequest(BaseModel):
     status: TaskStatus
+    # Set together with an Accept (suggested -> pending) on a task the AI couldn't find a clear
+    # date/time for (due_at was null) - the frontend prompts for it at that moment instead of a
+    # separate edit step, so Calendar/Reminder sync on Accept has something to schedule against.
+    # Never clears an existing due_at: omitted or null leaves the task's current value untouched.
+    due_at: datetime | None = None

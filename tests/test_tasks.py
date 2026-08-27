@@ -236,6 +236,39 @@ async def test_accepting_proactive_task_without_due_date_does_not_touch_calendar
 
 
 @pytest.mark.asyncio
+async def test_accepting_proactive_task_without_due_date_can_supply_one_to_sync(
+    client, auth_headers, monkeypatch
+):
+    """UI escape hatch for a suggestion Orbit couldn't find a clear date/time for (see
+    ConfirmTaskDueDateModal.jsx): the Accept request can carry a due_at alongside the status
+    change, applied before Calendar/Reminder sync runs - a suggestion with no due_at isn't stuck
+    unsynced forever, it just needs the human to supply the missing piece at Accept time."""
+    fake_service = MagicMock()
+    fake_service.events.return_value.insert.return_value.execute.return_value = {
+        "id": "evt-6", "htmlLink": "https://calendar.google.com/event?eid=evt6",
+    }
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
+
+    created = await _create_proactive_task(client, auth_headers, title="Đi ăn kem")
+    assert created["due_at"] is None
+    assert created["status"] == "suggested"
+
+    due_at_local = datetime.now(ZoneInfo(get_settings().calendar_timezone)) + timedelta(days=1)
+    due_at_local = due_at_local.replace(microsecond=0)
+    resp = await client.patch(
+        f"/api/v1/tasks/{created['id']}/status",
+        json={"status": "pending", "due_at": due_at_local.replace(tzinfo=None).isoformat()},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "pending"
+    assert body["due_at"] is not None
+    assert body["calendar_event_id"] == "evt-6"
+    assert body["reminder_id"] is not None
+
+
+@pytest.mark.asyncio
 async def test_accepting_proactive_task_survives_calendar_sync_failure(client, auth_headers, monkeypatch):
     """Calendar and Reminder sync on Accept are independent, best-effort actions: a broken Google
     API must not stop Accept from succeeding, and must not stop the Reminder sync from still
