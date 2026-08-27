@@ -827,5 +827,4 @@ async def agent_status():
 
 @router.get("/usage/status", response_model=UsageStatusOut)
 async def usage_status(current_user: User = Depends(get_current_user)) -> UsageStatusOut:
-    del current_user
     return UsageStatusOut(**(await usage_service.get_usage_summary(current_user.id)))
