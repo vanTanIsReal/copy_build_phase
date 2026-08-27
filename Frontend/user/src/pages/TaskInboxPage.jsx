@@ -10,6 +10,8 @@ import { listTasks, updateTaskStatus } from '../api/tasks'
 import { groupTasks } from '../utils/taskGrouping'
 import HologramSurface from '../components/fx/HologramSurface'
 import FluidButton from '../components/fx/FluidButton'
+import ConfirmTaskDueDateModal from '../components/task/ConfirmTaskDueDateModal'
+import TaskSuggestionDetail from '../components/task/TaskSuggestionDetail'
 
 const sourceLabel = { manual: 'Manual', proactive: 'AI suggestion' }
 const priorityClass = { High: 'danger', Medium: 'warning', Low: 'info' }
@@ -24,6 +26,7 @@ export default function TaskInboxPage() {
   const { subscribe } = useOutletContext()
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
+  const [needsDueDate, setNeedsDueDate] = useState(null) // task awaiting date/time confirmation to accept
 
   const refresh = () => {
     setLoading(true)
@@ -48,7 +51,18 @@ export default function TaskInboxPage() {
 
   // Re-throws after toasting (unlike dismiss/complete below) so FluidButton's own success/error
   // state - the checkmark morph - only ever fires on a real success, never on a swallowed failure.
-  const accept = (task) => updateTaskStatus(token, task.id, 'pending').then(upsertTask).catch(err => { pushToast(err.detail || ACTION_FAILED); throw err })
+  // A suggestion with no due_at means Orbit couldn't find a clear date/time in the conversation -
+  // Accept opens ConfirmTaskDueDateModal for that one human-in-the-loop step instead of accepting
+  // immediately (Calendar/Reminder sync needs a due_at to schedule against).
+  const accept = (task) => {
+    if (!task.due_at) { setNeedsDueDate(task); return Promise.resolve() }
+    return updateTaskStatus(token, task.id, 'pending').then(upsertTask).catch(err => { pushToast(err.detail || ACTION_FAILED); throw err })
+  }
+  const confirmAcceptWithDueDate = (dueAtIso) =>
+    updateTaskStatus(token, needsDueDate.id, 'pending', dueAtIso)
+      .then(upsertTask)
+      .then(() => setNeedsDueDate(null))
+      .catch(err => { pushToast(err.detail || ACTION_FAILED); throw err })
   const dismiss = (task) => updateTaskStatus(token, task.id, 'dismissed').then(upsertTask).catch(err => pushToast(err.detail || ACTION_FAILED))
   const complete = (task) => updateTaskStatus(token, task.id, 'completed').then(upsertTask).catch(err => pushToast(err.detail || ACTION_FAILED))
 
@@ -69,7 +83,7 @@ export default function TaskInboxPage() {
             <div className="suggestion-card" key={task.id}>
               <div className={`suggestion-check text-${tone}`}><i className="bi bi-flag-fill" /></div>
               <div className="flex-grow-1">
-                <h4>{task.title}</h4>
+                <h4>{task.title}<TaskSuggestionDetail task={task}/></h4>
                 <div className="suggestion-meta">
                   <span><i className="bi bi-chat-left-text" />{sourceLabel[task.source] || task.source}</span>
                   <span><i className="bi bi-calendar3" />{formatDue(task.due_at)}</span>
@@ -127,6 +141,7 @@ export default function TaskInboxPage() {
         icon="bi-flag" title="High priority" items={highPriority} tone="warning"
         actions={(task) => <button className="btn btn-sm btn-primary" onClick={() => complete(task)}>Complete</button>}
       />
+      <ConfirmTaskDueDateModal task={needsDueDate} onConfirm={confirmAcceptWithDueDate} onClose={()=>setNeedsDueDate(null)}/>
     </HologramSurface>
   )
 }

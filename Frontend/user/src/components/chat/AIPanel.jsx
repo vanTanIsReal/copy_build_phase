@@ -64,6 +64,41 @@ function tryParseScheduleItems(text) {
   }
 }
 
+// Remembered across sessions like WorkspaceContext's orbit_workspace_id - the user picks a scope
+// once (e.g. "Last hour") and it should stay picked next time they open the AI panel, not silently
+// reset to the default every time. Keyed per-conversation (one JSON map under a single storage key)
+// rather than one global value - the panel component is reused as the user switches between chats
+// without unmounting, and a scope picked for one conversation (e.g. "50 latest messages" for a busy
+// group) shouldn't leak into an unrelated one. conversationId can be null (e.g. the standalone
+// /assistant page, not tied to any conversation), so that case gets its own map entry too.
+const SCOPE_STORAGE_KEY = 'orbit_ai_panel_scope'
+const DEFAULT_SCOPE = 'latest_20'
+function scopeMapKey(conversationId) {
+  return conversationId || 'global'
+}
+function loadScopeMap() {
+  try {
+    const raw = localStorage.getItem(SCOPE_STORAGE_KEY)
+    const parsed = raw ? JSON.parse(raw) : {}
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+function loadStoredScope(conversationId) {
+  const stored = loadScopeMap()[scopeMapKey(conversationId)]
+  return stored && scopeOptions[stored] ? stored : DEFAULT_SCOPE
+}
+function saveStoredScope(conversationId, scope) {
+  try {
+    const map = loadScopeMap()
+    map[scopeMapKey(conversationId)] = scope
+    localStorage.setItem(SCOPE_STORAGE_KEY, JSON.stringify(map))
+  } catch {
+    // private mode / storage disabled - fine, just won't persist
+  }
+}
+
 function describeInterrupt(interrupt) {
   const d = interrupt.draft
   if (interrupt.type === 'reminder') return `Tạo nhắc nhở "${d.title}" lúc ${d.due_at}?`
@@ -94,7 +129,11 @@ export default function AIPanel({
   onBusyChange,
 }) {
   const { token } = useAuth()
-  const [scope, setScope] = useState('latest_20')
+  const [scope, setScope] = useState(() => loadStoredScope(conversationId))
+  // The panel doesn't unmount when the user switches to a different conversation (conversationId
+  // just changes on this same mounted instance) - without this, the scope picked for the previous
+  // conversation would stick around instead of switching to what was remembered for the new one.
+  useEffect(() => { setScope(loadStoredScope(conversationId)) }, [conversationId])
   const [customSince, setCustomSince] = useState('')
   const [customUntil, setCustomUntil] = useState('')
   const [runningAction, setRunningAction] = useState(null)
@@ -314,7 +353,7 @@ export default function AIPanel({
           {granted ? <button className="revoke-btn" onClick={()=>toggleGrant(false)}>Disable my Assistant access</button> : <button className="btn btn-primary w-100 mt-3" onClick={()=>toggleGrant(true)} disabled={!conversationId}><i className="bi bi-shield-check me-2"/>Enable my Assistant access</button>}
           <label className="d-flex align-items-start gap-2 mt-3 small"><input type="checkbox" className="form-check-input mt-0" checked={contributionAllowed} onChange={event=>onToggleContribution(event.target.checked).catch(err=>setError(err.detail || 'Could not update contribution consent.'))} disabled={!conversationId}/><span>Allow Assistant to process messages I author in this direct conversation.</span></label>
         </>}
-        {granted && <><label className="mt-3">Immediate request window</label><select value={scope} onChange={event=>setScope(event.target.value)} className="form-select">{Object.entries(scopeOptions).map(([value, option])=><option key={value} value={value}>{option.label}</option>)}</select>{scope === 'custom' && <div className="row g-2 mt-1"><label className="col-6 small">From<input className="form-control form-control-sm" type="datetime-local" value={customSince} onChange={event=>setCustomSince(event.target.value)}/></label><label className="col-6 small">To<input className="form-control form-control-sm" type="datetime-local" value={customUntil} onChange={event=>setCustomUntil(event.target.value)}/></label></div>}</>}
+        {granted && <><label className="mt-3">Immediate request window</label><select value={scope} onChange={event=>{ const next = event.target.value; setScope(next); saveStoredScope(conversationId, next) }} className="form-select">{Object.entries(scopeOptions).map(([value, option])=><option key={value} value={value}>{option.label}</option>)}</select>{scope === 'custom' && <div className="row g-2 mt-1"><label className="col-6 small">From<input className="form-control form-control-sm" type="datetime-local" value={customSince} onChange={event=>setCustomSince(event.target.value)}/></label><label className="col-6 small">To<input className="form-control form-control-sm" type="datetime-local" value={customUntil} onChange={event=>setCustomUntil(event.target.value)}/></label></div>}</>}
         <small className="d-block text-muted mt-2">Authorized content is sent to the configured external AI provider for processing.</small>
       </div>
 

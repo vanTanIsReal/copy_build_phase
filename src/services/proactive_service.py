@@ -235,7 +235,11 @@ def _build_window_prompt(
         "now, not literally that hour today: if reading it as that hour AM today has already "
         "passed, resolve it as PM today instead; only roll to tomorrow if the PM reading has also "
         'already passed. This is how a casual "8 giờ đi chơi nhé" is actually understood, not as '
-        "08:00 the next time the clock reaches it.\n\n"
+        "08:00 the next time the clock reaches it.\n"
+        '- If NO hour is mentioned at all - only a day ("mai", "hôm nay", "thứ 6 tuần sau") with no '
+        'clock time whatsoever - due_at MUST be null, never a guessed hour. In particular, never '
+        "reuse the current message's own send time as if it were the meeting time; that produces a "
+        'nonsense due_at like "7am" for a plan that never mentioned a time.\n\n'
         "Examples:\n"
         "[1] An (09:00): tối nay 8h tôi đi họp\n[2] Binh (09:01): ok\n"
         '-> {"commitments":[{"title":"Họp tối nay","due_at":"...T20:00:00",'
@@ -273,6 +277,12 @@ def _build_window_prompt(
         "above it resolves to the next upcoming 8 o'clock, 20:00 tonight.\n\n"
         "[1] An (09:00): 8h họp nhé\n[2] An (09:05): thôi huỷ nhé\n"
         '-> {"commitments":[{"proposal_message_index":1,"cancelled":true,"owners":[]}]}\n\n'
+        "[1] An (07:05): Mai đi uống cafe nhé\n"
+        '-> {"commitments":[{"title":"Uống cafe","due_at":null,'
+        '"proposal_message_index":1,"cancelled":false,'
+        '"owners":[{"name":"An","evidence":"self","message_index":1}]}]}\n'
+        "Only a day is named (\"mai\"), no clock time at all - due_at is null, NOT 07:05 (the "
+        "message's own send time) and not any other guessed hour.\n\n"
         f"Chat excerpt:\n{_format_window(window, tz_name)}"
     )
 
@@ -370,7 +380,28 @@ async def _task_exists(
     return any(task.source_message_ids and task.source_message_ids[0] == proposal_message_id for task in tasks)
 
 
-def _task_payload(task: Task) -> dict:
+async def _task_payload(db: AsyncSession, task: Task) -> dict:
+    # source_message_ids[0] is always the proposal message (see maybe_suggest_task below), so the
+    # frontend's "why did Orbit suggest this" hover reads source_messages[0].sender_name as who
+    # proposed it, same shape TaskOut.source_messages uses (task_routes._load_source_messages).
+    source_messages = None
+    if task.source_message_ids:
+        rows = (
+            await db.execute(
+                select(Message, User)
+                .join(User, User.id == Message.sender_id)
+                .where(Message.id.in_(task.source_message_ids))
+            )
+        ).all()
+        by_id = {
+            message.id: {
+                "sender_name": sender.display_name,
+                "content": message.content,
+                "created_at": message.created_at.isoformat(),
+            }
+            for message, sender in rows
+        }
+        source_messages = [by_id[mid] for mid in task.source_message_ids if mid in by_id]
     return {
         "id": task.id,
         "workspace_id": task.workspace_id,
@@ -381,6 +412,7 @@ def _task_payload(task: Task) -> dict:
         "status": task.status,
         "source": task.source,
         "source_message_ids": task.source_message_ids,
+        "source_messages": source_messages,
         "consent_scope_hash": task.consent_scope_hash,
         "invalidated_reason": task.invalidated_reason,
         "created_at": task.created_at.isoformat(),
@@ -421,7 +453,7 @@ async def _retract_tasks_for_source(
         await db.refresh(task)
         await manager.broadcast_to_users(
             [task.owner_id],
-            {"type": "task_updated", "task": _task_payload(task)},
+            {"type": "task_updated", "task": await _task_payload(db, task)},
         )
 
 
@@ -573,7 +605,7 @@ async def maybe_suggest_task(
                     await db.refresh(task)
                     await manager.broadcast_to_users(
                         [owner_id],
-                        {"type": "task_suggested", "task": _task_payload(task)},
+                        {"type": "task_suggested", "task": await _task_payload(db, task)},
                     )
     except Exception:  # noqa: BLE001 - background detection must never break message delivery
         logger.exception("Proactive commitment detection failed")
