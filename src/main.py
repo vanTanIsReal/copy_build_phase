@@ -31,7 +31,6 @@ from src.services import (
     thread_memory_service,
 )
 from src.services.ai_config_service import load_saved_ai_configuration
-from src.services.company_service import get_or_create_company_workspace
 from src.services.scheduler import scheduler
 from src.websocket.routes import router as ws_router
 
