@@ -15,3 +15,28 @@
 @media(max-width:992px){.personal-assistant-layout{grid-template-columns:200px minmax(380px,1fr)}.personal-messages{padding-inline:25px}.personal-composer-wrap{padding-inline:25px}}
 @media(max-width:768px){.personal-assistant-layout{display:block;position:relative}.assistant-sessions{display:none}.personal-chat{height:100%}.assistant-context{top:var(--topbar)}.personal-welcome{margin-top:8px}.personal-welcome h1{font-size:28px}.personal-messages{padding:20px 16px}.personal-composer-wrap{padding:7px 13px 10px}}
 @media(max-width:520px){.personal-chat-header{padding:0 11px}.personal-header-actions>.icon-btn{display:none}.prompt-grid{grid-template-columns:1fr}.personal-welcome>p{font-size:10px}.personal-welcome h1{font-size:25px}.welcome-ai-mark{width:48px;height:48px;font-size:19px}.active-sources{overflow-x:auto;padding-bottom:2px}.active-sources>*{white-space:nowrap}.active-sources>span{display:none}.personal-composer textarea{font-size:10px}.assistant-context{width:min(320px,88vw)}}
+
+/* Mobile/tablet hardening for /assistant - mirrors the /chat fix (orbit-fx.css + shared-styles.css).
+   The context panel becomes a slide-in drawer anchored to .personal-assistant-layout via
+   position:absolute (layout forced position:relative; it already has overflow:hidden) - robust vs
+   the transform HologramSurface (Framer Motion) leaves on the layout. top:0 not var(--topbar)
+   because the anchor is the layout box, which already starts below the sticky topbar. All scoped
+   to @media so the desktop 3-column grid is untouched. html,body{overflow-x:clip} is already set
+   globally in shared-styles.css. */
+@media (max-width: 1200px) {
+  .personal-assistant-layout { position: relative; }
+  .assistant-context {
+    position: absolute; top: 0; bottom: 0; left: auto; right: -100%;
+    width: min(360px, 92vw); z-index: 110; transition: right .25s;
+  }
+  .assistant-context.open { right: 0; }
+  .context-backdrop.show { position: absolute; inset: 0; z-index: 105; }
+}
+@media (max-width: 768px) {
+  .personal-assistant-layout { height: calc(100vh - var(--topbar)); height: calc(100dvh - var(--topbar)); }
+  .personal-chat, .personal-messages { min-width: 0; max-width: 100%; }
+  .personal-messages { overscroll-behavior: contain; }
+  .personal-message > div:last-child { max-width: 82%; min-width: 0; }
+  .personal-message-bubble { overflow-wrap: anywhere; }
+  .personal-composer-wrap { flex-shrink: 0; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+}
