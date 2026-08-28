@@ -96,6 +96,9 @@ export default function ChatPage() {
   useEffect(() => {
     if (!conversations.length) return
     if (selectedId && conversations.some(conversation => conversation.id === selectedId)) return
+    // On a phone the list and a conversation are separate screens (see `mobileChat`): land on the
+    // list and let the user pick. Desktop shows list + pane side by side, so keep auto-selecting.
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches) return
 
     const fallbackId = conversations[0].id
     setSelectedId(fallbackId)
