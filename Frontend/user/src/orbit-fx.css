@@ -65,6 +65,34 @@
 .orbit-fx .composer-main input::placeholder { color: var(--ofx-muted); }
 .orbit-fx .composer-help { color: #5c6690; }
 
+/* ===== Messenger-style conversation list on phones (<=768px) =====
+   Big circular avatars, roomy borderless rows, near-black canvas, two clean text lines - the
+   look from the reference Messenger screenshot. Entirely inside @media, so the desktop
+   3-column chat layout (sidebar / list / thread / AI panel) is byte-for-byte unchanged. */
+@media (max-width: 768px) {
+  .orbit-fx .conversation-list { background: var(--ofx-bg); border-right: 0; }
+  .conversation-title { padding: 16px 16px 8px; }
+  .orbit-fx .conversation-title h2 { font-size: 27px; letter-spacing: -.02em; }
+  .conversation-title span { display: none; }
+  .conversation-search { margin: 2px 14px 8px; height: 40px; border-radius: 20px; }
+  .conversation-items { padding: 2px 0 12px; }
+
+  .chat-item { padding: 9px 14px; gap: 12px; margin: 0; border-radius: 0; align-items: center; }
+  /* Avatar sizes come from an inline style prop on <Avatar>, so !important is the only lever */
+  .chat-item .avatar { width: 52px !important; height: 52px !important; font-size: 18px !important; border-radius: 50%; }
+  .chat-item .avatar-status { width: 12px; height: 12px; right: 1px; bottom: 1px; border-color: var(--ofx-bg); }
+  .orbit-fx .chat-item.active, .orbit-fx .chat-item:hover { background: transparent; }
+  .chat-item:active { background: var(--ofx-panel-2); }
+
+  .chat-item-body { gap: 3px; }
+  .chat-item-top strong { font-size: 15px; font-weight: 600; }
+  .chat-item-top time { font-size: 12px; color: var(--ofx-muted); }
+  /* the per-row AI permission toggle is not a Messenger element - hide it here; granting AI to a
+     conversation still works from inside the thread (AI panel Grant/Revoke) */
+  .chat-item-ai-toggle { display: none; }
+  .chat-item-bottom > span { font-size: 13.5px; }
+}
+
 /* ---------- AI Panel (pillar 1: bloom handled in AIPanel.jsx via springs.surfaceOpen) ---------- */
 .orbit-fx .ai-panel {
   background: linear-gradient(175deg, var(--ofx-panel), var(--ofx-bg)); border-color: var(--ofx-line);
