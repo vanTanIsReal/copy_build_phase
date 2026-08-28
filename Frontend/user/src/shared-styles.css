@@ -56,6 +56,10 @@ input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus
   .message-content{min-width:0;max-width:86%}
   .message-bubble{overflow-wrap:anywhere}
   .composer{flex-shrink:0;padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+  /* slim conversation header (like /assistant's): drop the non-functional phone/video
+     placeholder buttons and the AI-active pill - keep back / avatar / name / AI (star) / menu */
+  .header-actions .icon-btn:not(.ai-mobile-btn):not(:last-child){display:none}
+  .conversation-meta .ai-active{display:none}
 }
 @media(max-width:520px){.global-search{display:none}.top-navbar{justify-content:center}.top-navbar:after{content:'Orbit';font:800 18px 'Manrope'}.page-heading{align-items:flex-start!important}.page-heading h1{font-size:24px}.stats-grid{grid-template-columns:1fr 1fr}.stat-card{gap:9px}.stat-icon{width:36px;height:36px;font-size:16px}.stat-value{font-size:18px}.card-toolbar{align-items:flex-start}.toolbar-actions .btn{font-size:0}.toolbar-actions .btn i{font-size:14px;margin:0!important}.memory-grid{grid-template-columns:1fr}.memory-info .btn{display:none}.reminder-row{padding:14px 12px;gap:9px}.reminder-info>div{display:block}.reminder-info>div span{display:block;margin:3px 0}.reminder-controls>span,.reminder-controls>.icon-btn{display:none}.detected-sidebar{display:block}.suggestion-card{flex-wrap:wrap}.suggestion-actions{width:100%;margin-left:48px}.form-grid{grid-template-columns:1fr}.profile-page .page-heading .btn{font-size:0}.profile-page .page-heading .btn i{font-size:14px;margin:0!important}.auth-two{grid-template-columns:1fr}.conversation-meta .ai-active{display:none}.header-actions .icon-btn:not(.ai-mobile-btn):not(:last-child){display:none}.message-content{max-width:84%}}
 @media(max-width:1200px){.relationship-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
