@@ -16,7 +16,7 @@ export default function MessageArea({ conversation, messages, currentUserId, onS
   // New unread marker (new conversation, or same conversation reopened) - show the button again.
   useEffect(() => { setUnreadDismissed(false) }, [firstUnreadMessageId])
 
-  const submit = (e) => { e.preventDefault(); if (!draft.trim() && !attachments.length) return; const attachmentText = attachments.map(file => 📎 ).join('\\n'); onSend([draft.trim(), attachmentText].filter(Boolean).join('\\n')); setDraft(''); setAttachments([]); setEmojiOpen(false) }
+const submit = (e) => { e.preventDefault(); if (!draft.trim() && !attachments.length) return; const attachmentText = attachments.map(file => `[File] ${file.name}`).join('\\n'); onSend([draft.trim(), attachmentText].filter(Boolean).join('\\n')); setDraft(''); setAttachments([]); setEmojiOpen(false) }
   const addEmoji = (emoji) => { setDraft(value => value + emoji); setEmojiOpen(false) }
   const onFiles = (event) => { setAttachments(files => [...files, ...Array.from(event.target.files || [])].slice(0, 5)); event.target.value = '' }
 
