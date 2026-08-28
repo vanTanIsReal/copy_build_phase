@@ -42,3 +42,4 @@
   /* 16px stops iOS Safari auto-zoom on focus (overrides the 10px rule in the <=520px block above) */
   .personal-composer textarea { font-size: 16px; }
 }
+@media(max-width:768px){.ai-close{display:grid!important;visibility:visible;pointer-events:auto;position:relative;z-index:3}}
