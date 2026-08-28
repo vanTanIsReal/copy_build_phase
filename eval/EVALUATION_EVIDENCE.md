@@ -1,6 +1,6 @@
 # Evaluation Evidence — Orbit
 
-Generated at `2026-08-25T13:25:12.177060+00:00` from source revision `367bb9d`
+Generated at `2026-08-28T06:00:21.415828+00:00` from source revision `f37cce4`
 with uncommitted evaluation changes.
 
 This report never converts missing evidence into a passing score. `PENDING` means the runner or
@@ -10,22 +10,25 @@ protocol exists but no current result artifact is available.
 
 | Evidence | Result | Gate | Status |
 |---|---:|---:|---|
-| Automated tests | 416/417 passed, 1 skipped | No failures/errors | PASS |
-| Source coverage | 67.9% | >=60% | PASS |
-| Formal Agent acceptance | 35.3% case pass | Dataset gates | FAIL |
-| Task title F1 | 91.9% | >=70% | PASS |
-| Deadline accuracy | 82.1% | >=70% | PASS |
-| RAGAS grounding | 55.0% faithfulness | All RAGAS gates | FAIL |
-| API latency P95 | Pending | Configured runner gate | PENDING |
+| Automated tests | 410/410 passed, 0 skipped | No failures/errors | PASS |
+| Source coverage | 66.7% | >=60% | PASS |
+| Formal Agent acceptance | 29.4% case pass | Dataset gates | FAIL |
+| Task title F1 | 83.3% | >=85% product gate | FAIL |
+| Deadline accuracy | 100.0% | >=90% product gate | PASS |
+| RAGAS grounding | 66.7% faithfulness | All RAGAS gates | FAIL |
+| API latency P95 | 21.2 ms | Configured runner gate | PASS |
 | User feedback | Pending | >=5 participants | PENDING |
 
 ## 2. Current measured AI quality
 
-- Formal acceptance: `2026-08-14T08:40:17.134794+00:00` using
-  `groq/openai/gpt-oss-20b`.
-- Task extraction: `37` cases; title precision
-  `85.0%`, recall
-  `100.0%`, F1 `91.9%`.
+- Formal acceptance: `2026-08-28T05:57:27.076656+00:00` using
+  `openai/openai/gpt-5.6-luna`.
+- Task extraction: `13` cases; title precision
+  `83.3%`, recall
+  `83.3%`, F1 `83.3%`.
+- The task runner's internal threshold is 70%, but the canonical product gates in `metric.md` require
+  precision >=90%, recall >=80%, F1 >=85% and deadline accuracy >=90%; release status follows the
+  stricter product gates.
 - Missing or failed gates remain release risks even when deterministic unit tests pass.
 
 ## 3. Reproducible commands
