@@ -70,6 +70,23 @@
   background: linear-gradient(175deg, var(--ofx-panel), var(--ofx-bg)); border-color: var(--ofx-line);
   color: var(--ofx-ink); position: relative; box-shadow: var(--ofx-shadow);
 }
+/* Mobile/tablet: the AI panel slides in over the chat area as a drawer. position:absolute anchored
+   to .chat-layout (forced position:relative + overflow:hidden right here) is robust regardless of
+   the transform/filter Framer Motion leaves on .chat-layout via HologramSurface - that would
+   otherwise make a position:fixed panel anchor to .chat-layout anyway, but absolute is explicit.
+   Scoped to @media so desktop (>1200px) keeps the rule above (panel = the 3rd grid column). This
+   also re-asserts the drawer that shared-styles.css @media(max-width:1200px) intends but loses to
+   the higher-specificity `.orbit-fx .ai-panel{position:relative}` above. */
+@media (max-width: 1200px) {
+  .orbit-fx.chat-layout { position: relative; overflow: hidden; }
+  .orbit-fx .ai-panel {
+    position: absolute; top: 0; bottom: 0; left: auto; right: -100%;
+    width: min(380px, 92vw); z-index: 100;
+    background: var(--ofx-panel); transition: right .25s;
+  }
+  .orbit-fx .ai-panel.open { right: 0; }
+  .orbit-fx .ai-backdrop.show { position: absolute; inset: 0; z-index: 90; }
+}
 .orbit-fx .ai-panel-header h3 { color: var(--ofx-ink); }
 .orbit-fx .ai-panel-header span { color: var(--ofx-muted); }
 .orbit-fx .permission-card { background: var(--ofx-panel-2); border-color: var(--ofx-line); }
