@@ -11,7 +11,7 @@ from src.config import get_settings
 from src.db import session as db_session
 from src.db.models import AIPermission, Conversation, Message, Task, User
 from src.services import chat_service, consent_service, guardrail_service, usage_service
-from src.services.llm import get_llm, invoke_with_fallback
+from src.services.llm import get_llm
 from src.websocket.manager import manager
 
 logger = logging.getLogger(__name__)
@@ -448,13 +448,10 @@ async def maybe_suggest_task(
 
         settings = get_settings()
         llm = get_llm()
-        relevance_call = await invoke_with_fallback(
-            _build_relevance_prompt(content), primary_llm=llm
-        )
-        relevance = relevance_call.message
+        relevance = await llm.ainvoke(_build_relevance_prompt(content))
         await usage_service.log_usage(
-            provider=relevance_call.provider,
-            model=relevance_call.model,
+            provider=settings.llm_provider,
+            model=settings.model_name,
             usage_metadata=getattr(relevance, "usage_metadata", None),
             user_id=sender_id,
             workspace_id=workspace_id,
@@ -476,20 +473,18 @@ async def maybe_suggest_task(
 
         now = datetime.now(ZoneInfo(settings.calendar_timezone))
         visible_participants = [name for name, user_id in roster.items() if user_id in eligible_ids]
-        extraction_call = await invoke_with_fallback(
+        extraction = await llm.ainvoke(
             _build_window_prompt(
                 window,
                 now=now,
                 tz_name=settings.calendar_timezone,
                 visible_participants=visible_participants,
                 is_direct=is_direct,
-            ),
-            primary_llm=llm,
+            )
         )
-        extraction = extraction_call.message
         await usage_service.log_usage(
-            provider=extraction_call.provider,
-            model=extraction_call.model,
+            provider=settings.llm_provider,
+            model=settings.model_name,
             usage_metadata=getattr(extraction, "usage_metadata", None),
             user_id=sender_id,
             workspace_id=workspace_id,

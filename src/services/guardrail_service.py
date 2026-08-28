@@ -230,13 +230,6 @@ _WORK_DOMAIN_PATTERNS = (
     r"\b(emails?|bao cao|reports?|tai lieu|documents?|bien ban|agendas?|presentations?)\b",
     r"\b(hoi thoai|conversation|tin nhan|message|chat|tom tat|summar|trich xuat|extract|tim kiem|search)\w*\b",
     r"\b(nang suat|productivity|work profiles?|ho so cong viec)\b",
-    # Reading the authenticated user's own saved work preferences is an agent-domain action even
-    # when the question does not literally say "memory" (for example, "mau sac yeu thich cua
-    # toi la gi?"). The memory tool remains owner-scoped, so this does not grant access to anyone
-    # else's profile.
-    r"\b(so thich|preferences?|mau sac yeu thich)\b.{0,80}\b(cua toi|my|mine)\b",
-    r"\b(ca lam|ca toi|work shifts?|backend|frontend|migrations?|api contracts?)\b",
-    r"\b(qa|kiem thu|smoke tests?|regressions?|loi|bugs?|defects?)\b",
     r"\b(pham vi|policy|guardrail|quy tac an toan)\b",
     # Engineering/work identifiers are often supplied as terse facts before a follow-up. Requiring
     # the word "project" in "Mã thử nghiệm là BLUE-42" caused a false out-of-domain refusal and

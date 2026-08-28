@@ -35,7 +35,7 @@ function describeInterrupt(interrupt) {
 // sidebar and this chat panel stay in sync: selecting a past session sets it from outside, and this
 // component reports back (onThreadIdChange) whenever the server mints a new one on the first
 // message of a fresh session.
-export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, onActivity, workspaceId }) {
+export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, onActivity }) {
   const { token, user } = useAuth()
   const [draft,setDraft]=useState('')
   const [messages,setMessages]=useState([])
@@ -61,7 +61,7 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
     if (!threadId) { setMessages([]); setPending(null); setLoadedThreadId(null); return }
     if (threadId === loadedThreadId) return
     let cancelled = false
-    getAssistantThreadMessages(token, threadId, workspaceId).then(history => {
+    getAssistantThreadMessages(token, threadId).then(history => {
       if (cancelled) return
       setMessages(history.map((m,i) => ({ id: `${threadId}-${i}`, own: m.role === 'user', text: m.content })))
       setPending(null)
@@ -69,7 +69,7 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
     }).catch(() => { if (!cancelled) pushMessage({ text: 'Không tải được lịch sử cuộc trò chuyện.' }) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadedThreadId is the "already handled" guard, re-running on it would defeat that
-  }, [threadId, token, workspaceId])
+  }, [threadId, token])
 
   const handleResult = (res, expectedThreadId=threadId) => {
     if (res.thread_id && res.thread_id !== expectedThreadId) onThreadIdChange?.(res.thread_id)
@@ -94,7 +94,7 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
     setDraft('')
     markSending(requestKey,true)
     try {
-      const res = await chatWithAgent(token, { message: value, thread_id: requestThreadId, workspace_id: workspaceId })
+      const res = await chatWithAgent(token, { message: value, thread_id: requestThreadId })
       if (activeThreadRef.current===requestThreadId) handleResult(res,requestThreadId)
       else onActivity?.() // result is persisted in its own checkpoint; refresh the sidebar only
     } catch (err) {
@@ -148,7 +148,7 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
       {sending && <div className="personal-message"><div className="message-ai-icon"><i className="bi bi-stars"/></div><div className="personal-message-bubble">Đang xử lý...</div></div>}
     </div>
     <PulseWave active={sending} />
-    <div className="personal-composer-wrap"><div className="active-sources"><span><i className="bi bi-shield-check"/> Nguồn khả dụng: Chats · Tasks · Calendar · Memory · Actions require confirmation</span></div>{/* Floating glass composer: translucent blur + resting glow + a stronger glow ring on focus
+    <div className="personal-composer-wrap"><div className="active-sources"><span><i className="bi bi-database-check"/> Nguồn khả dụng: Chats · Tasks · Calendar · Memory</span></div>{/* Floating glass composer: translucent blur + resting glow + a stronger glow ring on focus
           (Tailwind focus-within: variant) - `.personal-composer`'s own box model/flex layout and
           the existing orbit-fx.css glow stay as-is, these classes only add the glass surface. */}
       <form

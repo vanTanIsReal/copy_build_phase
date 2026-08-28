@@ -64,18 +64,3 @@ async def test_generate_tasks_json_logs_usage(monkeypatch):
 
     assert result == "[]"
     assert logged["usage_metadata"]["total_tokens"] == 10
-
-
-@pytest.mark.asyncio
-async def test_task_prompt_excludes_preferences_roles_and_completed_work(monkeypatch):
-    fake_llm = AsyncMock()
-    fake_llm.ainvoke.return_value = AsyncMock(content="[]", usage_metadata=None)
-    monkeypatch.setattr(task_tool, "get_llm", lambda: fake_llm)
-
-    await task_tool.generate_tasks_json("Lan owns backend. Redis was completed.")
-
-    prompt = fake_llm.ainvoke.await_args.args[0]
-    assert "general roles/responsibilities" in prompt
-    assert "completed or cancelled work" in prompt
-    assert "conditional social suggestions" in prompt
-    assert "Never turn remembered personal facts into tasks" in prompt

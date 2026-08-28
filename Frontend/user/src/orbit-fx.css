@@ -15,7 +15,9 @@
    directly on AuthShell's own root (outside AppLayout, so they don't inherit it from `.app-shell`)
    - see the "Auth (Login/Register)" section below. The admin app (separate Vite build, its own
    vite.config.js) never sees any of this file; its own equivalent dark theme, including its login
-   page, lives in Frontend/admin/src/admin-fx.css. */
+   page, lives in Frontend/admin/src/admin-fx.css. RelationshipsPage's bespoke `.relationship-*`
+   classes are also not covered yet (not part of this pass's requested scope: Tasks, Calendar,
+   Profile, Workspaces + the AI/chat surfaces). */
 
 .orbit-fx {
   --ofx-bg: #0a0e1a;

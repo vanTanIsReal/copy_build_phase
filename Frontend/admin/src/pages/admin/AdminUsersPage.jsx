@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AdminPageHeader, EmptyState, StatusBadge, UserCell } from '../../components/AdminCommon'
 import { useAuth } from '../../context/AuthContext'
-import { listUsers, updateUserRole, updateUserStatus } from '../../api/admin'
+import { listUsers, updateUserBudget, updateUserRole, updateUserStatus } from '../../api/admin'
 
 const userView = user => ({
   ...user,
@@ -31,6 +31,13 @@ export default function AdminUsersPage() {
       setUsers(list => list.map(entry => entry.id === updated.id ? updated : entry))
     } catch (err) { setError(err.detail || 'Could not update user role.') }
   }
+  const updateBudget = async (item, value) => {
+    if (value === '' || !/^\d+$/.test(value)) return
+    try {
+      const updated = await updateUserBudget(token, item.id, Number(value))
+      setUsers(list => list.map(entry => entry.id === updated.id ? updated : entry))
+    } catch (err) { setError(err.detail || 'Could not update user token budget.') }
+  }
   const updateStatus = async item => {
     try {
       const updated = await updateUserStatus(token, item.id, !item.is_active)
@@ -44,7 +51,7 @@ export default function AdminUsersPage() {
     <div className="admin-summary-strip"><div><span className="blue"><i className="bi bi-people" /></span><div><strong>{users.length}</strong><small>Total users</small></div></div><div><span className="green"><i className="bi bi-person-check" /></span><div><strong>{users.filter(item => item.is_active).length}</strong><small>Active accounts</small></div></div><div><span className="red"><i className="bi bi-shield-lock" /></span><div><strong>{users.filter(item => item.platform_role === 'platform_admin').length}</strong><small>Platform admins</small></div></div></div>
     <section className="admin-card admin-table-card">
       <div className="admin-table-toolbar"><div className="admin-filter-search"><i className="bi bi-search" /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search name or email..." /></div><div className="admin-filter-actions"><select value={status} onChange={event => setStatus(event.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="locked">Locked</option></select></div></div>
-      <div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>User</th><th>Joined</th><th>Platform role</th><th>Status</th><th>Actions</th></tr></thead><tbody>{visible.map(item => <tr key={item.id}><td><UserCell user={item} /></td><td>{new Date(item.created_at).toLocaleDateString()}</td><td><StatusBadge value={item.platform_role === 'platform_admin' ? 'Admin' : 'User'} /></td><td><StatusBadge value={item.is_active ? 'Active' : 'Locked'} /></td><td><button className="admin-row-action" disabled={item.id === currentUser?.id} onClick={() => updateRole(item)} title="Toggle platform role"><i className="bi bi-shield-check" /></button><button className={`admin-row-action ${item.is_active ? '' : 'unlock'}`} disabled={item.id === currentUser?.id} onClick={() => updateStatus(item)} title={item.is_active ? 'Lock user' : 'Unlock user'}><i className={`bi ${item.is_active ? 'bi-lock' : 'bi-unlock'}`} /></button></td></tr>)}</tbody></table>{loading && <div className="admin-empty"><span className="spinner-border spinner-border-sm" /><strong>Loading users…</strong></div>}{!loading && !visible.length && <EmptyState text="No users found" />}</div>
+      <div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>User</th><th>Joined</th><th>Platform role</th><th>Token budget / day</th><th>Status</th><th>Actions</th></tr></thead><tbody>{visible.map(item => <tr key={item.id}><td><UserCell user={item} /></td><td>{new Date(item.created_at).toLocaleDateString()}</td><td><StatusBadge value={item.platform_role === 'platform_admin' ? 'Admin' : 'User'} /></td><td><input className="admin-inline-select" type="number" min="0" defaultValue={item.daily_token_budget ?? ''} onBlur={event => updateBudget(item, event.target.value)} aria-label={`Token budget for ${item.email}`} /></td><td><StatusBadge value={item.is_active ? 'Active' : 'Locked'} /></td><td><button className="admin-row-action" disabled={item.id === currentUser?.id} onClick={() => updateRole(item)} title="Toggle platform role"><i className="bi bi-shield-check" /></button><button className={`admin-row-action ${item.is_active ? '' : 'unlock'}`} disabled={item.id === currentUser?.id} onClick={() => updateStatus(item)} title={item.is_active ? 'Lock user' : 'Unlock user'}><i className={`bi ${item.is_active ? 'bi-lock' : 'bi-unlock'}`} /></button></td></tr>)}</tbody></table>{loading && <div className="admin-empty"><span className="spinner-border spinner-border-sm" /><strong>Loading usersÃ¢â‚¬Â¦</strong></div>}{!loading && !visible.length && <EmptyState text="No users found" />}</div>
     </section>
   </div>
 }

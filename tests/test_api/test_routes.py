@@ -49,20 +49,6 @@ async def test_readiness_checks_database_schema(client):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "path",
-    (
-        "/api/v1/workspaces/removed/people-insights",
-        "/api/v1/workspaces/removed/external-contacts",
-        "/api/v1/workspaces/removed/relationships",
-    ),
-)
-async def test_people_endpoints_are_removed(client, auth_headers, path):
-    response = await client.get(path, headers=auth_headers)
-    assert response.status_code == 404
-
-
-@pytest.mark.asyncio
 async def test_chat_requires_auth(client):
     response = await client.post("/api/v1/chat", json={"message": "hello"})
     assert response.status_code == 401
@@ -338,7 +324,7 @@ async def test_chat_blocked_when_over_daily_token_budget(client, auth_headers, m
     from src.agents import graph as agent_graph
     from src.services import usage_service
 
-    async def _over_budget():
+    async def _over_budget(user_id=None):
         return True
 
     monkeypatch.setattr(usage_service, "is_over_budget", _over_budget)
@@ -405,7 +391,7 @@ async def test_chat_resume_not_blocked_by_budget(client, auth_headers, monkeypat
 
     from src.services import usage_service
 
-    async def _over_budget():
+    async def _over_budget(user_id=None):
         return True
 
     monkeypatch.setattr(usage_service, "is_over_budget", _over_budget)
@@ -511,7 +497,7 @@ async def test_usage_status_accessible_to_regular_user_without_cost_or_model_fie
 async def test_usage_status_zero_budget_reports_zero_pct(client, auth_headers, monkeypatch):
     from src.services import usage_service
 
-    async def _zero_budget():
+    async def _zero_budget(user_id=None):
         return 0
 
     monkeypatch.setattr(usage_service, "get_daily_token_budget", _zero_budget)

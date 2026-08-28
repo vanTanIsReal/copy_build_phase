@@ -40,6 +40,7 @@ class User(Base):
     job_title: Mapped[str] = mapped_column(default="")
     timezone: Mapped[str] = mapped_column(default="Asia/Ho_Chi_Minh")
     preferences: Mapped[dict] = mapped_column(JSON, default=dict)
+    daily_token_budget: Mapped[int | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
@@ -633,7 +634,7 @@ class CalendarSyncState(Base):
 
 class AssistantThread(Base):
     """One row per Personal AI Assistant chat session (/assistant page) - lets a user browse past
-    sessions ("Gần đây" sidebar). Distinct from Conversation (1-1/group human chat) and from the
+    sessions ("Gáº§n Ä‘Ã¢y" sidebar). Distinct from Conversation (1-1/group human chat) and from the
     LangGraph checkpointer's own Postgres tables: those hold the full message state per thread_id
     but have no owner_id column and no title/preview concept, so they can't answer "which threads
     belong to this user" on their own - this table is the missing owner_id -> thread_id index, kept

@@ -39,7 +39,7 @@ async def test_register_is_rate_limited_per_ip(client):
 
 @pytest.mark.asyncio
 async def test_chat_is_rate_limited_per_user(client, auth_headers, monkeypatch):
-    async def _over_budget():
+    async def _over_budget(user_id=None):
         return True
 
     monkeypatch.setattr(usage_service, "is_over_budget", _over_budget)

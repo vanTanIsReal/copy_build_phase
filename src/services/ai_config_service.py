@@ -14,7 +14,6 @@ MODEL_OPTIONS: dict[str, list[dict[str, str]]] = {
     "openai": [
         {"id": "gpt-4.1-mini", "label": "GPT-4.1 mini"},
         {"id": "gpt-4o-mini", "label": "GPT-4o mini"},
-        {"id": "o4-mini", "label": "o4-mini"},
     ],
     "groq": [
         {"id": "openai/gpt-oss-120b", "label": "GPT-OSS 120B"},

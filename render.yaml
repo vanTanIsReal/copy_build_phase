@@ -50,6 +50,12 @@ services:
         value: Asia/Ho_Chi_Minh
       - key: RATE_LIMIT_ENABLED
         value: "true"
+      - key: DB_POOL_SIZE
+        value: "2"
+      - key: DB_MAX_OVERFLOW
+        value: "1"
+      - key: OAUTHLIB_RELAX_TOKEN_SCOPE
+        value: "1"
       - key: RATE_LIMIT_AUTH
         value: 10/minute
       - key: RATE_LIMIT_REGISTER

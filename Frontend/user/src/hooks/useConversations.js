@@ -6,11 +6,7 @@ export function useConversations(token, workspaceId) {
   const [loading, setLoading] = useState(true)
 
   const refresh = () => {
-    if (!token || !workspaceId) {
-      setConversations([])
-      setLoading(false)
-      return
-    }
+    if (!token) return
     setLoading(true)
     listConversations(token, workspaceId).then(data => setConversations(data.conversations)).finally(() => setLoading(false))
   }

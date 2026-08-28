@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { createReminder } from '../../api/reminders'
 
-export default function NewReminderModal({ open, onClose, onCreated, workspaceId }) {
+export default function NewReminderModal({ open, onClose, onCreated }) {
   const { token, user } = useAuth()
   const defaultLead = Number(user?.preferences?.default_reminder_lead_minutes) || 30
   const [title, setTitle] = useState('')
@@ -20,7 +20,6 @@ export default function NewReminderModal({ open, onClose, onCreated, workspaceId
     setSubmitting(true); setError('')
     try {
       const reminder = await createReminder(token, {
-        workspace_id: workspaceId,
         title: title.trim(),
         due_at_iso: `${dueAt}:00`,
         lead_minutes: Number(leadMinutes) || 0,

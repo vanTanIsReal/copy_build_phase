@@ -3,13 +3,13 @@ import PageHeader from '../components/common/PageHeader'
 import MemoryModal from '../components/memory/MemoryModal'
 import EmptyState from '../components/fx/EmptyState'
 import { useAuth } from '../context/AuthContext'
-import { useWorkspace } from '../context/WorkspaceContext'
 import { listMemories, deleteMemory, updateMemory } from '../api/memories'
 import { formatDateShort } from '../utils/datetime'
 
 const CATEGORY_STYLE = {
   Work: { icon: 'bi-briefcase', color: '#526ff5' },
   Preference: { icon: 'bi-sliders', color: '#8b5cf6' },
+  People: { icon: 'bi-people', color: '#ef5675' },
   Language: { icon: 'bi-translate', color: '#10b981' },
   Routine: { icon: 'bi-clock', color: '#f59e0b' },
 }
@@ -17,7 +17,6 @@ const DEFAULT_STYLE = { icon: 'bi-stars', color: '#64748b' }
 
 export default function MemoryPage() {
   const { token } = useAuth()
-  const { workspaceId } = useWorkspace()
   const [memories, setMemories] = useState([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
@@ -29,15 +28,10 @@ export default function MemoryPage() {
   const refresh = () => {
     setLoading(true)
     setError('')
-    if (!token || !workspaceId) {
-      setMemories([])
-      setLoading(false)
-      return
-    }
-    listMemories(token, workspaceId).then(setMemories).catch(err => setError(err.detail || 'Could not load memories.')).finally(() => setLoading(false))
+    listMemories(token).then(setMemories).catch(err => setError(err.detail || 'Could not load memories.')).finally(() => setLoading(false))
   }
 
-  useEffect(() => { refresh() }, [token, workspaceId])
+  useEffect(() => { refresh() }, [token])
 
   const categories = ['All', ...new Set(memories.map(m => m.category))]
   const shown = memories
@@ -64,6 +58,6 @@ export default function MemoryPage() {
       {!shown.length && <EmptyState variant="pulse" icon="bi-stars" title="No memories yet" description="Add one, or explicitly ask Orbit to remember a durable work detail." />}
     </div>}
     <div className="memory-info"><i className="bi bi-shield-check"/><div><strong>Your memory is private</strong><p>You control what Orbit remembers. Edit or delete anything at any time.</p></div></div>
-    <MemoryModal open={modalOpen} onClose={()=>setModalOpen(false)} onSaved={onSaved} memory={editing} workspaceId={workspaceId}/>
+    <MemoryModal open={modalOpen} onClose={()=>setModalOpen(false)} onSaved={onSaved} memory={editing}/>
   </div>
 }

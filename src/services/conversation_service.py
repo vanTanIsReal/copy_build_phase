@@ -4,7 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.models import Conversation, ConversationParticipant, User, WorkspaceMembership
+from src.db.models import Conversation, ConversationParticipant, ExternalContact, User, WorkspaceMembership
 from src.services.authorization_service import (
     get_authorized_participant_ids,
     require_conversation_access,
@@ -67,6 +67,32 @@ async def add_workspace_participant(
     return participant
 
 
+async def add_external_participant(
+    db: AsyncSession,
+    actor: User,
+    conversation_id: str,
+    external_contact_id: str,
+    resource_role: str = "participant",
+) -> ConversationParticipant:
+    if resource_role not in _RESOURCE_ROLES:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid resource role")
+    conversation = await db.get(Conversation, conversation_id)
+    contact = await db.get(ExternalContact, external_contact_id)
+    if conversation is None or contact is None or contact.workspace_id != conversation.workspace_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
+    await require_conversation_access(db, actor, conversation_id, "manager")
+    participant = ConversationParticipant(
+        conversation_id=conversation_id,
+        principal_kind="external_contact",
+        external_contact_id=external_contact_id,
+        resource_role=resource_role,
+        invited_by_user_id=actor.id,
+    )
+    db.add(participant)
+    await db.flush()
+    return participant
+
+
 async def revoke_participant(
     db: AsyncSession,
     actor: User,
@@ -82,6 +108,7 @@ async def revoke_participant(
 
 
 __all__ = [
+    "add_external_participant",
     "add_workspace_participant",
     "get_authorized_participant_ids",
     "revoke_participant",
