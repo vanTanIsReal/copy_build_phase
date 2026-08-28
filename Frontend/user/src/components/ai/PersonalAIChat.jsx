@@ -166,14 +166,6 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
       >
         <button type="button" className="icon-btn"><i className="bi bi-plus-lg"/></button>
         <textarea rows="1" value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Hỏi Orbit về công việc và lịch trình của bạn..." onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}}}/>
-        {/* Mic "listening" placeholder (pillar 3): a soft pulsing ring behind the icon while a
-            request is in flight - reuses the existing `sending` state as the closest available
-            signal to "AI is actively listening/processing", since real audio input isn't wired
-            up yet. */}
-        <div className="relative">
-          {sending && <span aria-hidden className="absolute inset-0 -m-1 animate-ping rounded-full bg-orbit-glow-a/40" />}
-          <button type="button" className="icon-btn relative"><i className="bi bi-mic"/></button>
-        </div>
         <button className="personal-send" aria-label="Gửi" disabled={sending} onClick={e=>{e.preventDefault();send()}}><i className="bi bi-arrow-up"/></button>
       </form><small>Orbit có thể mắc lỗi. Hãy kiểm tra lại thông tin quan trọng.</small></div>
   </section>
