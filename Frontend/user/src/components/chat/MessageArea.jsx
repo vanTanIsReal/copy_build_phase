@@ -21,9 +21,18 @@ export default function MessageArea({ conversation, messages, currentUserId, onS
     field.style.height = 'auto'
     field.style.height = `${Math.min(field.scrollHeight, 120)}px`
   }
-  const submit = (e) => { e.preventDefault(); if (!draft.trim() && !attachments.length) return; const attachmentText = attachments.map(file => `[File] ${file.name}`).join('\\n'); onSend([draft.trim(), attachmentText].filter(Boolean).join('\\n')); setDraft(''); setAttachments([]); setEmojiOpen(false) }
+  const submit = (e) => { e.preventDefault(); if (!draft.trim() && !attachments.length) return; const attachmentText = attachments.map(file => `[[orbit-attachment]]${JSON.stringify({ name: file.name, type: file.type, size: file.size, dataUrl: file.dataUrl })}`).join('\\n'); onSend([draft.trim(), attachmentText].filter(Boolean).join('\\n')); setDraft(''); setAttachments([]); setEmojiOpen(false) }
   const addEmoji = (emoji) => { setDraft(value => value + emoji); setEmojiOpen(false) }
-  const onFiles = (event) => { setAttachments(files => [...files, ...Array.from(event.target.files || [])].slice(0, 5)); event.target.value = '' }
+  const onFiles = async (event) => {
+    const selected = Array.from(event.target.files || []).filter(file => file.size <= 3 * 1024 * 1024)
+    const prepared = await Promise.all(selected.map(file => new Promise(resolve => {
+      const reader = new FileReader()
+      reader.onload = () => resolve({ name: file.name, type: file.type, size: file.size, dataUrl: reader.result })
+      reader.readAsDataURL(file)
+    })))
+    setAttachments(files => [...files, ...prepared].slice(0, 5))
+    event.target.value = ''
+  }
 
   // Only true when the marked message is actually among the currently loaded ones - useMessages
   // sizes its initial fetch to cover the known unread backlog, but in the rare case a backlog is
@@ -73,7 +82,7 @@ export default function MessageArea({ conversation, messages, currentUserId, onS
           <button type="button" className="icon-btn" aria-label="Choose emoji" title="Choose emoji" onClick={() => setEmojiOpen(open => !open)}><i className="bi bi-emoji-smile" /></button>
           <button className="send-btn" aria-label="Send"><i className="bi bi-send-fill" /></button>
         </div>
-        {attachments.length > 0 && <div className="composer-attachments">{attachments.map((file, index) => <span key={`${file.name}-${index}`}><i className="bi bi-paperclip" />{file.name}<button type="button" aria-label={`Remove ${file.name}`} onClick={() => setAttachments(files => files.filter((_, i) => i !== index))}>×</button></span>)}</div>}
+        {attachments.length > 0 && <div className="composer-attachments">{attachments.map((file, index) => <span key={`${file.name}-${index}`} className="composer-attachment">{file.type?.startsWith('image/') && <img src={file.dataUrl} alt={file.name} />}<i className="bi bi-paperclip" />{file.name}<button type="button" aria-label={`Remove ${file.name}`} onClick={() => setAttachments(files => files.filter((_, i) => i !== index))}>×</button></span>)}</div>}
         {emojiOpen && <div className="emoji-picker" role="listbox" aria-label="Emoji picker">{['😀','😂','😍','👍','👏','🎉','✅','🔥','💡','🙏','😊','🤝','🚀','❤️','😅','🎯'].map(emoji => <button type="button" key={emoji} onClick={() => addEmoji(emoji)}>{emoji}</button>)}</div>}
         <PulseWave active={aiBusy} />
         <div className="composer-help"><span><i className="bi bi-stars" /> Type <strong>@orbit</strong> to ask AI</span><span>Enter to send</span></div>

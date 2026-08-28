@@ -47,7 +47,7 @@ class MessageListResponse(BaseModel):
 
 
 class SendMessageRequest(BaseModel):
-    content: str = Field(..., min_length=1, max_length=5000)
+    content: str = Field(..., min_length=1, max_length=5_000_000)
 
 
 class AIPermissionOut(BaseModel):
