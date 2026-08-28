@@ -39,4 +39,6 @@
   .personal-message > div:last-child { max-width: 82%; min-width: 0; }
   .personal-message-bubble { overflow-wrap: anywhere; }
   .personal-composer-wrap { flex-shrink: 0; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  /* 16px stops iOS Safari auto-zoom on focus (overrides the 10px rule in the <=520px block above) */
+  .personal-composer textarea { font-size: 16px; }
 }
