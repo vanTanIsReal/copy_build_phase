@@ -34,7 +34,7 @@ export default function AppLayout() {
   const { sendJson } = useChatSocket(token, (data) => {
     handlersRef.current.forEach(handler => handler(data))
     if (data.type === 'reminder_fired') setToastReminder(data.reminder)
-    if (data.type === 'task_suggested') {
+    if (data.type === 'task_suggested' || data.type === 'task_created') {
       setToastTask(data.task)
       if (
         user?.preferences?.ai_suggestion_alerts === true &&

@@ -4,6 +4,7 @@ import PageHeader from '../components/common/PageHeader'
 import StatCard from '../components/common/StatCard'
 import { formatDue } from '../components/task/TaskTable'
 import { useAuth } from '../context/AuthContext'
+import { useWorkspace } from '../context/WorkspaceContext'
 import { useToast } from '../context/ToastContext'
 import { listTasks, updateTaskStatus } from '../api/tasks'
 import { groupTasks } from '../utils/taskGrouping'
@@ -20,6 +21,7 @@ const ACTION_FAILED = 'Không thực hiện được, thử lại sau.'
 // only what needs a decision or attention *right now*, ranked instead of just chronological.
 export default function TaskInboxPage() {
   const { token } = useAuth()
+  const { workspaceId } = useWorkspace()
   const { pushToast } = useToast()
   const { subscribe } = useOutletContext()
   const [tasks, setTasks] = useState([])
@@ -33,10 +35,10 @@ export default function TaskInboxPage() {
       setLoading(false)
       return
     }
-    listTasks(token).then(setTasks).finally(() => setLoading(false))
+    listTasks(token, workspaceId).then(setTasks).finally(() => setLoading(false))
   }
 
-  useEffect(() => { refresh() }, [token])
+  useEffect(() => { refresh() }, [token, workspaceId])
 
   const upsertTask = (task) => setTasks(prev => [...prev.filter(t => t.id !== task.id), task])
 

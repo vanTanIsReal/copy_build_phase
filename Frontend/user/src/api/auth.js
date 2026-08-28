@@ -24,3 +24,5 @@ export const updateProfile = (token, updates) => apiFetch('/auth/me', { method: 
 
 export const changePassword = (token, { current_password, new_password }) =>
   apiFetch('/auth/me/password', { method: 'POST', token, body: { current_password, new_password } })
+
+export const createAdminHandoff = (token) => apiFetch('/auth/admin/handoff', { method: 'POST', token })

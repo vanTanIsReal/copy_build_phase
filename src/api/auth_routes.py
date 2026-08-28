@@ -71,6 +71,30 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db))
     return _to_public(user)
 
 
+@router.post("/admin/handoff")
+async def create_admin_handoff(current_user: User = Depends(get_current_user)) -> dict[str, str]:
+    """Create a short-lived, one-time ticket for the separate Admin frontend."""
+    if current_user.platform_role != "platform_admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Platform administrator access is required")
+    now = time.time()
+    for key, (_, expires_at) in list(_admin_handoff_tickets.items()):
+        if expires_at <= now:
+            _admin_handoff_tickets.pop(key, None)
+    ticket = secrets.token_urlsafe(32)
+    _admin_handoff_tickets[ticket] = (current_user.id, now + 60)
+    return {"ticket": ticket}
+
+
+@router.post("/admin/handoff/consume", response_model=AuthResponse)
+async def consume_admin_handoff(ticket: str, db: AsyncSession = Depends(get_db)) -> AuthResponse:
+    record = _admin_handoff_tickets.pop(ticket, None)
+    if record is None or record[1] <= time.time():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired admin handoff")
+    user = await db.get(User, record[0])
+    if user is None or not user.is_active or user.platform_role != "platform_admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Platform administrator access is required")
+    return AuthResponse(access_token=create_access_token(user.id), user=_to_public(user))
+
 @router.post("/login", response_model=AuthResponse)
 async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
     user = (await db.execute(select(User).where(User.email == request.email.lower()))).scalar_one_or_none()

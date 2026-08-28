@@ -99,7 +99,7 @@ settings = get_settings()
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()],
+    allow_origins=list({origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()} | {"https://admin-c3-app-132-auo2.vercel.app"}),
     allow_origin_regex=settings.cors_origin_regex or None,
     allow_credentials=True,
     allow_methods=["*"],

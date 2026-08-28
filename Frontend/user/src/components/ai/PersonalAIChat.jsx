@@ -47,6 +47,7 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
   // Requests may finish after the user has selected another thread. Track activity by thread so
   // one request cannot paint a spinner or append its response into a different session.
   const [sendingThreadKeys,setSendingThreadKeys]=useState([])
+  const messagesRef=useRef(null)
   const activeThreadRef=useRef(threadId)
   activeThreadRef.current=threadId
   const threadKey=(id)=>id || '__new_thread__'
@@ -104,6 +105,14 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
     } finally { markSending(requestKey,false) }
   }
 
+  useEffect(() => {
+    const container = messagesRef.current
+    if (!container) return
+    const frame = requestAnimationFrame(() => {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [messages, sending, pending])
   const respond = async (approved, edits) => {
     if (!pending || sending) return
     const requestThreadId=threadId
@@ -129,7 +138,7 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
   return <section className="personal-chat orbit-fx">
     <ScanningBorder active={sending} />
     <header className="personal-chat-header"><div className="personal-ai-avatar"><i className="bi bi-stars"/><span/></div><div><h3>Orbit Personal AI</h3><span><i/> Sẵn sàng hỗ trợ bạn</span></div><div className="personal-header-actions"><button className="context-mobile-btn" onClick={onContext}><i className="bi bi-layout-sidebar-reverse"/> Bối cảnh</button><button className="icon-btn" aria-label="Cuộc trò chuyện mới" onClick={()=>onThreadIdChange?.(null)}><i className="bi bi-arrow-clockwise"/></button><button className="icon-btn"><i className="bi bi-three-dots"/></button></div></header>
-    <div className="personal-messages bg-[radial-gradient(circle,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[length:22px_22px]">
+    <div ref={messagesRef} className="personal-messages bg-[radial-gradient(circle,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[length:22px_22px]">
       {messages.length===0 && <div className="personal-welcome"><motion.div initial={{scale:.85,opacity:0}} animate={{scale:1,opacity:1}} className="welcome-ai-mark"><i className="bi bi-stars"/></motion.div><span className="welcome-kicker">Chào {user?.display_name || 'bạn'}</span><h1>Hôm nay mình có thể<br/><em>giúp gì cho bạn?</em></h1><p>Hỏi mình về lịch, công việc, deadline hoặc thông tin từ các cuộc trò chuyện đã được cấp quyền.</p><div className="prompt-grid">{prompts.map(p=>
         // Glassmorphism prompt card: translucent fill + backdrop blur + a soft corner flare span
         // (Tailwind utilities can't target pseudo-elements, hence a plain absolutely-positioned

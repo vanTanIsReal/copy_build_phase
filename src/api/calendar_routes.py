@@ -178,7 +178,7 @@ async def confirm_event_candidate(
         )
     try:
         if candidate.operation == "create":
-            if candidate.missing_fields or candidate.start_at is None or candidate.end_at is None:
+            if candidate.start_at is None or candidate.end_at is None:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=f"Candidate is incomplete: {', '.join(candidate.missing_fields)}",
@@ -197,7 +197,7 @@ async def confirm_event_candidate(
             event_type = "calendar_event_created"
             payload = {"event": calendar_service.to_out_dict(changed)}
         elif candidate.operation == "update":
-            if candidate.missing_fields or candidate.start_at is None or candidate.end_at is None:
+            if candidate.start_at is None or candidate.end_at is None:
                 raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Update is incomplete")
             changed = await _resolve_calendar_call(calendar_service.update_event(
                 current_user.id,

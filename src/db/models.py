@@ -36,6 +36,7 @@ class User(Base):
     display_name: Mapped[str]
     role: Mapped[str] = mapped_column(default="user")  # "user" | "admin"
     platform_role: Mapped[str] = mapped_column(default="user")  # "user" | "platform_admin"
+    daily_token_budget: Mapped[int | None] = mapped_column(default=None)
     is_active: Mapped[bool] = mapped_column(default=True)
     job_title: Mapped[str] = mapped_column(default="")
     timezone: Mapped[str] = mapped_column(default="Asia/Ho_Chi_Minh")

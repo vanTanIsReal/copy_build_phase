@@ -8,12 +8,14 @@ import ConfirmTaskDueDateModal from '../components/task/ConfirmTaskDueDateModal'
 import TaskSuggestionDetail from '../components/task/TaskSuggestionDetail'
 import EmptyState from '../components/fx/EmptyState'
 import { useAuth } from '../context/AuthContext'
+import { useWorkspace } from '../context/WorkspaceContext'
 import { listTasks, updateTaskStatus, deleteTask } from '../api/tasks'
 
 const sourceLabel = { manual: 'Manual', proactive: 'AI suggestion' }
 
 export default function TaskPage() {
   const { token } = useAuth()
+  const { workspaceId } = useWorkspace()
   const { subscribe } = useOutletContext()
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
@@ -30,10 +32,10 @@ export default function TaskPage() {
       return
     }
     setError('')
-    listTasks(token).then(setTasks).catch(err => setError(err.detail || 'Could not load tasks.')).finally(() => setLoading(false))
+    listTasks(token, workspaceId).then(setTasks).catch(err => setError(err.detail || 'Could not load tasks.')).finally(() => setLoading(false))
   }
 
-  useEffect(() => { refresh() }, [token])
+  useEffect(() => { refresh() }, [token, workspaceId])
 
   const upsertTask = (task) => setTasks(prev => [...prev.filter(t => t.id !== task.id), task])
   const removeTask = (taskId) => setTasks(prev => prev.filter(t => t.id !== taskId))
