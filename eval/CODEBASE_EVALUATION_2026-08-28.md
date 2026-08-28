@@ -1,497 +1,221 @@
-# Báo cáo đánh giá code `deploy` và hướng dẫn triển khai đánh giá
+# Báo cáo đánh giá code và deployment — 2026-08-28
 
-## 1. Phạm vi và kết luận
+## 1. Kết luận
 
-Báo cáo này đánh giá cây mã nguồn mới nhất của `origin/deploy` tại commit
-`6c8b489f51e683ccd4218956989df1d5a696b43c` (`fix: make user app standalone for Vercel`). Nhánh
-đang làm việc là `hau` tại commit `f37cce4a987089e0c2d39fb04ac23aa83cd3c966`; hai commit có cùng
-tree hash nên nội dung source được đánh giá giống hệt `origin/deploy`.
+Trạng thái phát hành: **HOLD / CHƯA ĐỦ ĐIỀU KIỆN PHÁT HÀNH**.
 
-Thời điểm đánh giá: **2026-08-28**, múi giờ `Asia/Bangkok` (UTC+7).
+Phần nền tảng và memory PostgreSQL đạt yêu cầu, nhưng release vẫn bị chặn bởi chất lượng Agent/RAGAS,
+latency chat P95, WebSocket staging, accessibility và hiệu năng hiển thị. Google OAuth/Calendar thật
+không được chạy theo yêu cầu của người dùng, vì vậy hạng mục đó là **SKIP**, không phải PASS.
 
-Kết luận release: **HOLD / CHƯA ĐỦ ĐIỀU KIỆN PHÁT HÀNH**.
+Không sửa mã nguồn ứng dụng trong lần đánh giá staging này. Các thay đổi chỉ gồm file cấu hình mẫu,
+báo cáo và artifact đánh giá. Dữ liệu test task/reminder đã được xóa sau khi chạy.
 
-- Nền tảng kỹ thuật đạt baseline: toàn bộ 410 test pass, coverage vượt gate, migration PostgreSQL
-  từ database trắng pass, hai frontend build pass, static check và dependency audit pass.
-- Chất lượng AI chưa đạt release gate: RAGAS fail ở `faithfulness` và `answer_relevancy`.
-- Formal Agent mới chỉ pass 5/17 case; task extraction đạt gate của runner nhưng chưa đạt precision/F1
-  theo release gate sản phẩm trong `metric.md`.
-- Chưa có dữ liệu phản hồi người dùng thật và chưa đo latency của endpoint chat/model thật.
+## 2. Phạm vi revision thực tế
 
-Không có source, test, script hay cấu hình nào được sửa trong quá trình đánh giá. Artifact máy đầy đủ
-được ghi tại `D:\deploy\orbit-eval-artifacts-20260828`; các file `latest` trong `eval/results/` và báo
-cáo tổng hợp được thay bằng kết quả mới theo yêu cầu, còn các report/rerun lịch sử đã được loại bỏ.
+Ba deployment hiện không cùng commit. Theo chỉ đạo, mỗi phần được đánh giá đúng theo revision đang chạy:
 
-## 2. Môi trường đánh giá
+| Thành phần | Revision đang chạy | Nhánh deployment | Trạng thái |
+|---|---|---|---|
+| Backend Render `orbit-backend` | `def0bf3dfb4664f395d7a74bac6f23e39793870b` | `tuan` | live |
+| User Vercel | `6c8b489f51e683ccd4218956989df1d5a696b43c` | `deploy` | ready |
+| Admin Vercel | `8195003923c1a8387faf0fa1b526b267d09f60d8` | `tuan` | ready |
+| Nhánh làm việc `hau` | `3517ef82bbf566603c46cdc6fa70a0a64305b72b` | `hau` | source app không khác trực tiếp `origin/deploy`; commit này thêm tài liệu đánh giá |
 
-| Thành phần | Giá trị |
-|---|---|
-| Hệ điều hành | Windows |
-| Python | 3.13.14 |
-| Node.js | 22.12.0 |
-| npm | 10.9.0 |
-| PostgreSQL | 17.10, local isolated cluster |
-| Database test | `orbit_agent_eval_test` |
-| PostgreSQL endpoint | `127.0.0.1:55432` |
-| RAGAS application/evaluator | `openai/gpt-5.6-luna` qua OpenRouter |
-| RAGAS embedding | `openai/text-embedding-3-small` |
+Vì revision không đồng nhất, E2E xác nhận tính tương thích của tổ hợp deployment hiện tại, nhưng không
+chứng minh một release duy nhất đã được build từ cùng một commit. Đây vẫn là rủi ro phát hành.
 
-Database PostgreSQL trên là database test riêng, chỉ bind localhost và không dùng chung database
-`orbit` trong `.env`. Dữ liệu trong database này có thể bị reset bởi runner đánh giá.
+## 3. Bảng kết quả tổng hợp
 
-## 3. Kết quả đo mới
-
-### 3.1 Tổng hợp release gate
-
-| Hạng mục | Kết quả | Gate | Trạng thái |
-|---|---:|---:|---|
+| Hạng mục | Kết quả mới nhất | Gate/diễn giải | Trạng thái |
+|---|---:|---|---|
 | Backend regression | 410/410 pass | Không failure/error | **PASS** |
-| Coverage `src` có branch | 66,71% | >= 60% | **PASS** |
-| PostgreSQL checkpoint reconnect | 1/1 pass | Phải pass trên PostgreSQL thật | **PASS** |
-| Alembic fresh upgrade | Đến `20260826_25` | Upgrade từ DB trắng không lỗi | **PASS** |
-| Ruff | 0 lỗi | 0 lỗi | **PASS** |
-| Python dependency consistency | Không có broken requirement | 0 lỗi | **PASS** |
-| User frontend build | Thành công | Build thành công | **PASS** |
-| Admin frontend build | Thành công | Build thành công | **PASS** |
-| npm production audit, user | 0 vulnerability | Không high/critical | **PASS** |
-| npm production audit, admin | 0 vulnerability | Không high/critical | **PASS** |
-| RAGAS grounding | 2/4 metric đạt | Tất cả metric phải đạt | **FAIL** |
-| `/health` latency P95 | 21,238 ms | <= 5.000 ms, 100% HTTP 200 | **PASS** |
-| `/ready` latency P95 | 1.185,869 ms | <= 5.000 ms, 100% HTTP 200 | **PASS** |
-| Formal user-agent acceptance | 5/17 pass (29,4%) | >= 80% và các gate thành phần | **FAIL** |
-| Task title precision | 83,3% | >= 90% theo `metric.md` | **FAIL** |
-| Task title recall | 83,3% | >= 80% theo `metric.md` | **PASS** |
-| Task title F1 | 83,3% | >= 85% theo `metric.md` | **FAIL** |
-| Task deadline accuracy | 100% (8/8) | >= 90% theo `metric.md` | **PASS** |
-| User feedback | 0 participant | >= 5 participant | **PENDING** |
-| Chat/model latency | Chưa đo | P95 < 5 giây | **PENDING** |
+| Coverage `src` | 66,71% | >= 60% | **PASS** |
+| Alembic fresh upgrade | đến revision `20260826_25` | DB trắng nâng cấp không lỗi | **PASS** |
+| Memory harness PostgreSQL | 9/9 pass | Toàn bộ repository test dùng PostgreSQL thật | **PASS** |
+| PostgreSQL checkpoint reconnect | 1/1 pass | Ghi/đóng/mở/đọc lại được | **PASS** |
+| RAGAS | fail `faithfulness`, `answer_relevancy` | Tất cả metric phải đạt | **FAIL** |
+| Formal Agent acceptance | 5/17 pass (29,4%) | >= 80% | **FAIL** |
+| Task title precision/F1 | 83,3% / 83,3% | >= 90% / >= 85% | **FAIL** |
+| Chat staging | 10/10 HTTP 200 | P95 < 5.000 ms | **FAIL** — P95 5.242 ms |
+| Browser user login/chat/routes | login + chat + 8/8 route | Luồng chính hoạt động | **PASS** |
+| Browser admin login/routes | login + 6/6 route | Luồng chính hoạt động | **PASS** |
+| Task API E2E | create/list/update/delete: 201/200/200/204 | Tất cả thao tác thành công | **PASS** |
+| Reminder scheduler | trạng thái cuối `fired` | Reminder phải được xử lý | **PASS** |
+| WebSocket staging | handshake HTTP 403 | Kết nối và nhận event | **FAIL** |
+| Load API | 87/100 2xx, 13 HTTP 429 | Không lỗi ở tải đã chọn | **FAIL** |
+| Axe user authenticated routes | 14 serious/critical theo tổng route | 0 serious/critical | **FAIL** |
+| Axe admin authenticated routes | 11 serious/critical theo tổng route | 0 serious/critical | **FAIL** |
+| Lighthouse user login | Performance 68, Accessibility 92 | >= 80 / >= 90 | **FAIL** performance |
+| Lighthouse admin login | Performance 81, Accessibility 83 | >= 80 / >= 90 | **FAIL** accessibility |
+| Web Vitals lab LCP | user 5.353 ms, admin 3.726 ms | <= 2.500 ms | **FAIL** |
+| Web Vitals lab CLS | user 0,0027, admin 0 | <= 0,1 | **PASS** |
+| Google OAuth/Calendar thật | không chạy theo yêu cầu | Cần tài khoản Google test | **SKIP** |
+| User feedback thật | 0 participant | >= 5 participant | **PENDING** |
 
-### 3.2 Backend và coverage
+## 4. Kết quả staging chi tiết
 
-Lệnh full suite sạch, có bật PostgreSQL test và `SelectorEventLoop` trên Windows, cho kết quả:
+### 4.1 Chat/model thật và chi phí
 
-```text
-410 passed, 64 warnings in 380.37s
-Required test coverage of 60% reached. Total coverage: 66.71%
-```
+Đã gửi 10 request tuần tự đến `POST /api/v1/chat` trên Render:
 
-Coverage gồm 6.812 statement, 4.919 line được cover, 1.893 line chưa cover; 790/1.746 branch được
-cover. Coverage tổng đạt gate nhưng biên an toàn chỉ cao hơn gate 6,71 điểm phần trăm.
+| Metric | TTFB | Tổng thời gian |
+|---|---:|---:|
+| P50 | 1.763 ms | 1.764 ms |
+| P95 | 5.241 ms | 5.242 ms |
+| P99 | 7.369 ms | 7.370 ms |
+| Max | 7.901 ms | 7.902 ms |
 
-Các vùng có rủi ro coverage đáng chú ý:
+10/10 request trả HTTP 200 và Agent ở trạng thái `completed`. Endpoint hiện trả response không streaming,
+vì vậy TTFB gần như thời gian hoàn thành cả response; không được gọi đây là TTFT thật. Muốn đo TTFT phải
+có endpoint streaming/SSE/WebSocket phát token.
 
-| Vùng | Coverage | Nhận định |
-|---|---:|---|
-| `src/services/conversation_service.py` | 0,0% | Service production không có bằng chứng trực tiếp |
-| `src/services/people_intelligence_service.py` | 16,6% | Feature mới, xử lý directory/private note nhưng gần như chưa test |
-| `src/agents/tools/people_tool.py` | 39,5% | Tool mới chưa được test đầy đủ theo nhánh lỗi/quyền |
-| `src/services/chat_service.py` | 40,6% | Luồng chat quan trọng còn nhiều nhánh chưa cover |
-| `src/api/task_routes.py` | 44,4% | Các nhánh workspace/calendar sync còn thiếu test |
-| `src/services/workspace_service.py` | 44,8% | Ranh giới phân quyền workspace cần coverage cao hơn |
-| `src/api/calendar_routes.py` | 46,0% | OAuth/error path chưa được cover đầy đủ |
-| `src/api/chat_routes.py` | 48,3% | Request boundary quan trọng còn coverage thấp |
+Runtime Render được xác minh qua API là `openai/gpt-4.1-mini`. Giá cấu hình tham khảo là $0,40/1M input
+token và $1,60/1M output token. Tuy nhiên dashboard usage không tăng token hay request sau 10 lần gọi,
+nên cost/run là **UNAVAILABLE**, không phải `$0`. Cần sửa/kiểm tra pipeline ghi usage trước khi tính chi phí.
+Kết quả Agent cũ dùng 91.691 token với model khác cũng không được áp giá của model staging hiện tại.
 
-64 warning hiện tại chủ yếu là deprecation từ `google-genai`, Starlette và adapter datetime của
-`aiosqlite`. Warning chưa làm fail release gate nhưng cần theo dõi trước khi nâng dependency.
+### 4.2 Browser E2E
 
-### 3.3 PostgreSQL và migration
+Playwright với Chrome thật đã xác nhận:
 
-Các bằng chứng đã chạy trên PostgreSQL 17.10 thật:
+- User đăng nhập thành công và chuyển đến `/chat`.
+- Chat UI gửi một prompt và số message tăng từ 0 lên 2.
+- Các trang `/assistant`, `/chat`, `/tasks`, `/tasks/inbox`, `/reminders`, `/calendar`, `/memory`,
+  `/profile` đều render HTTP 200.
+- Admin đăng nhập thành công; `/admin`, `/admin/users`, `/admin/user-data`, `/admin/ai`,
+  `/admin/ai-usage`, `/admin/audit-log` đều render HTTP 200.
+- User app phát sinh một console error HTTP 409 khi Calendar chưa kết nối Google; admin không có console error.
 
-- `AsyncPostgresSaver` ghi checkpoint, đóng pool, mở pool mới và đọc lại checkpoint thành công.
-- Alembic nâng một database trắng qua toàn bộ revision đến `20260826_25` thành công.
-- Backend `/ready` trả 100/100 HTTP 200 sau migration.
+### 4.3 Task, reminder, WebSocket và load
 
-Trên Windows, test psycopg async phải chạy với `SelectorEventLoop`. Nếu chạy pytest trực tiếp bằng
-event loop mặc định, test sẽ timeout với thông báo psycopg không hỗ trợ `ProactorEventLoop`; đây là
-lỗi cách khởi chạy môi trường Windows, không phải lỗi kết nối PostgreSQL.
+- Task staging: tạo, nhìn thấy trong danh sách, cập nhật và xóa đều thành công.
+- Reminder staging: tạo thành công và scheduler chuyển trạng thái sang `fired`; sau đó dữ liệu test được xóa.
+- WebSocket `wss://orbit-backend-xkgq.onrender.com/api/v1/ws` trả HTTP 403 ngay khi handshake cho cả
+  kịch bản realtime. Vì không kết nối được, message overhead và delivery latency không thể đo.
+- Load 100 request với concurrency 5: 87 HTTP 200 và 13 HTTP 429; P50 306 ms, P95 1.203 ms,
+  max 3.464 ms. Rate limit đang bảo vệ hệ thống, nhưng bài load theo tiêu chí tất cả request thành công
+  vẫn FAIL. Muốn đo throughput hạ tầng riêng cần một profile/token test được cấp rate-limit phù hợp.
+- Không thấy một queue độc lập trong bằng chứng runtime; lần này chỉ chứng minh scheduler bằng thay đổi
+  trạng thái reminder, không chứng minh khả năng chịu lỗi của distributed queue.
 
-### 3.4 Frontend, dependency và bundle
+### 4.4 Memory trên PostgreSQL thật
 
-- User app: 728 module được transform, build thành công trong khoảng 2,93 giây.
-- Admin app: 52 module được transform, build thành công trong khoảng 1,56 giây.
-- `npm audit --omit=dev --audit-level=high`: 0 vulnerability cho cả hai app.
-- `pip check`: không có broken requirement.
-- `ruff check src tests scripts`: pass.
+Đã chạy lại toàn bộ 9 test của `tests/test_memory_harness.py` bằng fixture ngoài repository, đặt
+`DATABASE_URL` trước khi import ứng dụng và cố ý không nạp fixture SQLite trong `tests/conftest.py`.
 
-User build có cảnh báo chunk vượt 500 kB. Chunk `CalendarPage` là **1.058,80 kB** sau minify
-(136,43 kB gzip). Đây không phải lỗi chức năng nhưng là rủi ro tải/parse JavaScript trên thiết bị yếu;
-nên đo Web Vitals trên staging và cân nhắc code splitting theo route/thư viện lịch.
+Kết quả: **9/9 PASS trong 10,57 giây** trên PostgreSQL 17.10, database riêng
+`orbit_agent_eval_test` tại `127.0.0.1:55432`. Test bao phủ retrieval, TTL/lifecycle, cross-user isolation,
+semantic retrieval, replacement/provenance, context budget, heartbeat compaction và maintenance.
 
-### 3.5 RAGAS mới
+PostgreSQL local cô lập là lựa chọn đúng cho harness vì test drop/create schema và ghi dữ liệu phá hủy.
+Không chạy harness này thẳng vào database production của Render. Deployment được kiểm tra qua API E2E;
+database test local dùng để chứng minh repository thực sự tương thích PostgreSQL thay vì SQLite.
 
-Dataset: 5 case summary tổng hợp, không chứa dữ liệu production.
+### 4.5 Accessibility và Web Vitals
 
-| Metric | Điểm | Gate | Trạng thái |
-|---|---:|---:|---|
-| Faithfulness | 0,666667 | >= 0,70 | **FAIL** |
-| Answer relevancy | 0,405250 | >= 0,70 | **FAIL** |
-| Context precision | 0,844444 | >= 0,60 | **PASS** |
-| Context recall | 1,000000 | >= 0,60 | **PASS** |
+Axe trên các route đã đăng nhập ghi nhận lỗi lặp theo từng trang. Các nhóm chính gồm `button-name`,
+`select-name`, `label`, `color-contrast`, `nested-interactive`, `heading-order` và `landmark-unique`.
+Tổng theo route là 14 serious/critical ở user và 11 ở admin; con số này có thể lặp cùng một nguyên nhân
+trên nhiều route.
 
-Kết luận: model giữ được đầy đủ context cần thiết và context retrieval có precision tốt, nhưng câu
-trả lời chưa vượt gate về bám nguồn và độ liên quan theo grader. Không được lấy trung bình bốn metric
-để ghi đè hai gate fail.
+Lighthouse navigation lab trên hai trang login:
 
-Có một sai lệch trong thiết kế benchmark cần ghi nhận khi diễn giải kết quả: prompt production trong
-`summarize_tool.py` bắt model đổi ngày tương đối thành ngày tuyệt đối theo thời điểm chạy, trong khi
-dataset/reference RAGAS vẫn giữ các cụm như “ngày mai” và “thứ Sáu tuần sau”. Current context đưa cho
-grader không chứa timestamp đánh giá, nên một số ngày tuyệt đối hợp lý vẫn có thể bị tính là unsupported.
-Điều này có thể làm giảm faithfulness, nhưng không giải thích thay cho `answer_relevancy` rất thấp và
-không đủ căn cứ để đổi trạng thái FAIL thành PASS.
+| App | Performance | Accessibility | Best Practices | SEO | FCP | LCP | TBT | CLS |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| User | 68 | 92 | 96 | 82 | 4.663 ms | 5.353 ms | 0,5 ms | 0,0027 |
+| Admin | 81 | 83 | 96 | 82 | 3.649 ms | 3.726 ms | 0 ms | 0 |
 
-### 3.6 Formal Agent acceptance mới
+INP không có trong lần navigation-only này. INP cần dữ liệu RUM từ người dùng thật hoặc một bài tương tác
+riêng; không được tự suy diễn từ TBT. Chunk Calendar 1.058,80 kB minified ở baseline build vẫn là rủi ro.
 
-Runner dùng 17 case trong `user_agent_acceptance_v1.json`, PostgreSQL test cô lập và model
-`openai/gpt-5.6-luna` qua OpenRouter. Kết quả được tạo lúc `2026-08-28T05:57:27Z` trên code mới.
+## 5. Những phần chưa thể kết luận PASS
 
-| Metric | Kết quả | Gate | Trạng thái |
-|---|---:|---:|---|
-| Case pass rate | 29,4% (5/17) | >= 80% | **FAIL** |
-| Tool routing accuracy | 60,0% | >= 95% | **FAIL** |
-| Task precision | 66,7% | >= 90% | **FAIL** |
-| Task recall | 100% | >= 90% | **PASS** |
-| Task due accuracy | 100% | >= 90% | **PASS** |
-| Memory isolation pass rate | 0% | 100% | **FAIL** |
-| Forbidden claim rate | 0% | 0% | **PASS** |
-| Side effect trước HITL | 0% | 0% | **PASS** |
+1. Google Sign-In, OAuth consent, refresh token và thao tác event thật: **SKIP theo yêu cầu người dùng**.
+2. TTFT token thật: endpoint `/api/v1/chat` không streaming.
+3. WebSocket delivery/latency: handshake staging đang bị 403.
+4. Cost/run: staging không ghi usage cho 10 request thành công.
+5. INP/field Web Vitals: chưa có RUM hoặc bài tương tác chuyên biệt.
+6. User satisfaction: chưa có tối thiểu 5 người tham gia thật.
+7. Release đồng nhất: backend, user và admin chưa cùng revision.
 
-Các case pass: `ROUTE-01`, `ROUTE-02`, `TASK-01`, `MEM-CANDIDATE-01`, `READ-01`. Mười hai case còn
-lại fail, tập trung ở reminder/HITL routing, summary, multi-task extraction, memory retrieval/isolation
-và `SEC-01`. Latency Agent P50 là 5,276 giây, P95 là 11,889 giây. `unsupported_claim_rate=75%` và
-memory isolation 0% là rủi ro nghiêm trọng cần phân tích theo từng check trước release.
+## 6. Cách triển khai và chạy lại đánh giá
 
-Artifact mới duy nhất là `eval/results/agent_acceptance_latest.json/.md`; hai artifact rerun lịch sử
-đã bị xóa để tránh nhầm kết quả.
+### 6.1 Cấu hình an toàn
 
-### 3.7 Task extraction mới
+Sao chép `.env.example` thành `.env`, chỉ điền secret trong `.env`. Không commit password, Render token,
+Vercel token hoặc model key. Dùng tài khoản staging riêng và bật `E2E_ALLOW_TEST_DATA_WRITE=true` chỉ khi
+cho phép runner tạo rồi xóa task/reminder test.
 
-Runner dùng model `openai/gpt-5.6-luna`, ngày neo `2026-08-28`, timezone `Asia/Ho_Chi_Minh` và 13 case
-hiện có trong code mới.
+Các URL/ID công khai đã được điền trong `.env.example`. Với lần đánh giá này không cần
+`VERCEL_AUTOMATION_BYPASS_SECRET`; direct admin public URL được dùng thay cho deployment bị Vercel bảo vệ.
 
-| Metric | Kết quả | Gate runner | Gate sản phẩm |
-|---|---:|---:|---:|
-| Title precision | 83,3% | PASS (>= 70%) | **FAIL** (>= 90%) |
-| Title recall | 83,3% | PASS (>= 70%) | **PASS** (>= 80%) |
-| Title F1 | 83,3% | PASS (>= 70%) | **FAIL** (>= 85%) |
-| Date accuracy | 100% (8/8) | PASS (>= 70%) | **PASS** (>= 90%) |
+### 6.2 Xác minh revision trước khi đo
 
-Hai case miss là `single_task_relative_date` và `two_speakers_two_tasks`. Vì threshold trong runner
-(70%) thấp hơn release gate chính thức trong `metric.md`, báo cáo release dùng gate sản phẩm và giữ
-trạng thái FAIL cho precision/F1 dù script trả exit code 0.
+Qua Render API, lấy latest live deploy và commit cho backend. Qua Vercel API, lọc deployment
+`target=production` của hai project và ghi `githubCommitSha`. Nếu ba SHA khác nhau, phải ghi kết quả theo
+từng component giống mục 2, không tuyên bố toàn hệ thống đang cùng một release.
 
-### 3.8 Latency local
+### 6.3 Chạy PostgreSQL memory harness
 
-Mỗi endpoint được warm-up 10 request, sau đó đo 100 request với concurrency 10 trên backend local và
-PostgreSQL test local.
-
-| Endpoint | Success | P50 | P95 | P99 | Max |
-|---|---:|---:|---:|---:|---:|
-| `GET /health` | 100% | 13,250 ms | 21,238 ms | 23,765 ms | 24,403 ms |
-| `GET /ready` | 100% | 963,389 ms | 1.185,869 ms | 1.344,410 ms | 1.412,458 ms |
-
-`/ready` pass gate 5 giây nhưng chậm hơn `/health` khoảng hai bậc độ lớn vì kiểm tra DB/schema cho mỗi
-request. Đây là baseline local, không thay thế đo staging/production có network latency và connection
-pool thực tế. Chưa có kết quả `/api/v1/chat` vì app provider hiện chưa có credential tương ứng.
-
-## 4. Khoảng trống và rủi ro ưu tiên
-
-### P0 — chặn release
-
-1. **RAGAS fail hai gate.** Cần phân tích failure theo case, cố định quy ước ngày tương đối/tuyệt đối,
-   chạy lại trên dataset frozen và chỉ release khi cả bốn metric đạt.
-2. **Formal Agent mới fail.** Chỉ 5/17 case pass; routing 60%, memory isolation 0% và unsupported claim
-   rate 75% chưa đủ an toàn để release.
-3. **Task extraction chưa đạt gate sản phẩm.** Precision và F1 cùng 83,3%, thấp hơn ngưỡng tương ứng
-   90% và 85%, dù runner nội bộ với threshold 70% báo pass.
-4. **Thiếu user validation và chat latency.** CSV feedback đang có 0 participant; chưa đo model thật
-   trên endpoint chat.
-
-### P1 — nên xử lý trước production pilot
-
-1. **People intelligence gần như chưa có test trực tiếp.** Service mới có coverage 16,6%, được gọi từ
-   planner và có thể đưa email, role, interaction metrics và private note của người dùng vào prompt.
-   Cần test permission, workspace isolation, revoked membership, prompt injection trong private note,
-   query ranking và giới hạn dữ liệu trước khi coi feature này là production-ready.
-2. **Memory harness không thực sự chứng minh PostgreSQL như README mô tả.** `tests/conftest.py` đặt
-   `DATABASE_URL=sqlite+aiosqlite:///:memory:` trước khi import application; `run_memory_harness.py`
-   chỉ kiểm tra `TEST_DATABASE_URL` rồi gọi pytest, không map URL đó thành database runtime. Vì vậy
-   memory/agent-quality harness hiện chứng minh logic repository trên SQLite. Chỉ test checkpoint riêng
-   trong `test_postgres_checkpointer.py` thực sự dùng PostgreSQL.
-3. **Coverage thấp ở các boundary quan trọng.** Chat, workspace, task, calendar và service mới còn
-   nhiều nhánh error/authorization chưa có bằng chứng.
-4. **Bundle Calendar lớn.** Cần đo tải trang thật và tách chunk nếu ảnh hưởng LCP/INP.
-5. **Cấu hình model mặc định của deployment chưa sẵn sàng.** `.env` chọn Google nhưng chưa có
-   `GOOGLE_API_KEY`. Formal evaluation chạy được qua cấu hình OpenAI-compatible/OpenRouter chỉ đặt ở
-   process runtime; cấu hình production thực tế vẫn phải được xác nhận riêng.
-
-## 5. Cách triển khai đánh giá có thể tái lập
-
-### 5.1 Nguyên tắc an toàn
-
-- Luôn dùng database disposable có tên kết thúc bằng `_test`, `_tests` hoặc `_harness`.
-- Không đặt `TEST_DATABASE_URL` bằng `DATABASE_URL` của dev/staging/production.
-- Không commit API key, database password, raw chat hoặc dữ liệu cá nhân vào artifact.
-- Ghi commit SHA, tree SHA, model, dataset version, timestamp và timezone trong mỗi report.
-- Kết quả thiếu phải là `PENDING`/`BLOCKED`, không tự chuyển thành PASS.
-- Formal agent runner reset toàn bộ `public` schema; tuyệt đối không trỏ nó vào database dùng chung.
-
-### 5.2 Chuẩn bị dependency
+Database phải là database test có thể xóa schema, tuyệt đối không dùng `DATABASE_URL` production:
 
 ```powershell
+& "C:\Program Files\PostgreSQL\17\bin\pg_ctl.exe" `
+  -D "D:\deploy\.orbit-postgres-eval-20260828" `
+  -o "-p 55432" start
+
 cd D:\deploy\copy_build_phase
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[dev,eval]"
-
-cd Frontend\user
-npm ci
-cd ..\admin
-npm ci
-cd ..\..
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://orbit_eval@127.0.0.1:55432/orbit_agent_eval_test"
+python -m pytest D:\deploy\.orbit-pg-memory-harness -q `
+  --junitxml=eval/results/memory-harness-postgres.junit.xml
 ```
 
-### 5.3 Tạo PostgreSQL test
+Điểm kiểm soát quan trọng: `DATABASE_URL` phải được đặt trước khi import `src.db.session`, và runner không
+được nạp `tests/conftest.py` đang thay repository bằng SQLite.
 
-Cách khuyến nghị nếu Docker hoạt động:
+### 6.4 Chạy staging benchmark và browser E2E
 
 ```powershell
-docker run --name orbit-eval-postgres `
-  -e POSTGRES_USER=orbit_eval `
-  -e POSTGRES_PASSWORD=<strong-test-password> `
-  -e POSTGRES_DB=orbit_agent_eval_test `
-  -p 127.0.0.1:55432:5432 `
-  -d postgres:17
+cd D:\deploy\.orbit-e2e-tools
+node chat-benchmark.mjs
+node realtime-load.mjs
+node browser-e2e.mjs
 
-$EvalDbUrl = "postgresql+asyncpg://orbit_eval:<url-encoded-password>@127.0.0.1:55432/orbit_agent_eval_test"
+node .\node_modules\lighthouse\cli\index.js `
+  "https://c3-app-132-auo2.vercel.app/login" `
+  --chrome-path="C:\Program Files\Google\Chrome\Application\chrome.exe" `
+  --chrome-flags="--headless --no-sandbox --disable-gpu" `
+  --only-categories=performance,accessibility,best-practices,seo `
+  --output=json `
+  --output-path="D:\deploy\copy_build_phase\eval\results\lighthouse-user-staging.raw.json" `
+  --quiet
 ```
 
-Lần đánh giá trong báo cáo này dùng PostgreSQL 17 local cluster riêng vì Docker daemon không chạy:
+Chạy tương tự cho admin URL. Sau mỗi lần chạy phải kiểm tra cleanup dữ liệu test, tách HTTP 429 khỏi lỗi
+5xx và ghi rõ TTFB không phải TTFT nếu endpoint không streaming.
 
-```powershell
-$PgBin = "C:\Program Files\PostgreSQL\17\bin"
-$EvalData = "D:\deploy\.orbit-postgres-eval-20260828"
+### 6.5 Quy tắc chấm
 
-& "$PgBin\initdb.exe" -D $EvalData -U orbit_eval -A trust --encoding=UTF8 --locale=C
-& "$PgBin\pg_ctl.exe" -D $EvalData -l "$EvalData\postgres.log" `
-  -o '"-h 127.0.0.1 -p 55432"' -w start
-& "$PgBin\createdb.exe" -h 127.0.0.1 -p 55432 -U orbit_eval `
-  -T template0 -E UTF8 orbit_agent_eval_test
+- `PASS`: có artifact mới và đạt gate.
+- `FAIL`: đã đo nhưng không đạt gate hoặc luồng không chạy được.
+- `SKIP`: chủ động loại khỏi phạm vi; không được tính như PASS.
+- `PENDING`: chưa có dữ liệu đủ tin cậy.
+- Không tính cost khi token usage không được ghi; không coi usage delta 0 là chi phí thật bằng 0.
+- Không chạy harness phá hủy trên production database.
 
-$EvalDbUrl = "postgresql+asyncpg://orbit_eval@127.0.0.1:55432/orbit_agent_eval_test"
-```
+## 7. Artifact mới nhất
 
-`trust` chỉ chấp nhận được cho cluster test disposable bind tại localhost. Không dùng cấu hình này
-cho server chia sẻ hoặc production.
+- `results/latency-chat-staging-latest.json` / `.md`
+- `results/realtime-load-staging-latest.json` / `.md`
+- `results/browser-e2e-staging-latest.json` / `.md`
+- Ảnh chụp chứa dữ liệu tài khoản staging được giữ ngoài Git tại
+  `D:\deploy\orbit-eval-artifacts-20260828\browser-*-staging.png`
+- `results/memory-harness-postgres-latest.json` / `.md`
+- `results/memory-harness-postgres.junit.xml`
+- `results/lighthouse-staging-latest.json` / `.md`
+- `results/lighthouse-user-staging.raw.json`, `results/lighthouse-admin-staging.raw.json`
+- `results/agent_acceptance_latest.json` / `.md`
+- `results/ragas-latest.json` / `.md`
 
-Sau khi hoàn tất đánh giá, có thể dừng instance mà không xóa dữ liệu test:
-
-```powershell
-# Nếu dùng Docker
-docker stop orbit-eval-postgres
-
-# Nếu dùng local cluster của báo cáo này
-& "$PgBin\pg_ctl.exe" -D $EvalData -w stop
-```
-
-Chỉ xóa container/data directory khi đã xác nhận không cần giữ artifact hoặc tái chạy đánh giá.
-
-### 5.4 Kiểm tra migration PostgreSQL
-
-```powershell
-$env:DATABASE_URL = $EvalDbUrl
-$env:APP_ENV = "test"
-.\.venv\Scripts\python.exe -m alembic upgrade head
-.\.venv\Scripts\python.exe -m alembic current
-Remove-Item Env:DATABASE_URL
-Remove-Item Env:APP_ENV
-```
-
-Expected: revision hiện tại là `20260826_25`, không có exception.
-
-### 5.5 Chạy full backend suite và coverage trên Windows
-
-Không dùng Proactor event loop cho psycopg async. Dùng thư mục tạm mới cho mỗi lần chạy để tránh
-`WinError 5` từ pytest `tmp_path` cũ.
-
-```powershell
-$ArtifactDir = "D:\deploy\orbit-eval-artifacts-$(Get-Date -Format yyyyMMdd-HHmmss)"
-$BaseTemp = "D:\deploy\orbit-pytest-$(Get-Date -Format yyyyMMdd-HHmmss)"
-New-Item -ItemType Directory -Force -Path $ArtifactDir | Out-Null
-$env:TEST_DATABASE_URL = $EvalDbUrl
-
-.\.venv\Scripts\python.exe -c @"
-import asyncio
-import pytest
-
-asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-raise SystemExit(pytest.main([
-    "tests", "-q", "-p", "no:cacheprovider",
-    "--basetemp=$($BaseTemp -replace '\\', '/')",
-    "--cov=src", "--cov-branch", "--cov-fail-under=60",
-    "--cov-report=term",
-    "--cov-report=json:$($ArtifactDir -replace '\\', '/')/coverage.json",
-    "--junitxml=$($ArtifactDir -replace '\\', '/')/test-results.junit.xml",
-]))
-"@
-
-Remove-Item Env:TEST_DATABASE_URL
-```
-
-Expected: 410 test pass, không skip PostgreSQL checkpoint, coverage >= 60%.
-
-Có thể chạy riêng checkpoint để chẩn đoán nhanh:
-
-```powershell
-$env:TEST_DATABASE_URL = $EvalDbUrl
-.\.venv\Scripts\python.exe -c @"
-import asyncio
-import pytest
-asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-raise SystemExit(pytest.main(["tests/test_agents/test_postgres_checkpointer.py", "-q"]))
-"@
-Remove-Item Env:TEST_DATABASE_URL
-```
-
-### 5.6 Static check, build và dependency audit
-
-```powershell
-.\.venv\Scripts\python.exe -m pip check
-.\.venv\Scripts\ruff.exe check src tests scripts
-
-cd Frontend\user
-npm run build
-npm audit --omit=dev --audit-level=high
-
-cd ..\admin
-npm run build
-npm audit --omit=dev --audit-level=high
-cd ..\..
-```
-
-### 5.7 Chạy RAGAS
-
-RAGAS dùng OpenRouter và tiêu tốn quota. Khóa model/dataset trước khi so sánh hai lần chạy.
-
-```powershell
-$env:OPENROUTER_API_KEY = "<secret>"
-$env:RAGAS_APPLICATION_MODEL = "openai/gpt-5.6-luna"
-$env:RAGAS_EVALUATOR_MODEL = "openai/gpt-5.6-luna"
-$env:RAGAS_EMBEDDING_MODEL = "openai/text-embedding-3-small"
-
-.\.venv\Scripts\python.exe scripts/eval_ragas.py `
-  --output-json "$ArtifactDir\ragas.json" `
-  --output-md "$ArtifactDir\ragas.md"
-
-Remove-Item Env:OPENROUTER_API_KEY
-```
-
-Gate hiện tại: faithfulness và answer relevancy >= 0,70; context precision và recall >= 0,60.
-Runner trả exit code 1 nếu bất kỳ gate nào fail; exit code 1 có report hợp lệ khác với lỗi runner/credential.
-
-### 5.8 Chạy formal user-agent acceptance
-
-Runner này dùng provider của ứng dụng, không dùng `OPENROUTER_API_KEY` của RAGAS. Ví dụ với Google:
-
-```powershell
-$env:LLM_PROVIDER = "google"
-$env:MODEL_NAME = "gemini-2.5-flash"
-$env:GOOGLE_API_KEY = "<secret>"
-$env:AGENT_EVAL_DATABASE_URL = $EvalDbUrl
-
-.\.venv\Scripts\python.exe scripts/eval_user_agent.py `
-  --json-report "$ArtifactDir\agent-acceptance.json" `
-  --markdown-report "$ArtifactDir\agent-acceptance.md"
-
-Remove-Item Env:GOOGLE_API_KEY
-Remove-Item Env:AGENT_EVAL_DATABASE_URL
-```
-
-Runner có 17 case, gọi model thật, tiêu tốn quota và reset schema test trước/sau run. Không đánh giá
-release bằng artifact cũ nếu source revision hoặc model thay đổi.
-
-### 5.9 Chạy task extraction
-
-```powershell
-$env:LLM_PROVIDER = "google"
-$env:MODEL_NAME = "gemini-2.5-flash"
-$env:GOOGLE_API_KEY = "<secret>"
-
-.\.venv\Scripts\python.exe scripts/eval_extract_tasks.py `
-  --as-of 2026-08-28 `
-  --output "$ArtifactDir\task-extraction.json"
-
-Remove-Item Env:GOOGLE_API_KEY
-```
-
-Ngày `--as-of` phải cố định trong report để chấm “hôm nay/ngày mai/thứ Hai tới” tái lập được.
-
-### 5.10 Đo latency local/staging
-
-Terminal A, chạy backend bằng launcher Windows có Selector event loop:
-
-```powershell
-$env:DATABASE_URL = $EvalDbUrl
-$env:APP_ENV = "test"
-.\.venv\Scripts\python.exe scripts/run_dev.py
-```
-
-Terminal B:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/benchmark_api_latency.py `
-  --base-url http://127.0.0.1:8000 --endpoint /health `
-  --requests 100 --warmup 10 --concurrency 10 `
-  --output-json "$ArtifactDir\latency-health.json" `
-  --output-md "$ArtifactDir\latency-health.md"
-
-.\.venv\Scripts\python.exe scripts/benchmark_api_latency.py `
-  --base-url http://127.0.0.1:8000 --endpoint /ready `
-  --requests 100 --warmup 10 --concurrency 10 `
-  --output-json "$ArtifactDir\latency-ready.json" `
-  --output-md "$ArtifactDir\latency-ready.md"
-```
-
-Với `/api/v1/chat`, cần bearer token test, provider key hợp lệ và phải ghi rõ model, dataset, warm/cold,
-concurrency, timeout và tỷ lệ provider error. Kết quả local không thay thế benchmark staging.
-
-### 5.11 User feedback
-
-1. Thu thập tối thiểu 5 participant ẩn danh theo `eval/user_feedback/README.md`.
-2. Không ghi email, số điện thoại hoặc raw chat vào CSV.
-3. Chạy:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/summarize_user_feedback.py `
-  --input eval\user_feedback\responses.csv `
-  --minimum-participants 5 `
-  --output-json "$ArtifactDir\user-feedback.json" `
-  --output-md "$ArtifactDir\user-feedback.md"
-```
-
-### 5.12 Tổng hợp và quyết định release
-
-Chỉ chạy `scripts/generate_evaluation_evidence.py` khi chủ động muốn cập nhật file tracked
-`eval/EVALUATION_EVIDENCE.md`; script không có chế độ `--help` và chạy trực tiếp sẽ ghi file đó.
-
-Quy tắc quyết định:
-
-1. Backend test/build/static/dependency gate phải pass.
-2. Migration và PostgreSQL integration phải pass trên DB disposable.
-3. Tất cả RAGAS gate và formal acceptance gate phải pass trên artifact mới gắn commit SHA.
-4. Privacy, authorization, HITL hoặc duplicate-side-effect fail thì dừng release ngay.
-5. Feedback dưới 5 participant, chat latency chưa đo hoặc artifact cũ đều giữ trạng thái `PENDING`.
-6. Chỉ chuyển sang `PASS/RELEASE` khi không còn `FAIL`, `PENDING` hoặc bằng chứng không gắn revision ở
-   các mục P0.
-
-## 6. Việc cần làm để chuyển từ HOLD sang RELEASE
-
-1. Chuẩn hóa RAGAS date anchor giữa prompt, context và reference; phân tích từng case fail rồi chạy lại
-   trên dataset/model frozen.
-2. Phân tích 12 case formal Agent fail, ưu tiên memory isolation, unsupported claim và tool routing;
-   sau đó chạy lại đủ 17 case trên cùng model/dataset.
-3. Sửa hai nhóm lỗi task extraction (relative-date title matching và multi-speaker attribution), rồi
-   chạy lại 13 case với ngày `as-of` cố định đến khi đạt gate sản phẩm.
-4. Bổ sung bằng chứng test cho people intelligence, đặc biệt isolation/private-note injection.
-5. Sửa quy trình memory harness để PostgreSQL URL thực sự được dùng, sau đó chạy lại trên PostgreSQL.
-6. Đo `/api/v1/chat` trên staging và thu thập ít nhất 5 participant feedback.
-7. Chạy lại toàn bộ regression cuối cùng và gắn artifact với commit SHA chuẩn bị phát hành.
+Các file `latest` là nguồn kết quả hiện hành; không dùng report lịch sử để thay cho lần chạy này.

@@ -1,59 +1,43 @@
 # Evaluation Evidence — Orbit
 
-Generated at `2026-08-28T06:00:21.415828+00:00` from source revision `f37cce4`
-with uncommitted evaluation changes.
+Generated on `2026-08-28` from the current `hau` evaluation workspace and the independently deployed
+backend, user and admin revisions listed in `CODEBASE_EVALUATION_2026-08-28.md`.
 
-This report never converts missing evidence into a passing score. `PENDING` means the runner or
-protocol exists but no current result artifact is available.
+Missing evidence is never converted into a pass. `SKIP` is excluded by scope; `PENDING` has insufficient
+evidence; `FAIL` was executed and did not meet its gate.
 
-## 1. Release evidence summary
+## Current evidence summary
 
-| Evidence | Result | Gate | Status |
-|---|---:|---:|---|
-| Automated tests | 410/410 passed, 0 skipped | No failures/errors | PASS |
-| Source coverage | 66.7% | >=60% | PASS |
-| Formal Agent acceptance | 29.4% case pass | Dataset gates | FAIL |
-| Task title F1 | 83.3% | >=85% product gate | FAIL |
-| Deadline accuracy | 100.0% | >=90% product gate | PASS |
-| RAGAS grounding | 66.7% faithfulness | All RAGAS gates | FAIL |
-| API latency P95 | 21.2 ms | Configured runner gate | PASS |
-| User feedback | Pending | >=5 participants | PENDING |
+| Evidence | Result | Status | Artifact |
+|---|---:|---|---|
+| Automated backend tests | 410/410 passed | PASS | `results/test-results.junit.xml` |
+| Source coverage | 66.71% | PASS | `results/coverage-latest.json` |
+| PostgreSQL memory harness | 9/9 passed | PASS | `results/memory-harness-postgres-latest.json` |
+| Formal Agent acceptance | 5/17 passed | FAIL | `results/agent_acceptance_latest.json` |
+| RAGAS grounding | faithfulness/relevancy below gate | FAIL | `results/ragas-latest.json` |
+| Chat staging | 10/10 success; total P95 5,242 ms | FAIL | `results/latency-chat-staging-latest.json` |
+| Browser user/admin | login, chat and 14 routes rendered | PASS functional | `results/browser-e2e-staging-latest.json` |
+| Staging task/reminder | CRUD passed; reminder reached `fired` | PASS | `results/realtime-load-staging-latest.json` |
+| Staging WebSocket | handshake HTTP 403 | FAIL | `results/realtime-load-staging-latest.json` |
+| API load | 87/100 HTTP 2xx; 13 HTTP 429 | FAIL | `results/realtime-load-staging-latest.json` |
+| Authenticated accessibility | user 14/admin 11 serious-or-critical route findings | FAIL | `results/browser-e2e-staging-latest.json` |
+| Lighthouse/Web Vitals | both LCP values above 2,500 ms | FAIL | `results/lighthouse-staging-latest.json` |
+| Real Google OAuth/Calendar | excluded by user | SKIP | none |
+| Real participant feedback | 0 participant | PENDING | `results/user-feedback-latest.json` |
 
-## 2. Current measured AI quality
+## Important interpretation
 
-- Formal acceptance: `2026-08-28T05:57:27.076656+00:00` using
-  `openai/openai/gpt-5.6-luna`.
-- Task extraction: `13` cases; title precision
-  `83.3%`, recall
-  `83.3%`, F1 `83.3%`.
-- The task runner's internal threshold is 70%, but the canonical product gates in `metric.md` require
-  precision >=90%, recall >=80%, F1 >=85% and deadline accuracy >=90%; release status follows the
-  stricter product gates.
-- Missing or failed gates remain release risks even when deterministic unit tests pass.
+- `/api/v1/chat` is non-streaming. Its measured TTFB is not true token-first latency.
+- Render runtime configuration reports `openai/gpt-4.1-mini`, but the usage dashboard recorded no token or
+  request delta after ten successful chat calls. Exact cost/run is therefore unavailable, not zero.
+- The PostgreSQL memory run bypassed the repository SQLite fixture and created/dropped schema only in a
+  disposable local PostgreSQL database.
+- Backend, user and admin are not deployed from one commit. Functional E2E applies to the current mixed
+  deployment, not to a synchronized release artifact.
+- INP requires real-user monitoring or a controlled interaction benchmark and was not inferred from TBT.
 
-## 3. Reproducible commands
+## Reproduction
 
-```powershell
-python scripts/run_coverage.py
-python scripts/benchmark_api_latency.py --base-url http://127.0.0.1:8000 --endpoint /health
-python scripts/eval_user_agent.py
-python scripts/eval_extract_tasks.py
-python scripts/eval_ragas.py
-python scripts/summarize_user_feedback.py
-python scripts/generate_evaluation_evidence.py
-```
-
-## 4. Traceability and evidence locations
-
-- Requirement-to-test-to-code map: [`TRACEABILITY_MATRIX.md`](TRACEABILITY_MATRIX.md)
-- Manual scenarios: [`../MANUAL_TEST_CASES.md`](../MANUAL_TEST_CASES.md)
-- Screenshot/video evidence: [`../Deliverables/evidence/`](../Deliverables/evidence/)
-- Formal acceptance: [`results/agent_acceptance_latest.md`](results/agent_acceptance_latest.md)
-- Evaluation protocols and commands: [`README.md`](README.md)
-
-## 5. Evidence still requiring human/external execution
-
-- RAGAS and formal Agent evaluation require real model credentials and consume quota.
-- User satisfaction requires real anonymized participants; no synthetic rating is accepted.
-- Latency must be measured against the actual target environment and recorded with its URL/model.
-- Coverage/JUnit artifacts must be regenerated after material source changes.
+Detailed environment setup, safety constraints and exact commands are in
+[`CODEBASE_EVALUATION_2026-08-28.md`](CODEBASE_EVALUATION_2026-08-28.md). Requirement mapping is in
+[`TRACEABILITY_MATRIX.md`](TRACEABILITY_MATRIX.md).

@@ -1,0 +1,15 @@
+{
+  "run_at": "2026-08-28T14:21:28.154Z",
+  "database_engine": "PostgreSQL 17.10",
+  "database_host": "127.0.0.1",
+  "database_port": 55432,
+  "database_name": "orbit_agent_eval_test",
+  "isolated_disposable_database": true,
+  "sqlite_fixture_bypassed": true,
+  "tests": 9,
+  "passed": 9,
+  "failed": 0,
+  "errors": 0,
+  "duration_seconds": 10.57,
+  "status": "PASS"
+}

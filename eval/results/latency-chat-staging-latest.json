@@ -1,0 +1,136 @@
+{
+  "run_at": "2026-08-28T14:14:48.199Z",
+  "target": "https://orbit-backend-xkgq.onrender.com/api/v1/chat",
+  "endpoint_streaming": false,
+  "ttft_interpretation": "Endpoint is non-streaming; TTFB is response-header latency, not true first-token latency.",
+  "request_count": 10,
+  "concurrency": 1,
+  "success_count": 10,
+  "success_rate": 1,
+  "ttfb": {
+    "min_ms": 1491.795,
+    "mean_ms": 2339.65,
+    "p50_ms": 1763.266,
+    "p95_ms": 5240.914,
+    "p99_ms": 7368.594,
+    "max_ms": 7900.514
+  },
+  "total": {
+    "min_ms": 1493.498,
+    "mean_ms": 2340.692,
+    "p50_ms": 1764.217,
+    "p95_ms": 5242.076,
+    "p99_ms": 7369.926,
+    "max_ms": 7901.889
+  },
+  "model": {
+    "provider": "openai",
+    "name": "gpt-4.1-mini",
+    "source": "Render service environment verified through Render API"
+  },
+  "usage_delta": {
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "request_count": 0,
+    "estimated_cost_usd": null,
+    "unpriced_tokens": 0,
+    "cost_status": "UNAVAILABLE: staging returned responses but recorded no usage delta"
+  },
+  "pricing_usd_per_million": {
+    "input": 0.4,
+    "output": 1.6
+  },
+  "samples": [
+    {
+      "index": 1,
+      "status_code": 200,
+      "ttfb_ms": 7900.514,
+      "total_ms": 7901.889,
+      "agent_status": "completed",
+      "response_nonempty": true,
+      "error": null
+    },
+    {
+      "index": 2,
+      "status_code": 200,
+      "ttfb_ms": 1805.049,
+      "total_ms": 1806.168,
+      "agent_status": "completed",
+      "response_nonempty": true,
+      "error": null
+    },
+    {
+      "index": 3,
+      "status_code": 200,
+      "ttfb_ms": 1580.058,
+      "total_ms": 1580.752,
+      "agent_status": "completed",
+      "response_nonempty": true,
+      "error": null
+    },
+    {
+      "index": 4,
+      "status_code": 200,
+      "ttfb_ms": 1721.483,
+      "total_ms": 1722.266,
+      "agent_status": "completed",
+      "response_nonempty": true,
+      "error": null
+    },
+    {
+      "index": 5,
+      "status_code": 200,
+      "ttfb_ms": 1990.291,
+      "total_ms": 1991.194,
+      "agent_status": "completed",
+      "response_nonempty": true,
+      "error": null
+    },
+    {
+      "index": 6,
+      "status_code": 200,
+      "ttfb_ms": 1491.795,
+      "total_ms": 1493.498,
+      "agent_status": "completed",
+      "response_nonempty": true,
+      "error": null
+    },
+    {
+      "index": 7,
+      "status_code": 200,
+      "ttfb_ms": 1834.256,
+      "total_ms": 1835.58,
+      "agent_status": "completed",
+      "response_nonempty": true,
+      "error": null
+    },
+    {
+      "index": 8,
+      "status_code": 200,
+      "ttfb_ms": 1563.974,
+      "total_ms": 1564.752,
+      "agent_status": "completed",
+      "response_nonempty": true,
+      "error": null
+    },
+    {
+      "index": 9,
+      "status_code": 200,
+      "ttfb_ms": 1938.913,
+      "total_ms": 1939.72,
+      "agent_status": "completed",
+      "response_nonempty": true,
+      "error": null
+    },
+    {
+      "index": 10,
+      "status_code": 200,
+      "ttfb_ms": 1570.168,
+      "total_ms": 1571.096,
+      "agent_status": "completed",
+      "response_nonempty": true,
+      "error": null
+    }
+  ]
+}
