@@ -52,6 +52,11 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
   activeThreadRef.current=threadId
   const threadKey=(id)=>id || '__new_thread__'
   const sending=sendingThreadKeys.includes(threadKey(threadId))
+  const resizeComposer = (event) => {
+    const field = event.currentTarget
+    field.style.height = 'auto'
+    field.style.height = `${Math.min(field.scrollHeight, 120)}px`
+  }
   const markSending=(key,value)=>setSendingThreadKeys(prev => value
     ? (prev.includes(key) ? prev : [...prev,key])
     : prev.filter(item=>item!==key))
@@ -165,7 +170,7 @@ export default function PersonalAIChat({ onContext, threadId, onThreadIdChange, 
         onSubmit={e=>{e.preventDefault();send()}}
       >
         <button type="button" className="icon-btn"><i className="bi bi-plus-lg"/></button>
-        <textarea rows="1" value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Hỏi Orbit về công việc và lịch trình của bạn..." onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}}}/>
+        <textarea rows="1" value={draft} onChange={e=>setDraft(e.target.value)} onInput={resizeComposer} placeholder="Hỏi Orbit về công việc và lịch trình của bạn..." onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}}}/>
         <button className="personal-send" aria-label="Gửi" disabled={sending} onClick={e=>{e.preventDefault();send()}}><i className="bi bi-arrow-up"/></button>
       </form><small>Orbit có thể mắc lỗi. Hãy kiểm tra lại thông tin quan trọng.</small></div>
   </section>

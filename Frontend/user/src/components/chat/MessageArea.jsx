@@ -16,7 +16,12 @@ export default function MessageArea({ conversation, messages, currentUserId, onS
   // New unread marker (new conversation, or same conversation reopened) - show the button again.
   useEffect(() => { setUnreadDismissed(false) }, [firstUnreadMessageId])
 
-const submit = (e) => { e.preventDefault(); if (!draft.trim() && !attachments.length) return; const attachmentText = attachments.map(file => `[File] ${file.name}`).join('\\n'); onSend([draft.trim(), attachmentText].filter(Boolean).join('\\n')); setDraft(''); setAttachments([]); setEmojiOpen(false) }
+  const resizeComposer = (event) => {
+    const field = event.currentTarget
+    field.style.height = 'auto'
+    field.style.height = `${Math.min(field.scrollHeight, 120)}px`
+  }
+  const submit = (e) => { e.preventDefault(); if (!draft.trim() && !attachments.length) return; const attachmentText = attachments.map(file => `[File] ${file.name}`).join('\\n'); onSend([draft.trim(), attachmentText].filter(Boolean).join('\\n')); setDraft(''); setAttachments([]); setEmojiOpen(false) }
   const addEmoji = (emoji) => { setDraft(value => value + emoji); setEmojiOpen(false) }
   const onFiles = (event) => { setAttachments(files => [...files, ...Array.from(event.target.files || [])].slice(0, 5)); event.target.value = '' }
 
@@ -64,7 +69,7 @@ const submit = (e) => { e.preventDefault(); if (!draft.trim() && !attachments.le
         <div className="composer-main">
           <input ref={fileInputRef} type="file" hidden multiple onChange={onFiles} />
           <button type="button" className="icon-btn" aria-label="Attach files" title="Attach files" onClick={() => fileInputRef.current?.click()}><i className="bi bi-paperclip" /></button>
-          <input value={draft} onChange={e => setDraft(e.target.value)} placeholder={`Message ${conversation.name}...`} />
+          <textarea rows="1" value={draft} onChange={e => setDraft(e.target.value)} onInput={resizeComposer} placeholder={`Message ${conversation.name}...`} />
           <button type="button" className="icon-btn" aria-label="Choose emoji" title="Choose emoji" onClick={() => setEmojiOpen(open => !open)}><i className="bi bi-emoji-smile" /></button>
           <button className="send-btn" aria-label="Send"><i className="bi bi-send-fill" /></button>
         </div>
