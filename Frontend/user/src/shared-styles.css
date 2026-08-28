@@ -56,6 +56,9 @@ input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus
   .message-content{min-width:0;max-width:86%}
   .message-bubble{overflow-wrap:anywhere}
   .composer{flex-shrink:0;padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+  /* 16px stops iOS Safari from auto-zooming the page when the message field gets focus
+     (any input under 16px triggers the zoom, which shoved the send button off-screen) */
+  .composer-main input{font-size:16px}
   /* slim conversation header (like /assistant's): drop the non-functional phone/video
      placeholder buttons and the AI-active pill - keep back / avatar / name / AI (star) / menu */
   .header-actions .icon-btn:not(.ai-mobile-btn):not(:last-child){display:none}

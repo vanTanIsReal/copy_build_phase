@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- interactive-widget=resizes-content: when the on-screen keyboard opens, shrink the layout
+         viewport (and 100dvh) so the chat composer rides above the keyboard instead of behind it.
+         Inert on desktop (no virtual keyboard); ignored by browsers that don't support it. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#4466f2" />
     <title>Orbit — AI Work Assistant</title>
   </head>
