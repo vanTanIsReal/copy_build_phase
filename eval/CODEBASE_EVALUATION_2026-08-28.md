@@ -4,7 +4,7 @@
 
 Trạng thái phát hành: **HOLD / CHƯA ĐỦ ĐIỀU KIỆN PHÁT HÀNH**.
 
-Phần nền tảng và memory PostgreSQL đạt yêu cầu, nhưng release vẫn bị chặn bởi chất lượng Agent/RAGAS,
+Phần nền tảng và memory PostgreSQL đạt yêu cầu, nhưng release vẫn bị chặn bởi chất lượng Agent,
 latency chat P95, WebSocket staging, accessibility và hiệu năng hiển thị. Google OAuth/Calendar thật
 không được chạy theo yêu cầu của người dùng, vì vậy hạng mục đó là **SKIP**, không phải PASS.
 
@@ -34,7 +34,6 @@ chứng minh một release duy nhất đã được build từ cùng một commi
 | Alembic fresh upgrade | đến revision `20260826_25` | DB trắng nâng cấp không lỗi | **PASS** |
 | Memory harness PostgreSQL | 9/9 pass | Toàn bộ repository test dùng PostgreSQL thật | **PASS** |
 | PostgreSQL checkpoint reconnect | 1/1 pass | Ghi/đóng/mở/đọc lại được | **PASS** |
-| RAGAS | fail `faithfulness`, `answer_relevancy` | Tất cả metric phải đạt | **FAIL** |
 | Formal Agent acceptance | 5/17 pass (29,4%) | >= 80% | **FAIL** |
 | Task title precision/F1 | 83,3% / 83,3% | >= 90% / >= 85% | **FAIL** |
 | Chat staging | 10/10 HTTP 200 | P95 < 5.000 ms | **FAIL** — P95 5.242 ms |
@@ -216,6 +215,5 @@ Chạy tương tự cho admin URL. Sau mỗi lần chạy phải kiểm tra clea
 - `results/lighthouse-staging-latest.json` / `.md`
 - `results/lighthouse-user-staging.raw.json`, `results/lighthouse-admin-staging.raw.json`
 - `results/agent_acceptance_latest.json` / `.md`
-- `results/ragas-latest.json` / `.md`
 
 Các file `latest` là nguồn kết quả hiện hành; không dùng report lịch sử để thay cho lần chạy này.

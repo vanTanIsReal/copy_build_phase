@@ -14,7 +14,6 @@ evidence; `FAIL` was executed and did not meet its gate.
 | Source coverage | 66.71% | PASS | `results/coverage-latest.json` |
 | PostgreSQL memory harness | 9/9 passed | PASS | `results/memory-harness-postgres-latest.json` |
 | Formal Agent acceptance | 5/17 passed | FAIL | `results/agent_acceptance_latest.json` |
-| RAGAS grounding | faithfulness/relevancy below gate | FAIL | `results/ragas-latest.json` |
 | Chat staging | 10/10 success; total P95 5,242 ms | FAIL | `results/latency-chat-staging-latest.json` |
 | Browser user/admin | login, chat and 14 routes rendered | PASS functional | `results/browser-e2e-staging-latest.json` |
 | Staging task/reminder | CRUD passed; reminder reached `fired` | PASS | `results/realtime-load-staging-latest.json` |

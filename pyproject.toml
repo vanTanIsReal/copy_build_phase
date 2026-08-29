@@ -53,7 +53,6 @@ dev = [
 ]
 eval = [
     "openai>=1.0.0",
-    "ragas>=0.4.0",
 ]
 
 [project.urls]
@@ -68,7 +67,6 @@ markers = [
     "memory_harness: deterministic evaluation of memory retrieval, lifecycle, compaction and context contracts",
     "agent_quality_harness: deterministic evaluation of short/long memory, guardrails, ambiguity and task scoring",
     "slow: evaluation that calls a real model or external service and is excluded from normal tests",
-    "ragas: context-grounding evaluation that calls a real application LLM and evaluator LLM",
 ]
 
 [tool.coverage.run]

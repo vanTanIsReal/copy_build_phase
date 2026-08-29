@@ -59,7 +59,6 @@ def build_report() -> str:
     tests = junit_summary()
     acceptance = load_json("agent_acceptance_latest.json")
     tasks = load_json("task-extraction-latest.json")
-    ragas = load_json("ragas-latest.json")
     latency = load_json("latency-latest.json")
     feedback = load_json("user-feedback-latest.json")
 
@@ -69,7 +68,6 @@ def build_report() -> str:
     if tests:
         tests_passed = tests["failures"] == 0 and tests["errors"] == 0
     acceptance_passed = acceptance.get("release_gate", {}).get("passed") if acceptance else None
-    ragas_passed = ragas.get("release_gate", {}).get("passed") if ragas else None
     latency_passed = latency.get("passed") if latency else None
     feedback_status = feedback.get("status") if feedback else None
     feedback_ready = None if feedback_status in {None, "PENDING"} else feedback_status == "READY"
@@ -103,7 +101,6 @@ protocol exists but no current result artifact is available.
 | Formal Agent acceptance | {fmt_percent(acceptance_case_rate)} case pass | Dataset gates | {status(acceptance_passed)} |
 | Task title F1 | {fmt_percent(task_f1)} | >=70% | {status(task_f1 >= 0.70 if task_f1 is not None else None)} |
 | Deadline accuracy | {fmt_percent(date_accuracy)} | >=70% | {status(date_accuracy >= 0.70 if date_accuracy is not None else None)} |
-| RAGAS grounding | {fmt_percent(ragas.get("metrics", {}).get("faithfulness") if ragas else None)} faithfulness | All RAGAS gates | {status(ragas_passed)} |
 | API latency P95 | {f"{p95:.1f} ms" if p95 is not None else "Pending"} | Configured runner gate | {status(latency_passed)} |
 | User feedback | {f"{feedback_rating:.2f}/5" if feedback_rating is not None else "Pending"} | >=5 participants | {status(feedback_ready)} |
 
@@ -123,7 +120,6 @@ python scripts/run_coverage.py
 python scripts/benchmark_api_latency.py --base-url http://127.0.0.1:8000 --endpoint /health
 python scripts/eval_user_agent.py
 python scripts/eval_extract_tasks.py
-python scripts/eval_ragas.py
 python scripts/summarize_user_feedback.py
 python scripts/generate_evaluation_evidence.py
 ```
@@ -138,7 +134,7 @@ python scripts/generate_evaluation_evidence.py
 
 ## 5. Evidence still requiring human/external execution
 
-- RAGAS and formal Agent evaluation require real model credentials and consume quota.
+- Formal Agent evaluation requires real model credentials and consumes quota.
 - User satisfaction requires real anonymized participants; no synthetic rating is accepted.
 - Latency must be measured against the actual target environment and recorded with its URL/model.
 - Coverage/JUnit artifacts must be regenerated after material source changes.

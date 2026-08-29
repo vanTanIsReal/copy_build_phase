@@ -4,9 +4,9 @@ from pathlib import Path
 import pytest
 
 from scripts.benchmark_api_latency import percentile, summarize_latencies
-from scripts.eval_ragas import load_cases
 from scripts.run_coverage import build_command
 from scripts.summarize_user_feedback import load_responses, summarize
+from scripts.validate_agent_dataset import DEFAULT_DATASET, load_and_validate
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -34,13 +34,13 @@ def test_coverage_command_enforces_local_source_gate():
     assert any(argument.endswith("test-results.junit.xml") for argument in command)
 
 
-def test_ragas_dataset_is_non_empty_synthetic_and_unique():
-    cases = load_cases(ROOT / "eval" / "ragas" / "conversation_summary_cases.jsonl")
+def test_formal_agent_dataset_is_valid_non_empty_and_unique():
+    dataset, errors = load_and_validate(DEFAULT_DATASET)
+    cases = dataset["evaluation_cases"]
 
-    assert len(cases) >= 5
-    assert len({case["case_id"] for case in cases}) == len(cases)
-    assert all(case["retrieved_contexts"] for case in cases)
-    assert all("response" not in case for case in cases)
+    assert errors == []
+    assert len(cases) >= 15
+    assert len({case["id"] for case in cases}) == len(cases)
 
 
 def test_empty_feedback_is_pending_not_a_fake_pass():
@@ -98,14 +98,14 @@ def test_feedback_csv_is_validated_and_aggregated(tmp_path):
     assert report["consented_anonymized_quotes"] == []
 
 
-def test_openrouter_example_has_no_committed_secret():
+def test_evaluation_example_has_no_committed_secret():
     values = {}
     for line in (ROOT / ".env.example").read_text(encoding="utf-8").splitlines():
         if "=" in line and not line.lstrip().startswith("#"):
             key, value = line.split("=", 1)
             values[key] = value
 
-    assert values["OPENROUTER_API_KEY"] == ""
-    assert values["RAGAS_APPLICATION_MODEL"] == "openai/gpt-5.6-luna"
-    assert values["RAGAS_EVALUATOR_MODEL"] == "openai/gpt-5.6-luna"
-    assert values["RAGAS_EMBEDDING_MODEL"] == "openai/text-embedding-3-small"
+    assert values["E2E_USER_EMAIL"] == ""
+    assert values["E2E_USER_PASSWORD"] == ""
+    assert values["RENDER_API_KEY"] == ""
+    assert values["VERCEL_TOKEN"] == ""
