@@ -1,14 +1,13 @@
-# Evaluation Evidence — Orbit
+# Báo cáo đánh giá tổng hợp — Orbit
 
-Generated at `2026-08-29T13:26:06.606137+00:00` from source revision `17aa87d`
-with uncommitted evaluation changes.
+Tạo lúc `2026-08-29T13:34:47.802235+00:00` từ source revision cơ sở `0cfe60e`.
 
-This report never converts missing evidence into a passing score. `PENDING` means the runner or
-protocol exists but no current result artifact is available.
+Báo cáo không chuyển bằng chứng còn thiếu thành điểm đạt. `PENDING` nghĩa là đã có runner/protocol nhưng
+chưa có đủ kết quả hợp lệ hiện tại.
 
-## 1. Release evidence summary
+## 1. Tổng quan gate phát hành
 
-| Evidence | Result | Gate | Status |
+| Hạng mục | Kết quả | Gate | Trạng thái |
 |---|---:|---:|---|
 | Automated tests | 414/414 passed, 0 skipped | No failures/errors | PASS |
 | Source coverage | 66.8% | >=60% | PASS |
@@ -44,22 +43,110 @@ Kết luận phát hành tổng thể: **FAIL** vì một hoặc nhiều gate b�
 
 - **User feedback = PENDING:** mới ghi nhận 0/5 người dùng thật bắt buộc. 5 phản hồi được tạo là dữ liệu kiểm thử hư cấu đã gắn nhãn rõ ràng và không được tính vào bằng chứng phát hành.
 
-## 3. Current measured AI quality
+## 3. Kết quả chi tiết đã hợp nhất
 
-- Formal acceptance: `2026-08-29T08:22:15.022026+00:00` using
-  `openrouter/openai/gpt-4.1-mini`.
-- Task extraction: `60` cases; title precision
-  `96.0%`, recall
-  `98.0%`, F1 `97.0%`.
-- Missing or failed gates remain release risks even when deterministic unit tests pass.
+Đây là **file báo cáo duy nhất dành cho người đọc**. Các JSON trong `eval/results/` chỉ là dữ liệu máy đọc
+được giữ lại để kiểm chứng và tái lập, không phải các báo cáo cần đọc riêng.
 
-## 4. Synthetic feedback (not release evidence)
+### 3.1 Backend, coverage và PostgreSQL
 
-The synthetic demo contains `5` fictional
-participants and is labeled `INSUFFICIENT_DATA`. It is useful only to exercise the reporting pipeline and is never
-substituted for the real feedback row above.
+| Phép đo | Kết quả | Trạng thái |
+|---|---:|---|
+| Automated tests | 414/414 passed, 0 skipped | PASS |
+| Source coverage | 66.77% | PASS |
+| PostgreSQL memory/quality harness | 17/17 | PASS |
+| Database harness | PostgreSQL 17.10 tại 127.0.0.1:55432/orbit_agent_eval_test | Cô lập, không dùng production |
 
-## 5. Reproducible commands
+### 3.2 Agent acceptance và chất lượng AI
+
+Formal acceptance chạy lúc `2026-08-29T08:22:15.022026+00:00` bằng
+`openrouter/openai/gpt-4.1-mini`.
+
+| Chỉ số | Kết quả | Gate | Trạng thái |
+|---|---:|---:|---|
+| Case pass | 15/30 (50.0%) | >=80% | FAIL |
+| Tool routing | 59.3% | >=95% | FAIL |
+| Task precision/recall/F1 | 100.0% / 100.0% / 100.0% | >=90% | PASS |
+| Task due accuracy | 100.0% | >=90% | PASS |
+| Task priority accuracy | 75.0% | Thông tin | N/A |
+| Required fact recall | 79.2% | Thông tin | N/A |
+| Forbidden claim rate | 0.0% | 0% | PASS |
+| HITL pre-confirmation side effects | 0.0% | 0% | PASS |
+| Memory retrieval/isolation/expired rejection | 0.0% / 0.0% / 0.0% | Isolation 100% | FAIL |
+| Agent latency P50/P95 | 3679.57 / 6510.1 ms | Thông tin | N/A |
+| LLM judge mean / unsupported claims | 0.811111 / 22.2% | Thông tin | N/A |
+| Token / request / estimated cost | 171170 / 56 / $0.072664 | Thông tin | N/A |
+
+### 3.3 Task extraction và chống tạo task giả
+
+| Môi trường | Case/run | Precision | Recall | F1 | Date accuracy | Trạng thái |
+|---|---:|---:|---:|---:|---:|---|
+| Local OpenRouter `openai/gpt-4.1-mini` | 60 case | 96.0% | 98.0% | 97.0% | 95.3% | PASS |
+| Staging `gemini-2.5-flash` | 60 case x 3 run | 86.8%..92.5% | 93.9%..100.0% | 90.2%..96.1% | 90.5%..95.3% | PASS |
+| Non-commitment false-positive staging | 40 case | — | — | 100.0% không tạo sai | — | PASS |
+
+Bộ non-commitment gồm greeting, discussion, question, delegated-to-other và completed-past; ghi nhận
+`0` false positive,
+`17104` token và chi phí ước tính
+`$0.0028959`.
+
+### 3.4 Staging API, latency, WebSocket và scheduler
+
+| Luồng | Kết quả | Ghi chú |
+|---|---:|---|
+| Chat benchmark mới nhất | 10/10, P50 1551.483 ms, P95 4545.144 ms | Endpoint không streaming; TTFB không phải TTFT thật |
+| Summary benchmark sâu | 25/25, P95 8010.157 ms | Run staging riêng trước benchmark mới nhất |
+| Task-extraction benchmark sâu | 25/25, P95 5869.951 ms | Run staging riêng |
+| Planner benchmark sâu | 4/5, P95 8419.351 ms | Có 1 HTTP 500 sau khoảng 60,7 giây |
+| Known cost subtotal / 1000 messages | $0.152487 | Chưa gồm `proactive_extraction, rolling_summary`; không phải tổng hoàn chỉnh |
+| WebSocket | 0/5 kết nối | Unexpected server response: 403 |
+| Task CRUD | 201/200/200/204 | Create/list/update/delete PASS |
+| Reminder scheduler | fired | Scheduler fired; event WebSocket không quan sát được do handshake 403 |
+| HTTP load | 85/100 2xx; {"200": 85, "429": 15} | 15 HTTP 429, không có 5xx trong load 100 request |
+
+Benchmark sâu ghi nhận telemetry `openai/gpt-4o-mini`, còn benchmark chat mới nhất ghi nhận
+`google/gemini-2.5-flash`.
+Hai artifact có thời điểm khác nhau nên không được coi là cùng một cấu hình runtime. Usage delta của benchmark mới nhất bằng 0,
+vì vậy báo cáo **không** diễn giải thành chi phí thực bằng 0.
+
+### 3.5 Browser, accessibility và Lighthouse
+
+| Surface | Functional E2E | Serious/critical theo route | Performance | Accessibility | LCP | CLS |
+|---|---|---:|---:|---:|---:|---:|
+| User | Login + chat + 8/8 route PASS | 14 | 61 | 92 | 6505.108 ms | 0.002921 |
+| Admin | Login + 6/6 route PASS | 11 | 82 | 83 | 3642.232 ms | 0 |
+
+Các nhóm lỗi accessibility: `button-name, color-contrast, empty-table-header, heading-order, label, landmark-unique, nested-interactive, page-has-heading-one, select-name`. INP chưa đo vì
+Lighthouse navigation-only không cung cấp dữ liệu tương tác thật.
+
+### 3.6 Google Calendar-only OAuth
+
+Google Sign-In đã được loại khỏi phạm vi theo yêu cầu; chỉ luồng cấp quyền Calendar được đánh giá.
+
+| Kiểm tra | Kết quả |
+|---|---|
+| Tạo authorization URL | 200; host `accounts.google.com` |
+| Calendar scope và client ID | Có |
+| Client ID khớp cấu hình Calendar local | true |
+| Redirect URI | `https://orbit-backend-xkgq.onrender.com/api/v1/calendar/oauth/callback` |
+| Callback FRONTEND_ORIGIN khớp staging | true; `https://c3-app-132-auo2.vercel.app` |
+| Account đánh giá đã kết nối | false |
+| Google consent/token exchange | NOT_RUN |
+
+Kết luận Calendar: **PARTIAL/FAIL**. Cấu hình runtime đủ để bắt đầu OAuth, nhưng truy cập Calendar riêng tư vẫn cần
+người dùng Google hoàn tất màn consent; ứng dụng không cần dùng Google Sign-In làm cơ chế đăng nhập.
+
+### 3.7 Feedback
+
+- Feedback thật: `0/5` người, trạng thái **PENDING**.
+- Feedback mô phỏng: `5` người hư cấu,
+  task completion `80.0%`,
+  rating `3.6/5`, helpfulness
+  `4.0/5`, trust
+  `3.6/5`.
+- Dữ liệu mô phỏng chỉ kiểm thử pipeline và **không được tính** làm feedback thật hoặc gate phát hành.
+
+## 4. Lệnh tái lập
 
 ```powershell
 python scripts/run_coverage.py
@@ -70,23 +157,9 @@ python scripts/summarize_user_feedback.py
 python scripts/generate_evaluation_evidence.py
 ```
 
-## 6. Traceability and evidence locations
+## 5. Phần vẫn cần con người hoặc dữ liệu bên ngoài
 
-- Requirement-to-test-to-code map: [`TRACEABILITY_MATRIX.md`](TRACEABILITY_MATRIX.md)
-- Manual scenarios: [`../MANUAL_TEST_CASES.md`](../MANUAL_TEST_CASES.md)
-- Screenshot/video evidence: [`../Deliverables/evidence/`](../Deliverables/evidence/)
-- Formal acceptance: [`results/agent_acceptance_latest.md`](results/agent_acceptance_latest.md)
-- PostgreSQL memory harness: [`results/memory-harness-postgres-latest.md`](results/memory-harness-postgres-latest.md)
-- Staging realtime/load: [`results/realtime-load-staging-latest.md`](results/realtime-load-staging-latest.md)
-- Browser E2E/accessibility: [`results/browser-e2e-staging-latest.md`](results/browser-e2e-staging-latest.md)
-- Lighthouse: [`results/lighthouse-staging-latest.md`](results/lighthouse-staging-latest.md)
-- Calendar OAuth: [`results/calendar-oauth-staging-latest.md`](results/calendar-oauth-staging-latest.md)
-- Synthetic feedback demo: [`results/user-feedback-synthetic-demo.md`](results/user-feedback-synthetic-demo.md)
-- Evaluation protocols and commands: [`README.md`](README.md)
-
-## 7. Evidence still requiring human/external execution
-
-- User satisfaction requires real anonymized participants; no synthetic rating is accepted.
-- Calendar token exchange requires a user to complete Google's interactive consent flow.
-- INP requires real-user or controlled interaction data; navigation-only Lighthouse does not measure it.
-- Coverage/JUnit artifacts must be regenerated after material source changes.
+- Cần tối thiểu 5 người dùng thật cung cấp feedback ẩn danh; không chấp nhận rating mô phỏng.
+- Cần một người dùng hoàn tất Google Calendar consent và token exchange.
+- Cần dữ liệu tương tác thật hoặc controlled interaction để đo INP.
+- Cần chạy lại coverage/JUnit sau thay đổi source đáng kể.
