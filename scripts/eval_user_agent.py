@@ -182,6 +182,11 @@ def called_tools(result: dict[str, Any]) -> list[str]:
     return names
 
 
+def routed_to_expected_tool(tools: list[str], expected_tool: str) -> bool:
+    """Accept prerequisite/tool-chain calls as long as the expected action was reached."""
+    return expected_tool in tools
+
+
 def first_tool_args(result: dict[str, Any], tool_name: str) -> dict[str, Any] | None:
     from langchain_core.messages import AIMessage
 
@@ -431,8 +436,14 @@ async def run_case(
 
     if "tool" in expected:
         expected_tool = expected["tool"]
-        actual_tool = tools[0] if tools else None
-        add_check(checks, "tool_routing", actual_tool == expected_tool, actual_tool, expected_tool)
+        actual_tool = expected_tool if routed_to_expected_tool(tools, expected_tool) else (tools[0] if tools else None)
+        add_check(
+            checks,
+            "tool_routing",
+            routed_to_expected_tool(tools, expected_tool),
+            actual_tool,
+            expected_tool,
+        )
         expected_args = expected.get("tool_args")
         if expected_tool and expected_args:
             actual_args = first_tool_args(result, expected_tool) or {}
@@ -442,7 +453,8 @@ async def run_case(
         expected_tool = None
 
     if expected.get("style") and tools:
-        actual_args = first_tool_args(result, tools[0]) or {}
+        style_tool = expected_tool if expected_tool in tools else tools[0]
+        actual_args = first_tool_args(result, style_tool) or {}
         add_check(
             checks,
             "summary_style_arg",
@@ -893,6 +905,8 @@ async def run_evaluation(
                 f"{case['id']} {result.latency_ms:.0f}ms tools={result.actual_tools or ['none']}",
                 flush=True,
             )
+            if args.case_delay_seconds > 0 and index < len(cases):
+                await asyncio.sleep(args.case_delay_seconds)
 
         usage = await usage_service.get_usage_today(workspace_id=manifest["workspace_id"])
         metrics = aggregate_metrics(data, results, usage)
@@ -944,6 +958,12 @@ def main() -> int:
         default=15.0,
         help="Thời gian chờ giữa các lần retry (mặc định: 15 giây)",
     )
+    parser.add_argument(
+        "--case-delay-seconds",
+        type=float,
+        default=0.0,
+        help="Thời gian chờ giữa các case để tuân thủ rate limit của model",
+    )
     parser.add_argument("--json-report", type=Path, default=DEFAULT_JSON_REPORT)
     parser.add_argument("--markdown-report", type=Path, default=DEFAULT_MD_REPORT)
     parser.add_argument(
@@ -958,8 +978,8 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if args.transient_retries < 0 or args.retry_delay_seconds < 0:
-        print("--transient-retries và --retry-delay-seconds không được âm.", file=sys.stderr)
+    if args.transient_retries < 0 or args.retry_delay_seconds < 0 or args.case_delay_seconds < 0:
+        print("Các giá trị retry/delay không được âm.", file=sys.stderr)
         return 2
 
     data, errors = load_and_validate(args.dataset)

@@ -1,5 +1,12 @@
+import asyncio
 import os
 from unittest.mock import AsyncMock
+
+# psycopg's async driver cannot run on Windows' default ProactorEventLoop. Set this before
+# pytest-asyncio creates its session loop so the real PostgreSQL checkpoint integration test uses
+# the same compatible loop family as scripts/run_dev.py.
+if os.name == "nt":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # Admin configuration tests validate provider/model selection, not a live provider call.
 os.environ.setdefault("GOOGLE_API_KEY", "test-google-api-key")

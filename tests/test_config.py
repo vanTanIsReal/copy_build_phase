@@ -23,6 +23,23 @@ def test_valid_production_settings_are_accepted():
     assert settings.app_env == "production"
 
 
+def test_openrouter_production_settings_require_their_api_key():
+    with pytest.raises(ValidationError):
+        _production_settings(
+            llm_provider="openrouter",
+            google_api_key="",
+            openrouter_api_key="",
+        )
+
+    settings = _production_settings(
+        llm_provider="openrouter",
+        google_api_key="",
+        openrouter_api_key="test-openrouter-key",
+        model_name="openai/gpt-4.1-mini",
+    )
+    assert settings.llm_provider == "openrouter"
+
+
 @pytest.mark.parametrize(
     "override",
     [

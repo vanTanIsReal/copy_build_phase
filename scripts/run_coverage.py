@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = ROOT / "eval" / "results"
-BASE_TEMP = ROOT / ".tmp" / "pytest-coverage"
+# Use a per-process directory. A stale pytest base temp can become unreadable on Windows after a
+# subprocess exits, which previously turned unrelated tests using tmp_path into setup errors.
+BASE_TEMP = ROOT / ".tmp" / f"pytest-coverage-{os.getpid()}"
 
 
 def build_command(minimum: float) -> list[str]:

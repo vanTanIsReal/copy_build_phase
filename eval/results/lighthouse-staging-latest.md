@@ -1,14 +1,12 @@
-# Lighthouse / Web Vitals — Staging
+# Lighthouse Staging Evidence
 
-Đo bằng system Chrome ở chế độ Lighthouse lab trên trang đăng nhập công khai.
+- Run: `2026-08-29T13:15:42.921Z`
+- Mode: Lighthouse lab on unauthenticated login pages using system Chrome
+- Gates: performance >= 80, accessibility >= 90, LCP <= 2500 ms, CLS <= 0.1
 
-| Deployment | Performance | Accessibility | LCP | CLS | Kết quả chính |
-|---|---:|---:|---:|---:|---|
-| User | 68 | 92 | 5.353 ms | 0,0027 | Performance/LCP **FAIL** |
-| Admin | 81 | 83 | 3.726 ms | 0 | Accessibility/LCP **FAIL** |
+| Surface | Performance | Accessibility | Best practices | SEO | LCP | CLS |
+|---|---:|---:|---:|---:|---:|---:|
+| User | 61 (FAIL) | 92 (PASS) | 96 | 82 | 6505.108 ms (FAIL) | 0.002921 (PASS) |
+| Admin | 82 (PASS) | 83 (FAIL) | 96 | 82 | 3642.232 ms (FAIL) | 0 (PASS) |
 
-Gate: Performance >= 80, Accessibility >= 90, LCP <= 2.500 ms, CLS <= 0,1.
-
-INP không được suy diễn từ navigation-only Lighthouse. Muốn có INP phải thu thập RUM từ người dùng
-thật hoặc chạy kịch bản tương tác chuyên biệt. Axe E2E trên các trang đã đăng nhập được ghi trong
-`browser-e2e-staging-latest.json`.
+INP was not measured because a navigation-only Lighthouse lab run does not provide real-user interaction data.

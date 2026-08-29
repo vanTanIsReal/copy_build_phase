@@ -1,5 +1,5 @@
 {
-  "run_at": "2026-08-28T14:24:58.952Z",
+  "run_at": "2026-08-29T08:26:25.023Z",
   "browser": "system Chrome via Playwright",
   "user_revision": "6c8b489f51e6",
   "admin_revision": "8195003923c1",
@@ -17,12 +17,12 @@
       "label": "user/assistant",
       "url": "https://c3-app-132-auo2.vercel.app/assistant",
       "title": "Orbit — AI Work Assistant",
-      "body_text_length": 2366,
+      "body_text_length": 2904,
       "violations": 4,
       "serious_or_critical": 2,
       "violation_ids": [
-        "button-name:critical:4",
-        "color-contrast:serious:9",
+        "button-name:critical:3",
+        "color-contrast:serious:7",
         "heading-order:moderate:1",
         "landmark-unique:moderate:1"
       ],
@@ -32,11 +32,11 @@
       "label": "user/chat",
       "url": "https://c3-app-132-auo2.vercel.app/chat",
       "title": "Orbit — AI Work Assistant",
-      "body_text_length": 1381,
+      "body_text_length": 1387,
       "violations": 6,
       "serious_or_critical": 4,
       "violation_ids": [
-        "button-name:critical:6",
+        "button-name:critical:4",
         "color-contrast:serious:14",
         "landmark-unique:moderate:1",
         "nested-interactive:serious:2",
@@ -49,7 +49,7 @@
       "label": "user/tasks",
       "url": "https://c3-app-132-auo2.vercel.app/tasks",
       "title": "Orbit — AI Work Assistant",
-      "body_text_length": 770,
+      "body_text_length": 776,
       "violations": 4,
       "serious_or_critical": 2,
       "violation_ids": [
@@ -64,7 +64,7 @@
       "label": "user/tasks/inbox",
       "url": "https://c3-app-132-auo2.vercel.app/tasks/inbox",
       "title": "Orbit — AI Work Assistant",
-      "body_text_length": 448,
+      "body_text_length": 454,
       "violations": 1,
       "serious_or_critical": 1,
       "violation_ids": [
@@ -76,11 +76,11 @@
       "label": "user/reminders",
       "url": "https://c3-app-132-auo2.vercel.app/reminders",
       "title": "Orbit — AI Work Assistant",
-      "body_text_length": 643,
+      "body_text_length": 1123,
       "violations": 3,
       "serious_or_critical": 1,
       "violation_ids": [
-        "color-contrast:serious:7",
+        "color-contrast:serious:22",
         "heading-order:moderate:1",
         "landmark-unique:moderate:1"
       ],
@@ -90,7 +90,7 @@
       "label": "user/calendar",
       "url": "https://c3-app-132-auo2.vercel.app/calendar",
       "title": "Orbit — AI Work Assistant",
-      "body_text_length": 446,
+      "body_text_length": 452,
       "violations": 2,
       "serious_or_critical": 1,
       "violation_ids": [
@@ -103,7 +103,7 @@
       "label": "user/memory",
       "url": "https://c3-app-132-auo2.vercel.app/memory",
       "title": "Orbit — AI Work Assistant",
-      "body_text_length": 514,
+      "body_text_length": 520,
       "violations": 1,
       "serious_or_critical": 1,
       "violation_ids": [
@@ -115,7 +115,7 @@
       "label": "user/profile",
       "url": "https://c3-app-132-auo2.vercel.app/profile",
       "title": "Orbit — AI Work Assistant",
-      "body_text_length": 1393,
+      "body_text_length": 1399,
       "violations": 3,
       "serious_or_critical": 2,
       "violation_ids": [
@@ -136,11 +136,11 @@
       "url": "https://admin-nu-six-83.vercel.app/admin",
       "http_status": 200,
       "title": "Orbit Admin",
-      "body_text_length": 1344,
+      "body_text_length": 1475,
       "violations": 1,
       "serious_or_critical": 1,
       "violation_ids": [
-        "color-contrast:serious:13"
+        "color-contrast:serious:14"
       ]
     },
     {
@@ -148,11 +148,11 @@
       "url": "https://admin-nu-six-83.vercel.app/admin/users",
       "http_status": 200,
       "title": "Orbit Admin",
-      "body_text_length": 3599,
+      "body_text_length": 3665,
       "violations": 2,
       "serious_or_critical": 2,
       "violation_ids": [
-        "color-contrast:serious:32",
+        "color-contrast:serious:33",
         "select-name:critical:1"
       ]
     },
@@ -161,7 +161,7 @@
       "url": "https://admin-nu-six-83.vercel.app/admin/user-data",
       "http_status": 200,
       "title": "Orbit Admin",
-      "body_text_length": 2171,
+      "body_text_length": 2207,
       "violations": 2,
       "serious_or_critical": 2,
       "violation_ids": [
@@ -187,7 +187,7 @@
       "url": "https://admin-nu-six-83.vercel.app/admin/ai-usage",
       "http_status": 200,
       "title": "Orbit Admin",
-      "body_text_length": 812,
+      "body_text_length": 939,
       "violations": 2,
       "serious_or_critical": 2,
       "violation_ids": [

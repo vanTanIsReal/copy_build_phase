@@ -24,6 +24,8 @@ _PRICING_PER_MILLION: dict[tuple[str, str], tuple[float, float]] = {
     ("google", "gemini-2.5-flash-lite"): (0.10, 0.40),
     ("openai", "gpt-4o-mini"): (0.15, 0.60),
     ("openai", "gpt-4.1-mini"): (0.40, 1.60),
+    ("openrouter", "openai/gpt-4o-mini"): (0.15, 0.60),
+    ("openrouter", "openai/gpt-4.1-mini"): (0.40, 1.60),
     ("groq", "openai/gpt-oss-20b"): (0.075, 0.30),
     ("groq", "llama-3.1-8b-instant"): (0.05, 0.08),
 }

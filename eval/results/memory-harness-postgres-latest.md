@@ -1,10 +1,10 @@
-# Memory Harness — PostgreSQL thật
+# Memory Harness - PostgreSQL
 
-- Database: PostgreSQL 17.10, database test riêng `orbit_agent_eval_test` trên `127.0.0.1:55432`
-- Kết quả: **9/9 PASS**, 0 failure, 0 error, 10,57 giây
-- Fixture SQLite trong `tests/conftest.py`: **đã bỏ qua cho lần chạy này**
-- Repository, lifecycle/TTL, isolation, semantic retrieval, context budget và maintenance đều chạy
-  trên PostgreSQL thông qua `postgresql+asyncpg`.
+- Run: `2026-08-29T15:18:43.651370+07:00`
+- Database: PostgreSQL 17.10, isolated test database `orbit_agent_eval_test` at `127.0.0.1:55432`
+- Result: **17/17 PASS**, 0 failures, 0 errors, 15.017 seconds
+- SQLite fixture: bypassed for this run
 
-Database local cô lập được dùng vì harness tạo/xóa schema và dữ liệu. Không chạy thao tác phá hủy này
-trên PostgreSQL production của deployment.
+Repository behavior, memory lifecycle/TTL, user isolation, semantic retrieval, context budgeting, maintenance, safety routing, and task-scoring checks ran against PostgreSQL through `postgresql+asyncpg`.
+
+The disposable local database was used because this harness creates and removes test data. No destructive harness operation was run against production.

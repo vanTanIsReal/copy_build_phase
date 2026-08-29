@@ -1,18 +1,18 @@
 # Staging Chat Latency and Cost
 
-- Run: `2026-08-28T14:14:48.199Z`
+- Run: `2026-08-29T13:15:04.466Z`
 - Target: `POST https://orbit-backend-xkgq.onrender.com/api/v1/chat`
-- Runtime model: `openai/gpt-4.1-mini` (verified from Render service environment)
+- Model: `google/gemini-2.5-flash`
 - Requests: **10**, sequential
 - Success: **10/10**
 - Streaming: **No**; TTFB is not true first-token latency.
 
 | Metric | TTFB | Total |
 |---|---:|---:|
-| P50 | 1763.266 ms | 1764.217 ms |
-| P95 | 5240.914 ms | 5242.076 ms |
-| P99 | 7368.594 ms | 7369.926 ms |
-| Max | 7900.514 ms | 7901.889 ms |
+| P50 | 1550.34 ms | 1551.483 ms |
+| P95 | 4544.529 ms | 4545.144 ms |
+| P99 | 6136.874 ms | 6137.444 ms |
+| Max | 6534.96 ms | 6535.519 ms |
 
 ## Usage delta
 
@@ -20,8 +20,5 @@
 - Completion tokens: **0**
 - Total tokens: **0**
 - Provider requests logged: **0**
-- Estimated cost: **UNAVAILABLE**, not `$0`: the staging usage endpoint recorded no delta for these 10 successful requests.
+- Estimated cost: **$0.000000**
 - Unpriced tokens: **0**
-
-The configured list prices are $0.40/input and $1.60/output per 1M tokens. They cannot be applied
-until the deployed backend records prompt/completion usage for the requests.

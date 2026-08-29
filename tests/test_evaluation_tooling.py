@@ -1,14 +1,32 @@
 import csv
+import json
 from pathlib import Path
 
 import pytest
 
 from scripts.benchmark_api_latency import percentile, summarize_latencies
+from scripts.eval_operational_metrics import (
+    DEFAULT_DATASET as NON_COMMITMENT_DATASET,
+)
+from scripts.eval_operational_metrics import (
+    _load_dataset,
+    _synthetic_window,
+    _usage_tokens,
+    _verified_candidate_count,
+)
+from scripts.eval_user_agent import routed_to_expected_tool
 from scripts.run_coverage import build_command
 from scripts.summarize_user_feedback import load_responses, summarize
 from scripts.validate_agent_dataset import DEFAULT_DATASET, load_and_validate
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_agent_routing_accepts_expected_tool_after_a_policy_prerequisite():
+    tools = ["check_request_policy", "create_reminder"]
+
+    assert routed_to_expected_tool(tools, "create_reminder") is True
+    assert routed_to_expected_tool(tools, "summarize_conversation") is False
 
 
 def test_latency_percentiles_use_linear_interpolation():
@@ -32,6 +50,29 @@ def test_coverage_command_enforces_local_source_gate():
     assert "--cov-fail-under=60" in command
     assert any(argument.endswith("coverage-latest.json") for argument in command)
     assert any(argument.endswith("test-results.junit.xml") for argument in command)
+
+
+def test_non_commitment_dataset_and_candidate_verification():
+    dataset = _load_dataset(NON_COMMITMENT_DATASET)
+    window, _, _ = _synthetic_window("Bình gửi báo cáo trước thứ Sáu nhé.")
+    invalid_delegation = {
+        "commitments": [
+            {
+                "proposal_message_index": 1,
+                "cancelled": False,
+                "owners": [{"name": "Bình", "evidence": "confirmed", "message_index": 1}],
+            }
+        ]
+    }
+
+    assert len(dataset["cases"]) == 40
+    assert len({case["category"] for case in dataset["cases"]}) == 5
+    assert _verified_candidate_count(json.dumps(invalid_delegation), window) == 0
+
+
+def test_usage_token_normalization_supports_provider_key_names():
+    assert _usage_tokens({"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}) == (10, 5, 15)
+    assert _usage_tokens({"prompt_tokens": 8, "completion_tokens": 2}) == (8, 2, 10)
 
 
 def test_formal_agent_dataset_is_valid_non_empty_and_unique():

@@ -32,11 +32,21 @@ sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.task_eval_metrics import parse_predicted, score_case  # noqa: E402
-from src.agents.tools.task_tool import extract_tasks  # noqa: E402
+from src.agents.tools import task_tool  # noqa: E402
 from src.config import get_settings  # noqa: E402
 
 F1_THRESHOLD = 0.7
 DATE_ACCURACY_THRESHOLD = 0.7
+
+
+class _EvaluationDateTime(datetime):
+    """Freeze the task prompt clock so --as-of controls generation and scoring."""
+
+    reference: datetime
+
+    @classmethod
+    def now(cls, tz: ZoneInfo | None = None) -> datetime:
+        return cls.reference.astimezone(tz) if tz is not None else cls.reference.replace(tzinfo=None)
 
 
 def _next_weekday(base: date, weekday: int) -> date:
@@ -66,7 +76,7 @@ class EvalCase:
     expected: list[ExpectedTask] = field(default_factory=list)
 
 
-DATASET: list[EvalCase] = [
+LEGACY_INLINE_DATASET: list[EvalCase] = [
     EvalCase(
         name="single_task_explicit_weekday",
         conversation="Alice: Nhớ gửi báo cáo doanh thu cho sếp trước thứ Sáu này nhé.\nBob: ok để mình làm.",
@@ -166,6 +176,15 @@ DATASET: list[EvalCase] = [
     ),
 ]
 
+# Canonical 60-case suite. The inline cases above are retained only for compatibility with older
+# imports; the versioned split dataset is the sole input used by this runner.
+from scripts.eval_data.base import DATASET as BASE_CASES  # noqa: E402
+from scripts.eval_data.edge_cases import DATASET as EDGE_CASES  # noqa: E402
+from scripts.eval_data.expanded_cases import DATASET as EXPANDED_CASES  # noqa: E402
+from scripts.eval_data.real_conversations import DATASET as REAL_CONVERSATION_CASES  # noqa: E402
+
+DATASET = [*BASE_CASES, *EDGE_CASES, *REAL_CONVERSATION_CASES, *EXPANDED_CASES]
+
 
 def _parse_predicted(raw: str) -> list[dict]:
     return parse_predicted(raw)
@@ -193,16 +212,24 @@ def _arguments() -> argparse.Namespace:
         default=45.0,
         help="Maximum seconds for one model call before retrying it (default: 45).",
     )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=3,
+        help="Maximum model calls in flight (default: 3).",
+    )
     return parser.parse_args()
 
 
 async def main() -> None:
     args = _arguments()
-    if args.retries < 0 or args.timeout_seconds <= 0:
-        raise SystemExit("--retries must be non-negative and --timeout-seconds must be positive.")
+    if args.retries < 0 or args.timeout_seconds <= 0 or args.concurrency < 1:
+        raise SystemExit("--retries must be non-negative; timeout/concurrency must be positive.")
     settings = get_settings()
     tz = ZoneInfo(settings.calendar_timezone)
     today = date.fromisoformat(args.as_of) if args.as_of else datetime.now(tz).date()
+    _EvaluationDateTime.reference = datetime(today.year, today.month, today.day, 9, 0, tzinfo=tz)
+    task_tool.datetime = _EvaluationDateTime
 
     total_tp = total_fp = total_fn = 0
     total_date_correct = total_date_checked = 0
@@ -211,21 +238,30 @@ async def main() -> None:
         f"Running task-extraction accuracy eval on {len(DATASET)} cases (today = {today}, {settings.calendar_timezone})...\n"
     )
 
-    for case in DATASET:
-        raw = "[]"
-        for attempt in range(args.retries + 1):
-            try:
-                raw = await asyncio.wait_for(
-                    extract_tasks.coroutine(state={"context": case.conversation}),
-                    timeout=args.timeout_seconds,
-                )
-                break
-            except Exception as exc:  # noqa: BLE001 - report provider failure as evaluation evidence
-                if attempt == args.retries:
-                    llm_errors.append({"case": case.name, "error": f"{type(exc).__name__}: {exc}"})
-                    print(f"[ERROR] {case.name}: model call failed after {attempt + 1} attempts")
-                else:
-                    await asyncio.sleep(attempt + 1)
+    semaphore = asyncio.Semaphore(args.concurrency)
+
+    async def evaluate(case: EvalCase) -> tuple[EvalCase, str, dict[str, str] | None]:
+        async with semaphore:
+            raw = "[]"
+            error = None
+            for attempt in range(args.retries + 1):
+                try:
+                    raw = await asyncio.wait_for(
+                        task_tool.extract_tasks.coroutine(state={"context": case.conversation}),
+                        timeout=args.timeout_seconds,
+                    )
+                    break
+                except Exception as exc:  # noqa: BLE001 - provider failure is evaluation evidence
+                    if attempt == args.retries:
+                        error = {"case": case.name, "error": f"{type(exc).__name__}: {exc}"}
+                    else:
+                        await asyncio.sleep(attempt + 1)
+            return case, raw, error
+
+    for case, raw, error in await asyncio.gather(*(evaluate(case) for case in DATASET)):
+        if error:
+            llm_errors.append(error)
+            print(f"[ERROR] {case.name}: model call failed after {args.retries + 1} attempts")
         predicted = _parse_predicted(raw)
         tp, fp, fn, date_results = _score_case(case.expected, predicted, today, tz)
         total_tp += tp
@@ -261,6 +297,8 @@ async def main() -> None:
                 {
                     "as_of": today.isoformat(),
                     "timezone": settings.calendar_timezone,
+                    "provider": settings.llm_provider,
+                    "model": settings.model_name,
                     "case_count": len(DATASET),
                     "title_precision": precision,
                     "title_recall": recall,
@@ -271,6 +309,7 @@ async def main() -> None:
                     "f1_threshold": F1_THRESHOLD,
                     "date_accuracy_threshold": DATE_ACCURACY_THRESHOLD,
                     "request_timeout_seconds": args.timeout_seconds,
+                    "concurrency": args.concurrency,
                     "llm_errors": llm_errors,
                 },
                 ensure_ascii=False,

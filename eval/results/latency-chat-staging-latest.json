@@ -1,5 +1,5 @@
 {
-  "run_at": "2026-08-28T14:14:48.199Z",
+  "run_at": "2026-08-29T13:15:04.466Z",
   "target": "https://orbit-backend-xkgq.onrender.com/api/v1/chat",
   "endpoint_streaming": false,
   "ttft_interpretation": "Endpoint is non-streaming; TTFB is response-header latency, not true first-token latency.",
@@ -8,45 +8,43 @@
   "success_count": 10,
   "success_rate": 1,
   "ttfb": {
-    "min_ms": 1491.795,
-    "mean_ms": 2339.65,
-    "p50_ms": 1763.266,
-    "p95_ms": 5240.914,
-    "p99_ms": 7368.594,
-    "max_ms": 7900.514
+    "min_ms": 1270.592,
+    "mean_ms": 2041.816,
+    "p50_ms": 1550.34,
+    "p95_ms": 4544.529,
+    "p99_ms": 6136.874,
+    "max_ms": 6534.96
   },
   "total": {
-    "min_ms": 1493.498,
-    "mean_ms": 2340.692,
-    "p50_ms": 1764.217,
-    "p95_ms": 5242.076,
-    "p99_ms": 7369.926,
-    "max_ms": 7901.889
+    "min_ms": 1271.223,
+    "mean_ms": 2042.877,
+    "p50_ms": 1551.483,
+    "p95_ms": 4545.144,
+    "p99_ms": 6137.444,
+    "max_ms": 6535.519
   },
   "model": {
-    "provider": "openai",
-    "name": "gpt-4.1-mini",
-    "source": "Render service environment verified through Render API"
+    "provider": "google",
+    "name": "gemini-2.5-flash"
   },
   "usage_delta": {
     "prompt_tokens": 0,
     "completion_tokens": 0,
     "total_tokens": 0,
     "request_count": 0,
-    "estimated_cost_usd": null,
-    "unpriced_tokens": 0,
-    "cost_status": "UNAVAILABLE: staging returned responses but recorded no usage delta"
+    "estimated_cost_usd": 0,
+    "unpriced_tokens": 0
   },
   "pricing_usd_per_million": {
-    "input": 0.4,
-    "output": 1.6
+    "input": 0.3,
+    "output": 2.5
   },
   "samples": [
     {
       "index": 1,
       "status_code": 200,
-      "ttfb_ms": 7900.514,
-      "total_ms": 7901.889,
+      "ttfb_ms": 6534.96,
+      "total_ms": 6535.519,
       "agent_status": "completed",
       "response_nonempty": true,
       "error": null
@@ -54,8 +52,8 @@
     {
       "index": 2,
       "status_code": 200,
-      "ttfb_ms": 1805.049,
-      "total_ms": 1806.168,
+      "ttfb_ms": 1564.568,
+      "total_ms": 1565.234,
       "agent_status": "completed",
       "response_nonempty": true,
       "error": null
@@ -63,8 +61,8 @@
     {
       "index": 3,
       "status_code": 200,
-      "ttfb_ms": 1580.058,
-      "total_ms": 1580.752,
+      "ttfb_ms": 1296.675,
+      "total_ms": 1297.531,
       "agent_status": "completed",
       "response_nonempty": true,
       "error": null
@@ -72,8 +70,8 @@
     {
       "index": 4,
       "status_code": 200,
-      "ttfb_ms": 1721.483,
-      "total_ms": 1722.266,
+      "ttfb_ms": 2111.779,
+      "total_ms": 2112.463,
       "agent_status": "completed",
       "response_nonempty": true,
       "error": null
@@ -81,8 +79,8 @@
     {
       "index": 5,
       "status_code": 200,
-      "ttfb_ms": 1990.291,
-      "total_ms": 1991.194,
+      "ttfb_ms": 1382.91,
+      "total_ms": 1383.812,
       "agent_status": "completed",
       "response_nonempty": true,
       "error": null
@@ -90,8 +88,8 @@
     {
       "index": 6,
       "status_code": 200,
-      "ttfb_ms": 1491.795,
-      "total_ms": 1493.498,
+      "ttfb_ms": 1536.112,
+      "total_ms": 1537.733,
       "agent_status": "completed",
       "response_nonempty": true,
       "error": null
@@ -99,8 +97,8 @@
     {
       "index": 7,
       "status_code": 200,
-      "ttfb_ms": 1834.256,
-      "total_ms": 1835.58,
+      "ttfb_ms": 1384.297,
+      "total_ms": 1387.225,
       "agent_status": "completed",
       "response_nonempty": true,
       "error": null
@@ -108,8 +106,8 @@
     {
       "index": 8,
       "status_code": 200,
-      "ttfb_ms": 1563.974,
-      "total_ms": 1564.752,
+      "ttfb_ms": 1270.592,
+      "total_ms": 1271.223,
       "agent_status": "completed",
       "response_nonempty": true,
       "error": null
@@ -117,8 +115,8 @@
     {
       "index": 9,
       "status_code": 200,
-      "ttfb_ms": 1938.913,
-      "total_ms": 1939.72,
+      "ttfb_ms": 1711.559,
+      "total_ms": 1712.377,
       "agent_status": "completed",
       "response_nonempty": true,
       "error": null
@@ -126,8 +124,8 @@
     {
       "index": 10,
       "status_code": 200,
-      "ttfb_ms": 1570.168,
-      "total_ms": 1571.096,
+      "ttfb_ms": 1624.707,
+      "total_ms": 1625.653,
       "agent_status": "completed",
       "response_nonempty": true,
       "error": null

@@ -21,6 +21,13 @@ def get_llm(*, temperature: float | None = None) -> BaseChatModel:
             api_key=settings.openai_api_key,
             temperature=effective_temperature,
         )
+    if settings.llm_provider == "openrouter":
+        return ChatOpenAI(
+            model=settings.model_name,
+            api_key=settings.openrouter_api_key,
+            base_url=settings.openrouter_base_url,
+            temperature=effective_temperature,
+        )
     return ChatGoogleGenerativeAI(
         model=settings.model_name,
         google_api_key=settings.google_api_key,

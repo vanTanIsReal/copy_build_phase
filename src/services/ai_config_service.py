@@ -21,6 +21,10 @@ MODEL_OPTIONS: dict[str, list[dict[str, str]]] = {
         {"id": "llama-3.3-70b-versatile", "label": "Llama 3.3 70B Versatile"},
         {"id": "llama-3.1-8b-instant", "label": "Llama 3.1 8B Instant"},
     ],
+    "openrouter": [
+        {"id": "openai/gpt-4.1-mini", "label": "GPT-4.1 mini via OpenRouter"},
+        {"id": "openai/gpt-4o-mini", "label": "GPT-4o mini via OpenRouter"},
+    ],
 }
 
 
@@ -30,6 +34,7 @@ def configured_providers() -> list[str]:
         "google": settings.google_api_key,
         "openai": settings.openai_api_key,
         "groq": settings.groq_api_key,
+        "openrouter": settings.openrouter_api_key,
     }
     return [provider for provider, api_key in keys.items() if api_key]
 

@@ -23,7 +23,7 @@ def test_canonical_agent_dataset_is_valid_and_has_required_coverage():
 
     assert validate_dataset(data) == []
     assert len(data["seed"]["users"]) == 4
-    assert len(data["evaluation_cases"]) == 17
+    assert len(data["evaluation_cases"]) == 30
     assert data["evaluation_policy"]["release_thresholds"]["case_pass_rate"] == 0.8
     assert {
         "conversation_summary",

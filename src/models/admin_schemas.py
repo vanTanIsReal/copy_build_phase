@@ -75,7 +75,7 @@ class AdminAIManagement(BaseModel):
 
 
 class UpdateAIConfigurationRequest(BaseModel):
-    provider: Literal["google", "groq", "openai"]
+    provider: Literal["google", "groq", "openai", "openrouter"]
     model: str = Field(min_length=1, max_length=120)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
 

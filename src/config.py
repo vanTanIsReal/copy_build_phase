@@ -22,10 +22,12 @@ class Settings(BaseSettings):
     cors_origin_regex: str = ""
 
     # LLM
-    llm_provider: Literal["google", "groq", "openai"] = "google"
+    llm_provider: Literal["google", "groq", "openai", "openrouter"] = "google"
     google_api_key: str = ""
     groq_api_key: str = ""
     openai_api_key: str = ""
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
     model_name: str = "gemini-2.5-flash"
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     daily_token_budget: int = Field(default=200_000, ge=0)
@@ -128,6 +130,8 @@ class Settings(BaseSettings):
             raise ValueError("GROQ_API_KEY is required when LLM_PROVIDER=groq in production")
         if self.llm_provider == "openai" and not self.openai_api_key:
             raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER=openai in production")
+        if self.llm_provider == "openrouter" and not self.openrouter_api_key:
+            raise ValueError("OPENROUTER_API_KEY is required when LLM_PROVIDER=openrouter in production")
         return self
 
 

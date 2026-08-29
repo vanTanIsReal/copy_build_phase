@@ -19,12 +19,22 @@ def _restore_settings_after():
 
 def test_configured_providers_reflects_settings_api_keys():
     settings = get_settings()
-    expected = {p for p, key in [("google", settings.google_api_key), ("openai", settings.openai_api_key), ("groq", settings.groq_api_key)] if key}
+    expected = {
+        provider
+        for provider, api_key in [
+            ("google", settings.google_api_key),
+            ("openai", settings.openai_api_key),
+            ("groq", settings.groq_api_key),
+            ("openrouter", settings.openrouter_api_key),
+        ]
+        if api_key
+    }
     assert set(ai_config_service.configured_providers()) == expected
 
 
 def test_is_supported_model():
     assert ai_config_service.is_supported_model("google", "gemini-2.5-flash") is True
+    assert ai_config_service.is_supported_model("openrouter", "openai/gpt-4.1-mini") is True
     assert ai_config_service.is_supported_model("google", "not-a-real-model") is False
     assert ai_config_service.is_supported_model("not-a-real-provider", "anything") is False
 

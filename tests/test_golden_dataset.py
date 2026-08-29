@@ -33,7 +33,13 @@ def _load_cases() -> list[dict]:
 def test_golden_dataset_has_target_size_and_balanced_primary_slices():
     cases = _load_cases()
     assert 100 <= len(cases) <= 150
-    assert Counter(case["category"] for case in cases) == {category: 24 for category in EXPECTED_CATEGORIES}
+    assert Counter(case["category"] for case in cases) == {
+        "extraction": 24,
+        "routing": 24,
+        "permission": 24,
+        "prompt_injection": 40,
+        "hitl": 24,
+    }
 
 
 def test_golden_dataset_schema_ids_and_references_are_valid():

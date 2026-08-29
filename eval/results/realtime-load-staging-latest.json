@@ -1,5 +1,5 @@
 {
-  "run_at": "2026-08-28T14:19:24.133Z",
+  "run_at": "2026-08-29T13:13:22.336Z",
   "target": {
     "api": "https://orbit-backend-xkgq.onrender.com/api/v1",
     "ws": "wss://orbit-backend-xkgq.onrender.com/api/v1/ws"
@@ -35,15 +35,15 @@
   "load": {
     "requests": 100,
     "concurrency": 5,
-    "success_2xx": 87,
+    "success_2xx": 85,
     "status_counts": {
-      "200": 87,
-      "429": 13
+      "200": 85,
+      "429": 15
     },
     "latency": {
-      "p50_ms": 306.369,
-      "p95_ms": 1203.014,
-      "max_ms": 3464.374
+      "p50_ms": 277.867,
+      "p95_ms": 766.802,
+      "max_ms": 2706.449
     }
   }
 }

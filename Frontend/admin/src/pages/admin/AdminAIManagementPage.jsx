@@ -3,7 +3,7 @@ import { AdminPageHeader, StatusBadge } from '../../components/AdminCommon'
 import { getAIManagement, getSystemHealth, updateAIManagement, updateDailyBudget } from '../../api/admin'
 import { useAuth } from '../../context/AuthContext'
 
-const providerName = provider => ({ google: 'Google Gemini', groq: 'Groq', openai: 'OpenAI' }[provider] || provider)
+const providerName = provider => ({ google: 'Google Gemini', groq: 'Groq', openai: 'OpenAI', openrouter: 'OpenRouter' }[provider] || provider)
 
 export default function AdminAIManagementPage() {
   const { token } = useAuth()
