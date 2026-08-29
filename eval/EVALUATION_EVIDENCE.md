@@ -1,6 +1,6 @@
 # Báo cáo đánh giá tổng hợp — Orbit
 
-Tạo lúc `2026-08-29T13:34:47.802235+00:00` từ source revision cơ sở `0cfe60e`.
+Tạo lúc `2026-08-29T14:31:38.069228+00:00` từ source revision cơ sở `f0651a1`.
 
 Báo cáo không chuyển bằng chứng còn thiếu thành điểm đạt. `PENDING` nghĩa là đã có runner/protocol nhưng
 chưa có đủ kết quả hợp lệ hiện tại.
@@ -145,6 +145,61 @@ người dùng Google hoàn tất màn consent; ứng dụng không cần dùng 
   `4.0/5`, trust
   `3.6/5`.
 - Dữ liệu mô phỏng chỉ kiểm thử pipeline và **không được tính** làm feedback thật hoặc gate phát hành.
+
+### 3.8 Mẫu báo cáo tổng đã điền
+
+**MÔI TRƯỜNG:** `server/staging` cho accuracy/latency và `local PostgreSQL cô lập` cho phép đo
+false-reminder/cost OpenRouter. Accuracy chạy với
+`LLM_PROVIDER=google` ·
+`MODEL_NAME=gemini-2.5-flash` · ngày chạy
+`2026-08-29`.
+
+Cost đủ 6 tác vụ chạy riêng với
+`LLM_PROVIDER=openrouter` ·
+`MODEL_NAME=openai/gpt-4.1-mini`.
+Không gộp hai model/môi trường thành cùng một runtime.
+
+1. **ACCURACY**
+
+   - Số ca test: **60 ca x 3 lần chạy = 180 lượt đánh giá**.
+   - Precision/Recall/F1 trung bình: **89.9% / 96.6% / 93.1%**.
+   - Qua 3 lần chạy: precision **86.8%–92.5%**; recall **93.9%–100.0%**; F1 **90.2%–96.1%**.
+   - Date accuracy: **119/127 (93.7%)**.
+   - File máy đọc đính kèm trong repo: `eval/extract_report.json`.
+
+2. **FALSE REMINDER**
+
+   - Server/staging: cỡ mẫu **40**; false positive **0 → 0.0%**.
+   - Local OpenRouter: cỡ mẫu **40**; false positive **1 → 2.5%**; case lỗi `DELEGATE-01`.
+
+3. **LATENCY (`/chat`)**
+
+   - Nguồn: **đo tay bằng scripted HTTP benchmark** · n = **25 cho mỗi quick action**.
+   - Tóm tắt: p50 **1577.519 ms** · p95 **2043.043 ms**.
+   - Trích task: p50 **1795.494 ms** · p95 **2566.973 ms**.
+
+4. **DAILY_TOKEN_BUDGET đang áp dụng:** server/deployment **300000 token/ngày** tại thời điểm đo; local harness **200000 token/ngày**.
+
+5. **CHI PHÍ**
+
+| Tác vụ | Model | in_tok tb | out_tok tb | cost/lần (USD) | tần suất / 1.000 tin |
+|---|---|---:|---:|---:|---:|
+| Tóm tắt | openai/gpt-4.1-mini | 3826.0 | 63.0 | $0.00163120 | 10 |
+| Trích task | openai/gpt-4.1-mini | 270.0 | 95.0 | $0.00026000 | 10 |
+| Planner (1 vòng) | openai/gpt-4.1-mini | 3822.0 | 186.0 | $0.00182640 | 120 |
+| Proactive relevance | openai/gpt-4.1-mini | 240.0 | 7.0 | $0.00010720 | 1000 |
+| Proactive extraction | openai/gpt-4.1-mini | 1372.0 | 65.0 | $0.00065280 | 100 |
+| Rolling summary | openai/gpt-4.1-mini | 248.0 | 65.0 | $0.00020320 | 33 |
+| **Tổng ước tính / 1.000 tin** |  |  |  | **$0.417266** | A/B/C/D bên dưới |
+
+Giả định:
+
+- **A:** 100% tin đủ điều kiện đi qua proactive relevance → 1.000 relevance call/1.000 tin.
+- **B:** 10% tin được relevance đánh dấu liên quan → 100 proactive extraction call/1.000 tin.
+- **C:** 10 lượt tóm tắt thủ công và 10 lượt trích task thủ công/1.000 tin.
+- **D:** 120 lượt chat thường, trung bình 1 vòng planner/lượt; rolling summary dự kiến 33 lượt/1.000 tin.
+
+Tổng **$0.417266/1.000 tin** là phép ngoại suy từ mẫu local OpenRouter, không phải hóa đơn production thực tế.
 
 ## 4. Lệnh tái lập
 

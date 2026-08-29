@@ -48,6 +48,8 @@ coverage.xml
 eval/results/*.junit.xml
 # Browser captures may contain staging account data; keep them as local evidence only.
 eval/results/browser-*-staging.png
+# Human-readable evaluation is consolidated in eval/EVALUATION_EVIDENCE.md.
+eval/results/operational-metrics-latest.md
 
 # Local task/test scratch space
 .tmp/

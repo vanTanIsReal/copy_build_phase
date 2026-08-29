@@ -54,6 +54,10 @@ def fmt_percent(value: float | None) -> str:
     return "Pending" if value is None else f"{value * 100:.1f}%"
 
 
+def mean(values: list[float]) -> float | None:
+    return sum(values) / len(values) if values else None
+
+
 def build_report() -> str:
     commit = source_revision()
     coverage = load_json("coverage-latest.json")
@@ -69,6 +73,7 @@ def build_report() -> str:
     calendar = load_json("calendar-oauth-staging-latest.json")
     false_reminders = load_json("false-reminder-staging-latest.json")
     deploy_metrics = load_json("deploy-latency-cost-latest.json")
+    operational = load_json("operational-metrics-latest.json")
     feedback = load_json("user-feedback-latest.json")
     synthetic_feedback = load_json("user-feedback-synthetic-demo.json")
     staging_tasks = load_project_json("eval/extract_report.json")
@@ -153,7 +158,22 @@ def build_report() -> str:
     acceptance_cases = acceptance.get("cases", []) if acceptance else []
     acceptance_passed_cases = sum(bool(case.get("passed")) for case in acceptance_cases)
     staging_task_range = staging_tasks.get("range", {}) if staging_tasks else {}
+    staging_task_runs = staging_tasks.get("runs", []) if staging_tasks else []
+    staging_precision_mean = mean([run["title_precision"] for run in staging_task_runs])
+    staging_recall_mean = mean([run["title_recall"] for run in staging_task_runs])
+    staging_f1_mean = mean([run["title_f1"] for run in staging_task_runs])
+    staging_date_correct = sum(run["date_correct"] for run in staging_task_runs)
+    staging_date_checked = sum(run["date_checked"] for run in staging_task_runs)
+    staging_date_accuracy = (
+        staging_date_correct / staging_date_checked if staging_date_checked else None
+    )
     deploy_latency = deploy_metrics.get("latency", {}) if deploy_metrics else {}
+    operational_cost = operational.get("cost", {}) if operational else {}
+    operational_cost_rows = {
+        row["purpose"]: row for row in operational_cost.get("rows", [])
+    }
+    operational_false = operational.get("false_reminder", {}) if operational else {}
+    operational_latency = operational.get("staging_chat_latency", {}) if operational else {}
 
     failure_reasons: list[str] = []
     if acceptance_passed is False and acceptance:
@@ -355,6 +375,61 @@ người dùng Google hoàn tất màn consent; ứng dụng không cần dùng 
   `{synthetic_feedback.get("helpfulness_mean", "Pending") if synthetic_feedback else "Pending"}/5`, trust
   `{synthetic_feedback.get("trust_mean", "Pending") if synthetic_feedback else "Pending"}/5`.
 - Dữ liệu mô phỏng chỉ kiểm thử pipeline và **không được tính** làm feedback thật hoặc gate phát hành.
+
+### 3.8 Mẫu báo cáo tổng đã điền
+
+**MÔI TRƯỜNG:** `server/staging` cho accuracy/latency và `local PostgreSQL cô lập` cho phép đo
+false-reminder/cost OpenRouter. Accuracy chạy với
+`LLM_PROVIDER={staging_tasks.get("provider", "unknown") if staging_tasks else "unknown"}` ·
+`MODEL_NAME={staging_tasks.get("model", "unknown") if staging_tasks else "unknown"}` · ngày chạy
+`{staging_tasks.get("as_of", "unknown") if staging_tasks else "unknown"}`.
+
+Cost đủ 6 tác vụ chạy riêng với
+`LLM_PROVIDER={operational.get("local_model", {}).get("provider", "unknown") if operational else "unknown"}` ·
+`MODEL_NAME={operational.get("local_model", {}).get("model", "unknown") if operational else "unknown"}`.
+Không gộp hai model/môi trường thành cùng một runtime.
+
+1. **ACCURACY**
+
+   - Số ca test: **{staging_tasks.get("case_count", 0) if staging_tasks else 0} ca x {staging_tasks.get("run_count", 0) if staging_tasks else 0} lần chạy = {len(staging_task_runs) * staging_tasks.get("case_count", 0) if staging_tasks else 0} lượt đánh giá**.
+   - Precision/Recall/F1 trung bình: **{fmt_percent(staging_precision_mean)} / {fmt_percent(staging_recall_mean)} / {fmt_percent(staging_f1_mean)}**.
+   - Qua 3 lần chạy: precision **{fmt_percent(staging_task_range.get("title_precision", {}).get("min"))}–{fmt_percent(staging_task_range.get("title_precision", {}).get("max"))}**; recall **{fmt_percent(staging_task_range.get("title_recall", {}).get("min"))}–{fmt_percent(staging_task_range.get("title_recall", {}).get("max"))}**; F1 **{fmt_percent(staging_task_range.get("title_f1", {}).get("min"))}–{fmt_percent(staging_task_range.get("title_f1", {}).get("max"))}**.
+   - Date accuracy: **{staging_date_correct}/{staging_date_checked} ({fmt_percent(staging_date_accuracy)})**.
+   - File máy đọc đính kèm trong repo: `eval/extract_report.json`.
+
+2. **FALSE REMINDER**
+
+   - Server/staging: cỡ mẫu **{false_reminders.get("case_count", 0) if false_reminders else 0}**; false positive **{false_reminders.get("false_positive_count", 0) if false_reminders else 0} → {fmt_percent(false_reminders.get("false_positive_rate") if false_reminders else None)}**.
+   - Local OpenRouter: cỡ mẫu **{operational_false.get("case_count", 0)}**; false positive **{operational_false.get("false_positive_count", 0)} → {fmt_percent(operational_false.get("false_positive_rate"))}**; case lỗi `{', '.join(operational_false.get('false_positive_case_ids', [])) or 'không có'}`.
+
+3. **LATENCY (`/chat`)**
+
+   - Nguồn: **đo tay bằng scripted HTTP benchmark** · n = **{operational_latency.get("summary", {}).get("request_count", 0)} cho mỗi quick action**.
+   - Tóm tắt: p50 **{operational_latency.get("summary", {}).get("metrics", {}).get("p50_ms", "Pending")} ms** · p95 **{operational_latency.get("summary", {}).get("metrics", {}).get("p95_ms", "Pending")} ms**.
+   - Trích task: p50 **{operational_latency.get("task_extraction", {}).get("metrics", {}).get("p50_ms", "Pending")} ms** · p95 **{operational_latency.get("task_extraction", {}).get("metrics", {}).get("p95_ms", "Pending")} ms**.
+
+4. **DAILY_TOKEN_BUDGET đang áp dụng:** server/deployment **{deploy_metrics.get("daily_token_budget", "Pending") if deploy_metrics else "Pending"} token/ngày** tại thời điểm đo; local harness **{operational.get("daily_token_budget", {}).get("actual_tokens_per_day", "Pending") if operational else "Pending"} token/ngày**.
+
+5. **CHI PHÍ**
+
+| Tác vụ | Model | in_tok tb | out_tok tb | cost/lần (USD) | tần suất / 1.000 tin |
+|---|---|---:|---:|---:|---:|
+| Tóm tắt | {operational_cost_rows.get("summary", {}).get("model", "Pending")} | {operational_cost_rows.get("summary", {}).get("average_input_tokens", "Pending")} | {operational_cost_rows.get("summary", {}).get("average_output_tokens", "Pending")} | {f"${operational_cost_rows.get('summary', {}).get('average_cost_usd'):.8f}" if operational_cost_rows.get("summary", {}).get("average_cost_usd") is not None else "Chưa đo"} | {operational_cost_rows.get("summary", {}).get("frequency_per_1000_messages", "Pending")} |
+| Trích task | {operational_cost_rows.get("task_extraction", {}).get("model", "Pending")} | {operational_cost_rows.get("task_extraction", {}).get("average_input_tokens", "Pending")} | {operational_cost_rows.get("task_extraction", {}).get("average_output_tokens", "Pending")} | {f"${operational_cost_rows.get('task_extraction', {}).get('average_cost_usd'):.8f}" if operational_cost_rows.get("task_extraction", {}).get("average_cost_usd") is not None else "Chưa đo"} | {operational_cost_rows.get("task_extraction", {}).get("frequency_per_1000_messages", "Pending")} |
+| Planner (1 vòng) | {operational_cost_rows.get("planner", {}).get("model", "Pending")} | {operational_cost_rows.get("planner", {}).get("average_input_tokens", "Pending")} | {operational_cost_rows.get("planner", {}).get("average_output_tokens", "Pending")} | {f"${operational_cost_rows.get('planner', {}).get('average_cost_usd'):.8f}" if operational_cost_rows.get("planner", {}).get("average_cost_usd") is not None else "Chưa đo"} | {operational_cost_rows.get("planner", {}).get("frequency_per_1000_messages", "Pending")} |
+| Proactive relevance | {operational_cost_rows.get("proactive_relevance", {}).get("model", "Pending")} | {operational_cost_rows.get("proactive_relevance", {}).get("average_input_tokens", "Pending")} | {operational_cost_rows.get("proactive_relevance", {}).get("average_output_tokens", "Pending")} | {f"${operational_cost_rows.get('proactive_relevance', {}).get('average_cost_usd'):.8f}" if operational_cost_rows.get("proactive_relevance", {}).get("average_cost_usd") is not None else "Chưa đo"} | {operational_cost_rows.get("proactive_relevance", {}).get("frequency_per_1000_messages", "Pending")} |
+| Proactive extraction | {operational_cost_rows.get("proactive_extraction", {}).get("model", "Pending")} | {operational_cost_rows.get("proactive_extraction", {}).get("average_input_tokens", "Pending")} | {operational_cost_rows.get("proactive_extraction", {}).get("average_output_tokens", "Pending")} | {f"${operational_cost_rows.get('proactive_extraction', {}).get('average_cost_usd'):.8f}" if operational_cost_rows.get("proactive_extraction", {}).get("average_cost_usd") is not None else "Chưa đo"} | {operational_cost_rows.get("proactive_extraction", {}).get("frequency_per_1000_messages", "Pending")} |
+| Rolling summary | {operational_cost_rows.get("rolling_summary", {}).get("model", "Pending")} | {operational_cost_rows.get("rolling_summary", {}).get("average_input_tokens", "Pending")} | {operational_cost_rows.get("rolling_summary", {}).get("average_output_tokens", "Pending")} | {f"${operational_cost_rows.get('rolling_summary', {}).get('average_cost_usd'):.8f}" if operational_cost_rows.get("rolling_summary", {}).get("average_cost_usd") is not None else "Chưa đo"} | {operational_cost_rows.get("rolling_summary", {}).get("frequency_per_1000_messages", "Pending")} |
+| **Tổng ước tính / 1.000 tin** |  |  |  | **${operational_cost.get("total_estimated_cost_per_1000_messages_usd", 0):.6f}** | A/B/C/D bên dưới |
+
+Giả định:
+
+- **A:** 100% tin đủ điều kiện đi qua proactive relevance → 1.000 relevance call/1.000 tin.
+- **B:** 10% tin được relevance đánh dấu liên quan → 100 proactive extraction call/1.000 tin.
+- **C:** 10 lượt tóm tắt thủ công và 10 lượt trích task thủ công/1.000 tin.
+- **D:** 120 lượt chat thường, trung bình 1 vòng planner/lượt; rolling summary dự kiến 33 lượt/1.000 tin.
+
+Tổng **$0.417266/1.000 tin** là phép ngoại suy từ mẫu local OpenRouter, không phải hóa đơn production thực tế.
 
 ## 4. Lệnh tái lập
 
